@@ -39,8 +39,8 @@ func newFixture(t *testing.T) *fixture {
 	must(t, os.MkdirAll(repo, 0o755))
 	t.Chdir(repo)
 	t.Setenv("AGENTGATE_SESSION", "fixture-session")
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
 	isolateHomes(t)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
 	os.Unsetenv(provider.WorkerEnv)
 	previousRoot, previousRun := Root, provider.Run
 	Root = func() string { return filepath.Join(root, "state") }
@@ -70,6 +70,8 @@ func isolateHomes(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	for _, name := range []string{"CODEX_THREAD_ID", "CODEX_TOOL_CALL_ID", "CODEX_SANDBOX", "CODEX_SANDBOX_NETWORK_DISABLED", "CLAUDE_CODE_SESSION_ID"} {
 		t.Setenv(name, "")
 	}

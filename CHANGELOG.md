@@ -2,6 +2,11 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.7.1
+
+- A worker now runs in a lane whose recorded path holds a symbolic link — the case of a task started before
+  the state directory moved to its new name. The sandbox mounts the real path.
+
 ## 0.7.0
 
 - **Renamed to `agentgate`** (was `claude-dev`): the tool is no longer tied to one CLI. An existing install

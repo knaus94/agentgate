@@ -342,3 +342,23 @@ func TestClaudeWorkerGetsOnlyTheListedTools(t *testing.T) {
 		t.Fatalf("a worker without servers runs as before:\n%s", argv)
 	}
 }
+
+func TestALaneReachedThroughALinkStillRuns(t *testing.T) {
+	cfg, root := setup(t)
+	// The state directory moved and a link was left at its old place; the lane is still named by the old path.
+	if err := os.MkdirAll(filepath.Join(root, "new-state", "lane"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "new-state"), filepath.Join(root, "old-state")); err != nil {
+		t.Fatal(err)
+	}
+	lane := filepath.Join(root, "old-state", "lane")
+	result, err := Run(Call{Route: cfg.MustRoute("sol:high"), Prompt: "p", Dir: lane, Timeout: 20 * time.Second,
+		ReadDirs: []string{filepath.Join(root, "old-state")}})
+	if err != nil || result.Session != "thread-1" {
+		t.Fatalf("a worker runs in a lane whose path holds a link: %+v %v", result, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "new-state", "lane", "argv.txt")); err != nil {
+		t.Fatal("what the worker wrote is in the real directory")
+	}
+}

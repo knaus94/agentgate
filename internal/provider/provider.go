@@ -72,6 +72,10 @@ func run(call Call) (Result, error) {
 	if err := os.MkdirAll(filepath.Join(call.Dir, "home"), 0o700); err != nil {
 		return Result{}, err
 	}
+	// The worker is given the lane by its real path: what the CLI is told and what the sandbox mounts agree.
+	if resolved, err := filepath.EvalSymlinks(call.Dir); err == nil {
+		call.Dir = resolved
+	}
 	invoke := runCodex
 	if call.Route.Provider == "claude" {
 		invoke = runClaude
@@ -116,7 +120,24 @@ func tail(raw []byte, n int) []byte {
 // /tmp and /run are replaced by empty private directories, so anything a process needs from there
 // is bound back explicitly: readable directories read-only, the lane and the writable ones read-write.
 func Sandbox(dir string, writer bool, readable, writable []string, argv []string) []string {
+	// A mount cannot be made through a symbolic link, and a path recorded before a directory moved may hold
+	// one (the state of an installation under the tool's earlier name is a link to its new place). Mounting
+	// the real path serves both: inside, the link still leads to it.
+	real := func(path string) string {
+		if resolved, err := filepath.EvalSymlinks(path); err == nil {
+			return resolved
+		}
+		return path
+	}
+	dir = real(dir)
+	for index := range readable {
+		readable[index] = real(readable[index])
+	}
+	for index := range writable {
+		writable[index] = real(writable[index])
+	}
 	cwd, _ := os.Getwd()
+	cwd = real(cwd)
 	checkout := "--ro-bind"
 	if writer {
 		checkout = "--bind"
