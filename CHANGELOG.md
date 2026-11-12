@@ -2,6 +2,19 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.4.0
+
+- **Interactive panel.** `claude-dev watch` is now a live terminal panel: every task of the checkout (or, with
+  `a` / `--all`, of the machine), the stages of the selected task with their timings, its workers with model,
+  account and duration, checks, findings and the next step. `enter` opens a worker's activity as it happens —
+  commands with their output, files read and edited, the model's words and its report — or a check's output,
+  the findings, the plan. `--once` prints the same picture as text.
+- Claude workers now write a stream of events while they run, like Codex workers, so their activity is visible
+  live. Every run of a lane is recorded with its start and end.
+- A running worker's receipt now carries its process id; the panel no longer shows running workers as stopped.
+- A run is treated as refused for a limit only when the CLI's failure says so, not when an ordinary event
+  mentions rate limits.
+
 ## 0.3.1
 
 - `claude-dev plan link <folder>` keeps a repository's `.claude-dev` (plans, helper scripts, personal settings)

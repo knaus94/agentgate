@@ -35,7 +35,8 @@ Setup
       plan save [name] | list | show <name> | link [synced directory]
                                   keep a plan and its readable brief in .claude-dev/plans/;
                                   link moves .claude-dev into a synced folder
-  watch [--once]                  live panel of the task in this checkout
+    watch [--all] [--once]          interactive panel: tasks, stages and timings, workers, checks, findings,
+                                  and what each worker is doing; --all shows every checkout
   status | stop | prune | version
 
 For the lead (used by /dev)
@@ -216,7 +217,7 @@ func run(args arguments) (any, int, error) {
 		value, err := dev.Route(cfg, plan)
 		return value, 0, err
 	case "watch":
-		dev.Watch(cfg, args.flags["once"])
+		dev.Watch(cfg, args.flags["once"], args.flags["all"])
 		return nil, 0, nil
 	case "prune":
 		return map[string]any{"removed": dev.Prune(cfg.RetentionDays)}, 0, nil

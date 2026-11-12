@@ -314,7 +314,7 @@ func TestHoldResumeStopAndStatusAreHonest(t *testing.T) {
 	}
 	before, _ := os.ReadFile(filepath.Join(home(), "state.json"))
 	_ = Current().Summary(f.cfg)
-	_ = Render(f.cfg, Visible(), false)
+	_ = PanelText(f.cfg, false, false, 120, 0)
 	if after, _ := os.ReadFile(filepath.Join(home(), "state.json")); string(after) != string(before) {
 		t.Fatal("status and watch must not change the gate")
 	}
@@ -540,17 +540,14 @@ func TestViewersWorkOutsideTheLeadSession(t *testing.T) {
 	if HasSession() || Visible() == nil || Visible().Session != "fixture-session" {
 		t.Fatal("a viewer without a session shows the newest task of the checkout")
 	}
-	panel := Render(f.cfg, Visible(), false)
-	for _, want := range []string{"/dev  medium  awaiting-review", "change the line", "core", "opus:medium", "COMPLETED", "true", "next "} {
+	panel := PanelText(f.cfg, false, false, 120, 0)
+	for _, want := range []string{"TASKS 1", "medium", "awaiting-review", "change the line", "writer  core", "opus:medium", "implemented", "CHECKS", "true", "next "} {
 		if !strings.Contains(panel, want) {
 			t.Errorf("the panel lacks %q:\n%s", want, panel)
 		}
 	}
-	if strings.Contains(panel, "\x1b[") || !strings.Contains(Render(f.cfg, Visible(), true), "\x1b[") {
+	if strings.Contains(panel, "\x1b[") || !strings.Contains(PanelText(f.cfg, false, true, 120, 0), "\x1b[") {
 		t.Fatal("colour is used only when asked for")
-	}
-	if !strings.Contains(Render(f.cfg, nil, false), "No /dev task") {
-		t.Fatal("an empty checkout is rendered as such")
 	}
 	overview := Overview()["gates"].([]map[string]any)
 	if len(overview) != 1 || overview[0]["phase"] != "awaiting-review" || overview[0]["operation_live"] != false {
@@ -1034,7 +1031,7 @@ func TestCorrectionContinuesOnTheAccountThatHoldsTheSession(t *testing.T) {
 	if !last.Writer || last.Resume != writer.Session || last.Account.Name != "second" {
 		t.Fatalf("a correction resumes the writer's session under the same account: %+v", last.Account)
 	}
-	if text := Render(f.cfg, Current(), false); !strings.Contains(text, "@second") {
+	if text := PanelText(f.cfg, false, false, 120, 0); !strings.Contains(text, "@second") {
 		t.Fatalf("the panel names the account a lane ran on:\n%s", text)
 	}
 }
@@ -1169,8 +1166,8 @@ func TestIsolatedSessionsCatchUpAndNeverConflictInTheCheckout(t *testing.T) {
 	if strings.TrimSpace(gitOut(t, "status", "--porcelain")) != "" {
 		t.Fatal("three finished tasks, and the checkout is still clean")
 	}
-	if others := siblings(Current(), paint{}); strings.Count(others, "ready to land") != 2 {
-		t.Fatalf("the panel lists the other sessions' tasks waiting to land:\n%s", others)
+	if all := PanelText(f.cfg, false, false, 120, 0); strings.Count(all, "ready to land") != 3 || !strings.Contains(all, "TASKS 3") {
+		t.Fatalf("the panel lists every session's task waiting to land:\n%s", all)
 	}
 
 	as("first")

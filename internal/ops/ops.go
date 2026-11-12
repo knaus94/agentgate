@@ -199,10 +199,16 @@ var ErrTimeout = errors.New("process timed out")
 
 // Run starts cmd in its own process group and waits for it, honouring stop requests and the timeout.
 // A zero timeout means no ceiling.
-func Run(cmd *exec.Cmd, timeout time.Duration) error {
+func Run(cmd *exec.Cmd, timeout time.Duration) error { return RunStarted(cmd, timeout, nil) }
+
+// RunStarted is Run with a callback made once the process exists, for a caller that records its pid.
+func RunStarted(cmd *exec.Cmd, timeout time.Duration, started func()) error {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return err
+	}
+	if started != nil {
+		started()
 	}
 	child := &Child{PID: cmd.Process.Pid, StartedAt: now()}
 	mu.Lock()
@@ -213,7 +219,7 @@ func Run(cmd *exec.Cmd, timeout time.Duration) error {
 	mu.Unlock()
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
-	started := time.Now()
+	began := time.Now()
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	var result error
@@ -228,7 +234,7 @@ loop:
 				result = err
 				break loop
 			}
-			if timeout > 0 && time.Since(started) >= timeout {
+			if timeout > 0 && time.Since(began) >= timeout {
 				Terminate(cmd, done)
 				result = fmt.Errorf("%w after %s", ErrTimeout, timeout)
 				break loop

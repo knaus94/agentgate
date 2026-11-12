@@ -27,7 +27,8 @@ saved with `plan save`). Unknown fields are rejected.
 | `finish` | `{summary, ...}` | close the task |
 | `land` | `{how?}` | isolated task only: bring it into the checkout — `apply` (default), `commit`, `branch` or `drop` |
 | `hold` | `{reason, cancelled?}` | park the task |
-| `resume`, `stop`, `status`, `watch` | — | lifecycle and observation |
+| `resume`, `stop`, `status` | — | lifecycle and observation |
+| `watch [--all] [--once]` | — | the user's interactive panel; `--once` prints it as text |
 
 Setup: `doctor`, `install [--zed] [--uninstall]`, `update [--check]`, `modes`,
 `config show|path|init|set <key> <value>|unset <key>`, `prune`, `version`,

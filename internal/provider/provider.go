@@ -82,10 +82,21 @@ func run(call Call) (Result, error) {
 	return result, err
 }
 
+// limited reports whether the failed run was refused for an exhausted limit. Only what the CLI said about the
+// failure counts: its stderr and the failure events of its stream. Ordinary events mention rate limits too
+// (Claude reports the state of the limits in every run) and must not be mistaken for a refusal.
 func limited(dir string) bool {
-	for _, name := range []string{"stderr.txt", "events.jsonl", "events.json"} {
-		raw, err := os.ReadFile(filepath.Join(dir, name))
-		if err == nil && limitPattern.Match(tail(raw, 8192)) {
+	if raw, err := os.ReadFile(filepath.Join(dir, "stderr.txt")); err == nil && limitPattern.Match(tail(raw, 8192)) {
+		return true
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, "events.jsonl"))
+	for _, line := range strings.Split(string(tail(raw, 65536)), "\n") {
+		var event struct {
+			Type string `json:"type"`
+		}
+		failure := json.Unmarshal([]byte(line), &event) != nil || event.Type == "" || event.Type == "result" || event.Type == "error" ||
+			event.Type == "turn.failed"
+		if failure && limitPattern.MatchString(line) {
 			return true
 		}
 	}
@@ -136,9 +147,11 @@ func environment(extra ...string) []string {
 	return append(append(env, WorkerEnv+"=1"), extra...)
 }
 
-func record(call Call, argv []string, cmd *exec.Cmd, state string) {
+// record keeps the receipt of the lane's present run, and adds every finished run to the lane's history,
+// so a viewer can show how long each attempt took.
+func record(call Call, argv []string, cmd *exec.Cmd, state string, started int64) {
 	receipt := map[string]any{"state": state, "route": call.Route, "account": call.Account.Name, "argv": argv, "writer": call.Writer,
-		"resumed": call.Resume != "", "observed_at": time.Now().Unix()}
+		"resumed": call.Resume != "", "started_at": started, "observed_at": time.Now().Unix()}
 	if cmd.Process != nil {
 		receipt["pid"] = cmd.Process.Pid
 	}
@@ -146,6 +159,16 @@ func record(call Call, argv []string, cmd *exec.Cmd, state string) {
 		receipt["returncode"] = cmd.ProcessState.ExitCode()
 	}
 	_ = ops.WriteJSON(filepath.Join(call.Dir, "process.json"), receipt)
+	if state != "exited" {
+		return
+	}
+	delete(receipt, "argv")
+	if line, err := json.Marshal(receipt); err == nil {
+		if history, err := os.OpenFile(filepath.Join(call.Dir, "runs.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+			_, _ = history.Write(append(line, '\n'))
+			history.Close()
+		}
+	}
 }
 
 // execute runs the sandboxed process with the prompt on stdin and returns its stdout.
@@ -163,9 +186,10 @@ func execute(call Call, argv []string, env []string, stdoutName string) error {
 	wrapped := Sandbox(call.Dir, call.Writer, call.ReadDirs, call.Writable, argv)
 	cmd := exec.Command(wrapped[0], wrapped[1:]...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr, cmd.Env = strings.NewReader(call.Prompt), stdout, stderr, env
-	record(call, argv, cmd, "starting")
-	err = ops.Run(cmd, call.Timeout)
-	record(call, argv, cmd, "exited")
+	// The receipt of a running lane carries the pid, so it is written once the process exists.
+	started := time.Now().Unix()
+	err = ops.RunStarted(cmd, call.Timeout, func() { record(call, argv, cmd, "starting", started) })
+	record(call, argv, cmd, "exited", started)
 	if err != nil {
 		if ops.IsCancelled(err) || errors.Is(err, ops.ErrTimeout) {
 			return err
@@ -296,7 +320,8 @@ func runClaude(call Call) (Result, error) {
 	if call.Writer {
 		tools += ",Edit,Write,Bash"
 	}
-	argv := []string{"claude", "-p", "--model", call.Route.Model, "--effort", call.Route.Effort, "--output-format", "json",
+	// The stream of events is what a viewer follows while the worker runs; the answer is its last "result" event.
+	argv := []string{"claude", "-p", "--model", call.Route.Model, "--effort", call.Route.Effort, "--output-format", "stream-json", "--verbose",
 		"--tools", tools, "--strict-mcp-config", "--setting-sources", "", "--dangerously-skip-permissions"}
 	if call.Resume != "" {
 		argv = append(argv, "--resume", call.Resume)
@@ -310,11 +335,12 @@ func runClaude(call Call) (Result, error) {
 		schema, _ := json.Marshal(call.Schema)
 		argv = append(argv, "--json-schema", string(schema))
 	}
-	if err := execute(call, argv, environment("CLAUDE_CONFIG_DIR="+home), "events.json"); err != nil {
+	if err := execute(call, argv, environment("CLAUDE_CONFIG_DIR="+home), "events.jsonl"); err != nil {
 		return Result{}, err
 	}
-	raw, _ := os.ReadFile(filepath.Join(call.Dir, "events.json"))
-	var out struct {
+	raw, _ := os.ReadFile(filepath.Join(call.Dir, "events.jsonl"))
+	type outcome struct {
+		Type       string                     `json:"type"`
 		IsError    bool                       `json:"is_error"`
 		Subtype    string                     `json:"subtype"`
 		SessionID  string                     `json:"session_id"`
@@ -322,7 +348,14 @@ func runClaude(call Call) (Result, error) {
 		Structured json.RawMessage            `json:"structured_output"`
 		ModelUsage map[string]json.RawMessage `json:"modelUsage"`
 	}
-	if err := json.Unmarshal(raw, &out); err != nil || out.IsError || out.Subtype != "success" || out.SessionID == "" {
+	var out outcome
+	for _, line := range strings.Split(string(raw), "\n") {
+		var event outcome
+		if json.Unmarshal([]byte(line), &event) == nil && event.Type == "result" {
+			out = event
+		}
+	}
+	if out.IsError || out.Subtype != "success" || out.SessionID == "" {
 		return Result{}, fmt.Errorf("%s did not complete (%s); inspect %s", call.Route, out.Subtype, call.Dir)
 	}
 	used := false

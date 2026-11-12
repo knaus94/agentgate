@@ -38,7 +38,10 @@ cat > /dev/null
 model=""; prev=""
 for arg in "$@"; do [ "$prev" = "--model" ] && model="$arg"; prev="$arg"; done
 [ -f "$PWD/wrong-model" ] && model="some-other-model"
-printf '{"is_error":false,"subtype":"success","session_id":"claude-1","result":"plain","structured_output":{"ok":true},"modelUsage":{"%s":{}}}' "$model"
+echo '{"type":"system","subtype":"init"}'
+echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"a.txt"}}]}}'
+printf '{"type":"result","is_error":false,"subtype":"success","session_id":"claude-1","result":"plain","structured_output":{"ok":true},"modelUsage":{"%s":{}}}\n' "$model"
+echo '{"type":"system","subtype":"session_state_changed"}'
 `
 
 func setup(t *testing.T) (*config.Config, string) {
@@ -128,13 +131,17 @@ func TestClaudeCallIsAttestedByTheModelThatAnswered(t *testing.T) {
 		t.Fatalf("claude: %+v %v", result, err)
 	}
 	argv := read(t, filepath.Join(lane, "argv.txt"))
-	for _, want := range []string{"claude-fable-5-2", "--effort\nhigh", "Read,Grep,Glob\n", "--no-session-persistence", "--strict-mcp-config", "--json-schema"} {
+	for _, want := range []string{"claude-fable-5-2", "--effort\nhigh", "Read,Grep,Glob\n", "--no-session-persistence", "--strict-mcp-config", "--json-schema", "stream-json\n--verbose"} {
 		if !strings.Contains(argv, want) {
 			t.Errorf("claude argv lacks %q:\n%s", want, argv)
 		}
 	}
 	if strings.Contains(argv, "Edit") {
 		t.Fatal("a reviewer gets no editing tools")
+	}
+	history := read(t, filepath.Join(lane, "runs.jsonl"))
+	if strings.Count(history, "\n") != 1 || !strings.Contains(history, `"started_at"`) || strings.Contains(history, `"argv"`) {
+		t.Fatalf("every finished run is added to the lane's history: %s", history)
 	}
 	if _, err := Run(Call{Route: cfg.MustRoute("opus:high"), Prompt: "p", Dir: filepath.Join(root, "state", "w"), Timeout: 20 * time.Second, Writer: true, Persist: true, Resume: "claude-1"}); err != nil {
 		t.Fatal(err)
@@ -271,5 +278,33 @@ func TestAnExhaustedAccountHandsOverBeforeTheModelChanges(t *testing.T) {
 	if _, used, err = RunRouted(cfg, Call{Route: cfg.MustRoute("sol:high"), Dir: root}, nil); err != nil || used.Alias != "sonnet" || used.Account != "" ||
 		strings.Join(ran, " ") != "sonnet@" {
 		t.Fatalf("the model changes after the accounts are exhausted: %+v %v %v", used, ran, err)
+	}
+}
+
+func TestOrdinaryLimitReportsAreNotARefusal(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, text string) { _ = os.WriteFile(filepath.Join(dir, name), []byte(text), 0o600) }
+	write("stderr.txt", "")
+	write("events.jsonl", `{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"the code handles 429 and a usage limit"}]}}
+{"type":"result","subtype":"error_during_execution","is_error":true,"result":"tool crashed"}
+`)
+	if limited(dir) {
+		t.Fatal("a run that only mentions limits was not refused for one")
+	}
+	write("events.jsonl", `{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}
+{"type":"result","subtype":"error","is_error":true,"result":"Claude usage limit reached. Your limit will reset at 3pm."}
+`)
+	if !limited(dir) {
+		t.Fatal("the failure event of the stream names the limit")
+	}
+	write("events.jsonl", `{"type":"error","message":"You've hit your usage limit."}`+"\n")
+	if !limited(dir) {
+		t.Fatal("codex reports the limit as an error event")
+	}
+	write("events.jsonl", "")
+	write("stderr.txt", "Error: 429 Too Many Requests")
+	if !limited(dir) {
+		t.Fatal("stderr still counts")
 	}
 }

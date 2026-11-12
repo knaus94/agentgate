@@ -102,26 +102,15 @@ Build from source with `go build ./cmd/claude-dev` (Go 1.25+).
 `-N` caps how many model processes run at once. `--preview` shows what would run without starting anything.
 `plan`, `research` and `verify` are read-only. `review` judges an existing diff; add `--fix` to let it correct.
 
-Watch a task from any terminal in the repository:
+Watch every task from any terminal in the repository:
 
 ```sh
 claude-dev watch
 ```
 
-```
-/dev  heavy  reviewing  round 1
-move invoice totals to integer cents
-
-▶ review  1m12s
-  review-1-3f2a/lane-0/run           opus:medium    pool claude  1m12s  reads, same session
-  review-1-3f2a/lane-1/run           astra:medium   pool codex   1m12s  reads, same session
-
-writers
-  api                fable:high     COMPLETED
-  web                fable:high     COMPLETED
-
-findings  P0 0  P1 1  P2 2   blocking BLOCKED 3   notes 4
-```
+An interactive panel: the tasks of all sessions, the stages each went through with timings, its workers, checks
+and findings — and, one `enter` deeper, what a worker is doing right now, command by command.
+See [docs/watch.md](docs/watch.md).
 
 Zed users: `claude-dev install --zed` adds `claude-dev: watch`, `status` and `stop` to Zed's tasks.
 
@@ -169,6 +158,7 @@ A repository can carry its own `.claude-dev.json`. See [docs/configuration.md](d
 - [Why these models](docs/model-selection.md) — the public data behind the defaults
 - [Configuration](docs/configuration.md) — models, pools, fallbacks, per-repository overrides
 - [Several subscriptions](docs/accounts.md) — accounts, limits, load spreading, failover
+- [The panel](docs/watch.md) — `claude-dev watch`: tasks, timings, live worker activity
 - [Isolated tasks](docs/isolation.md) — `-w`: worktrees, landing, catching up, preparing dependencies
 - [Releasing](docs/releasing.md) — how versions are published and installed
 - `claude-dev guide` and `claude-dev reference` print what the lead reads

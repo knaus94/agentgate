@@ -58,7 +58,7 @@ printf '%s' "$answer" > "$out"
 const fakeClaude = "#!/bin/sh" + fakeBody + `
 model=""; prev=""
 for arg in "$@"; do [ "$prev" = "--model" ] && model="$arg"; prev="$arg"; done
-printf '{"is_error":false,"subtype":"success","session_id":"claude-1","result":"","structured_output":%s,"modelUsage":{"%s":{}}}' "$answer" "$model"
+printf '{"type":"result","is_error":false,"subtype":"success","session_id":"claude-1","result":"","structured_output":%s,"modelUsage":{"%s":{}}}\n' "$answer" "$model"
 `
 
 type sandbox struct {
@@ -250,7 +250,7 @@ func TestWholeTaskThroughTheCommandLine(t *testing.T) {
 		t.Fatalf("finish refuses while a check fails: %s", stderr)
 	}
 	panel, _, _ := s.run("", "watch", "--once")
-	for _, want := range []string{"/dev  medium  reviewed", "core", "opus:medium", "fable:medium", "passed", "failed (7)"} {
+	for _, want := range []string{"TASKS 1", "medium", "reviewed", "writer  core", "opus:medium", "review  architecture", "fable:medium", "passed", "failed (7)", "stages"} {
 		if !strings.Contains(panel, want) {
 			t.Errorf("watch lacks %q:\n%s", want, panel)
 		}
