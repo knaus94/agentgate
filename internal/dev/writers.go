@@ -10,10 +10,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/knaus94/claude-dev/internal/assets"
-	"github.com/knaus94/claude-dev/internal/config"
-	"github.com/knaus94/claude-dev/internal/ops"
-	"github.com/knaus94/claude-dev/internal/provider"
+	"github.com/knaus94/agentgate/internal/assets"
+	"github.com/knaus94/agentgate/internal/config"
+	"github.com/knaus94/agentgate/internal/ops"
+	"github.com/knaus94/agentgate/internal/provider"
 )
 
 type writerReport struct {
@@ -65,7 +65,7 @@ func Launch(cfg *config.Config, plan *Plan) (any, error) {
 		return nil, err
 	}
 	if !resolved.Request.Writes() && !resolved.Request.ReviewFirst() {
-		return nil, fmt.Errorf("%s is read-only; use `claude-dev consult`", resolved.Request.Action)
+		return nil, fmt.Errorf("%s is read-only; use `agentgate consult`", resolved.Request.Action)
 	}
 	if err := requireTools(resolved); err != nil {
 		return nil, err

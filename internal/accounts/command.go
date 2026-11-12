@@ -8,15 +8,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/knaus94/claude-dev/internal/config"
+	"github.com/knaus94/agentgate/internal/config"
 )
 
 const commandUsage = `usage:
-  claude-dev accounts [--json]                       limits of the configured accounts
-  claude-dev accounts discover [--save]              find CLI profiles in the home directory; --save adds the usable ones
-  claude-dev accounts add <name> <claude|codex> <home> [--paid]
-  claude-dev accounts remove <name>
-  claude-dev accounts reset <name>                   forget that the account hit a limit`
+  agentgate accounts [--json]                       limits of the configured accounts
+  agentgate accounts discover [--save]              find CLI profiles in the home directory; --save adds the usable ones
+  agentgate accounts add <name> <claude|codex> <home> [--paid]
+  agentgate accounts remove <name>
+  agentgate accounts reset <name>                   forget that the account hit a limit`
 
 // LoginHint is the command that logs a profile in. It is interactive, so the user runs it in a terminal.
 func LoginHint(account config.Account) string {
@@ -26,7 +26,7 @@ func LoginHint(account config.Account) string {
 	return "CODEX_HOME=" + account.Home + " codex login"
 }
 
-// Command implements `claude-dev accounts ...`.
+// Command implements `agentgate accounts ...`.
 func Command(cfg *config.Config, manager *Manager, rest []string, flags map[string]bool) (any, error) {
 	action := ""
 	if len(rest) > 0 {
@@ -37,7 +37,7 @@ func Command(cfg *config.Config, manager *Manager, rest []string, flags map[stri
 		if len(cfg.Accounts) == 0 {
 			found := Discover()
 			return "No accounts are configured: every worker uses the default profile of its CLI.\n" +
-				"Profiles found on this machine (add the usable ones with `claude-dev accounts discover --save`):\n\n" +
+				"Profiles found on this machine (add the usable ones with `agentgate accounts discover --save`):\n\n" +
 				Render(found, nil, manager.leadHome), nil
 		}
 		statuses := manager.Statuses(true)
@@ -48,7 +48,7 @@ func Command(cfg *config.Config, manager *Manager, rest []string, flags map[stri
 	case "discover":
 		found := Discover()
 		if !flags["save"] {
-			return Render(found, nil, manager.leadHome) + "\nAdd the usable ones with `claude-dev accounts discover --save`.\n", nil
+			return Render(found, nil, manager.leadHome) + "\nAdd the usable ones with `agentgate accounts discover --save`.\n", nil
 		}
 		list, added := merge(cfg.Accounts, manager.Statuses(false), found)
 		if len(added) == 0 {
@@ -170,7 +170,7 @@ func Render(statuses []Status, at *int64, leadHome string) string {
 			if status.LoggedIn && status.Note != "" {
 				notes = append(notes, status.Note)
 			}
-			if provider == "claude" && clean(status.Home) == leadHome {
+			if provider == config.Lead() && clean(status.Home) == leadHome {
 				notes = append(notes, "lead session runs here")
 			}
 			plan := status.Plan

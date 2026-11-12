@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/knaus94/claude-dev/internal/accounts"
-	"github.com/knaus94/claude-dev/internal/config"
-	"github.com/knaus94/claude-dev/internal/ops"
-	"github.com/knaus94/claude-dev/internal/provider"
+	"github.com/knaus94/agentgate/internal/accounts"
+	"github.com/knaus94/agentgate/internal/config"
+	"github.com/knaus94/agentgate/internal/ops"
+	"github.com/knaus94/agentgate/internal/provider"
 )
 
 func write(t *testing.T, name, content string) {
@@ -532,7 +532,7 @@ func TestPruneRemovesOnlyOldFinishedTasks(t *testing.T) {
 func TestViewersWorkOutsideTheLeadSession(t *testing.T) {
 	f := newFixture(t)
 	f.launch(f.plan("-m change the line"))
-	t.Setenv("CLAUDE_DEV_SESSION", "")
+	t.Setenv("AGENTGATE_SESSION", "")
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
 	if HasSession() {
 		t.Fatal("a viewer has no session")
@@ -559,9 +559,9 @@ func TestViewersWorkOutsideTheLeadSession(t *testing.T) {
 		t.Fatal("without a session nobody can drive the gate")
 	}
 	// A live operation of the checkout can be stopped from any terminal.
-	t.Setenv("CLAUDE_DEV_SESSION", "fixture-session")
+	t.Setenv("AGENTGATE_SESSION", "fixture-session")
 	must(t, ops.Begin(home(), "launch", ""))
-	t.Setenv("CLAUDE_DEV_SESSION", "")
+	t.Setenv("AGENTGATE_SESSION", "")
 	requested, err := StopFromOutside()
 	must(t, err)
 	if requested.(map[string]any)["cancellation_requested"] != true || !ops.IsCancelled(ops.Checkpoint()) {
@@ -622,37 +622,39 @@ func TestRouteAndPreviewStartNothing(t *testing.T) {
 }
 
 func TestZedTasksAreAddedWithoutDamagingTheFile(t *testing.T) {
+	isolateHomes(t)
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(dir, "claude"))
-	first, err := Install(false, true)
+	first, err := Install(InstallOptions{Zed: true})
 	must(t, err)
 	tasks := filepath.Join(dir, "zed", "tasks.json")
 	raw, _ := os.ReadFile(tasks)
-	if first.(map[string]any)["zed"].(map[string]any)["changed"] != true || strings.Count(string(raw), "claude-dev: ") != 3 {
+	if first.(map[string]any)["zed"].(map[string]any)["changed"] != true || strings.Count(string(raw), "agentgate: ") != 3 {
 		t.Fatalf("three tasks are created: %s", raw)
 	}
-	write(t, tasks, `[{"label":"mine","command":"make"},{"label":"claude-dev: watch","command":"claude-dev watch"}]`)
-	_, err = Install(false, true)
+	write(t, tasks, `[{"label":"mine","command":"make"},{"label":"agentgate: watch","command":"agentgate watch"}]`)
+	_, err = Install(InstallOptions{Zed: true})
 	must(t, err)
 	raw, _ = os.ReadFile(tasks)
-	if !strings.Contains(string(raw), `"mine"`) || strings.Count(string(raw), "claude-dev: watch") != 1 || strings.Count(string(raw), "claude-dev: ") != 3 {
+	if !strings.Contains(string(raw), `"mine"`) || strings.Count(string(raw), "agentgate: watch") != 1 || strings.Count(string(raw), "agentgate: ") != 3 {
 		t.Fatalf("existing tasks are kept and nothing is duplicated: %s", raw)
 	}
 	commented := "// my tasks\n[{\"label\":\"mine\",\"command\":\"make\"}]\n"
 	write(t, tasks, commented)
-	third, err := Install(false, true)
+	third, err := Install(InstallOptions{Zed: true})
 	must(t, err)
 	zed := third.(map[string]any)["zed"].(map[string]any)
 	if after, _ := os.ReadFile(tasks); string(after) != commented || zed["changed"] != false {
 		t.Fatal("a file with comments is left exactly as it was")
 	}
-	if side, _ := os.ReadFile(zed["paste_from"].(string)); !strings.Contains(string(side), "claude-dev: watch") {
+	if side, _ := os.ReadFile(zed["paste_from"].(string)); !strings.Contains(string(side), "agentgate: watch") {
 		t.Fatal("the tasks are offered in a side file instead")
 	}
 }
 
 func TestDoctorReportsWhatIsMissing(t *testing.T) {
+	isolateHomes(t)
 	dir := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", dir)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "config"))
@@ -668,7 +670,7 @@ func TestDoctorReportsWhatIsMissing(t *testing.T) {
 	if checks["browser tooling"].Required {
 		t.Fatal("browser tooling is optional")
 	}
-	_, err := Install(false, false)
+	_, err := Install(InstallOptions{})
 	must(t, err)
 	checks = map[string]probe{}
 	for _, item := range Doctor()["checks"].([]probe) {
@@ -947,7 +949,7 @@ func TestSavedPlanIsReadableAndRunsFromAnotherSession(t *testing.T) {
 	plan.Architecture = &Accepted{ID: receipt["id"].(string), Acceptance: "the first design as written"}
 	saved, err := PlanSave(f.cfg, plan, "contract-change")
 	must(t, err)
-	if saved.(map[string]any)["plan"] != ".claude-dev/plans/contract-change/plan.json" {
+	if saved.(map[string]any)["plan"] != ".agentgate/plans/contract-change/plan.json" {
 		t.Fatalf("a plan is kept inside the repository: %v", saved)
 	}
 	brief, err := PlanShow("contract-change")
@@ -966,7 +968,7 @@ func TestSavedPlanIsReadableAndRunsFromAnotherSession(t *testing.T) {
 	}
 
 	// Another conversation in the same checkout picks the plan up: the design receipt belongs to the checkout.
-	t.Setenv("CLAUDE_DEV_SESSION", "another-session")
+	t.Setenv("AGENTGATE_SESSION", "another-session")
 	path, err := PlanFile("contract-change")
 	must(t, err)
 	raw, err := os.ReadFile(path)
@@ -1136,7 +1138,7 @@ func TestIsolatedSessionsCatchUpAndNeverConflictInTheCheckout(t *testing.T) {
 		if kind != "writer" {
 			return "", nil
 		}
-		text := os.Getenv("CLAUDE_DEV_SESSION") + "\n"
+		text := os.Getenv("AGENTGATE_SESSION") + "\n"
 		if _, repairing := packet["merge_conflicts"]; repairing {
 			text = "both changes\n"
 		}
@@ -1145,7 +1147,7 @@ func TestIsolatedSessionsCatchUpAndNeverConflictInTheCheckout(t *testing.T) {
 		}
 		return `{"status":"COMPLETED","summary":"implemented","blockers":[],"handoff":"","deviations":[]}`, nil
 	}
-	as := func(session string) { t.Setenv("CLAUDE_DEV_SESSION", session) }
+	as := func(session string) { t.Setenv("AGENTGATE_SESSION", session) }
 	other := Stream{Name: "core", Domain: "backend", Files: []string{"b.txt"}}
 
 	// Three sessions start from the same commit; two of them change the same file.
@@ -1238,10 +1240,10 @@ func TestPlansMoveToASyncedFolderAndStayUsable(t *testing.T) {
 	plan := f.plan("-w change the line")
 	_, err := PlanSave(f.cfg, plan, "the-change")
 	must(t, err)
-	must(t, os.MkdirAll(".claude-dev/tools", 0o755))
-	must(t, os.WriteFile(".claude-dev/tools/check.sh", []byte("#!/bin/sh\ntest -n \"$1\"\n"), 0o755))
-	must(t, os.WriteFile(".claude-dev/config.json", []byte(`{"max_parallel": 2, "accounts": [{"name": "x", "provider": "claude", "home": "/x"}],
-		"worktree": {"setup": [["sh", "-c", "echo \"$CLAUDE_DEV_CHECKOUT\" > .origin"]]}}`), 0o644))
+	must(t, os.MkdirAll(".agentgate/tools", 0o755))
+	must(t, os.WriteFile(".agentgate/tools/check.sh", []byte("#!/bin/sh\ntest -n \"$1\"\n"), 0o755))
+	must(t, os.WriteFile(".agentgate/config.json", []byte(`{"max_parallel": 2, "accounts": [{"name": "x", "provider": "claude", "home": "/x"}],
+		"worktree": {"setup": [["sh", "-c", "echo \"$AGENTGATE_CHECKOUT\" > .origin"]]}}`), 0o644))
 
 	linked, err := PlanLink(f.cfg, synced)
 	must(t, err)
@@ -1249,7 +1251,7 @@ func TestPlansMoveToASyncedFolderAndStayUsable(t *testing.T) {
 	if linked.(map[string]any)["target"] != target || fileText(t, filepath.Join(target, "plans", "the-change", "plan.json")) == "" {
 		t.Fatalf("the directory moves into the synced folder under the repository's name: %v", linked)
 	}
-	if where, _ := os.Readlink(".claude-dev"); where != target {
+	if where, _ := os.Readlink(".agentgate"); where != target {
 		t.Fatalf("a link is left in its place: %q", where)
 	}
 	cfg, err := config.Load()
@@ -1266,7 +1268,7 @@ func TestPlansMoveToASyncedFolderAndStayUsable(t *testing.T) {
 
 	// The link itself is not part of any change, and an isolated task still reaches the helper scripts.
 	f.cfg = cfg
-	plan.Checks = []Check{{Argv: []string{".claude-dev/tools/check.sh", "x"}}}
+	plan.Checks = []Check{{Argv: []string{".agentgate/tools/check.sh", "x"}}}
 	f.launch(plan)
 	gate := Current()
 	if len(gate.Foreign) != 0 || fileText(t, filepath.Join(gate.Worktree, ".origin")) != repo+"\n" {
@@ -1279,12 +1281,12 @@ func TestPlansMoveToASyncedFolderAndStayUsable(t *testing.T) {
 	}
 
 	// A second computer: the synced folder already has the data, the checkout has none.
-	must(t, os.Remove(".claude-dev"))
-	if _, err := PlanLink(cfg, ""); err != nil || fileText(t, ".claude-dev/plans/the-change/brief.md") == "" {
+	must(t, os.Remove(".agentgate"))
+	if _, err := PlanLink(cfg, ""); err != nil || fileText(t, ".agentgate/plans/the-change/brief.md") == "" {
 		t.Fatalf("linking picks up what the other computer saved: %v", err)
 	}
-	must(t, os.Remove(".claude-dev"))
-	must(t, os.MkdirAll(".claude-dev/plans", 0o755))
+	must(t, os.Remove(".agentgate"))
+	must(t, os.MkdirAll(".agentgate/plans", 0o755))
 	if _, err := PlanLink(cfg, ""); err == nil || !strings.Contains(err.Error(), "merge them by hand") {
 		t.Fatalf("two copies are never merged silently: %v", err)
 	}
@@ -1326,5 +1328,168 @@ func TestWorkerToolsGoToTheirRolesAndIndexesAreRefreshedOnce(t *testing.T) {
 	}
 	if raw, _ := os.ReadFile(marker); strings.Count(string(raw), "x") != 1 {
 		t.Fatalf("an index is refreshed once per run, before its first reader: %q", raw)
+	}
+}
+
+func TestCodexLeadIsInstalledChosenAndRemoved(t *testing.T) {
+	newFixture(t)
+	home, _ := os.UserHomeDir()
+	claude := filepath.Join(home, ".claude")
+	t.Setenv("CLAUDE_CONFIG_DIR", claude)
+	must(t, os.MkdirAll(codexDir(), 0o700))
+	must(t, os.WriteFile(filepath.Join(codexDir(), "hooks.json"), []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"other-tool stop"}]}]}}`), 0o600))
+
+	asked := 0
+	first, err := Install(InstallOptions{Ask: func() string { asked++; return "codex" }})
+	must(t, err)
+	cfg, err := config.Load()
+	must(t, err)
+	if asked != 1 || strings.Join(cfg.Leads, ",") != "codex" || cfg.Profile != "codex" {
+		t.Fatalf("the first install asks, remembers the answer and selects the codex profile: %+v %v", cfg.Leads, first)
+	}
+	skill, _ := os.ReadFile(filepath.Join(home, ".agents", "skills", "dev", "SKILL.md"))
+	policy, _ := os.ReadFile(filepath.Join(home, ".agents", "skills", "dev", "agents", "openai.yaml"))
+	rule, _ := os.ReadFile(filepath.Join(codexDir(), "rules", "agentgate.rules"))
+	hooks, _ := os.ReadFile(filepath.Join(codexDir(), "hooks.json"))
+	if !strings.Contains(string(skill), "name: dev") || !strings.Contains(string(policy), "allow_implicit_invocation: false") ||
+		!strings.Contains(string(rule), `prefix_rule(pattern=["agentgate"], decision="allow")`) ||
+		!strings.Contains(string(hooks), " hook") || !strings.Contains(string(hooks), "other-tool stop") {
+		t.Fatalf("codex gets the skill, the rule and the Stop hook next to its own hooks:\n%s\n%s\n%s", skill, rule, hooks)
+	}
+	if _, err := os.Stat(filepath.Join(claude, "commands", "dev.md")); err == nil {
+		t.Fatal("a codex-only install puts nothing into Claude Code")
+	}
+	if !strings.Contains(first.(map[string]any)["next"].(string), "/hooks") {
+		t.Fatalf("the user is told to trust the hook: %v", first)
+	}
+	for _, mode := range cfg.Modes {
+		for _, spec := range append([]string{mode.Backend, mode.Frontend, mode.Scout}, mode.Architecture...) {
+			if spec != "" && cfg.MustRoute(spec).Provider != "codex" {
+				t.Fatalf("in the codex profile every worker is a Codex model, got %s", spec)
+			}
+		}
+		for _, lane := range mode.Review {
+			if route := cfg.MustRoute(lane.Route); route.Provider != "codex" || route.Model == cfg.MustRoute(mode.Backend).Model {
+				t.Fatalf("a reviewer is a Codex model other than the writer's: %s", lane.Route)
+			}
+		}
+	}
+	if _, known := cfg.Models["opus"]; known || len(cfg.Fallbacks["sol"]) == 0 || cfg.Fallbacks["sol"][0] != "astra" {
+		t.Fatalf("the profile removes the Claude models and their fallbacks: %v", cfg.Fallbacks)
+	}
+
+	// Later installs (an update runs one) ask nothing and change nothing.
+	again, err := Install(InstallOptions{Ask: func() string { asked++; return "claude" }})
+	must(t, err)
+	if asked != 1 || again.(map[string]any)["note"] != "already up to date" {
+		t.Fatalf("an install repeats the remembered choice: %v", again)
+	}
+	doctor := Doctor()
+	names := map[string]bool{}
+	for _, item := range doctor["checks"].([]probe) {
+		names[item.Name] = item.OK
+		if item.Name == "claude" && item.Required {
+			t.Fatal("a codex-only setup does not need the Claude CLI")
+		}
+	}
+	if !names["$dev skill"] || !names["Codex rule"] || names["/dev command"] {
+		t.Fatalf("doctor checks what this lead needs: %v", names)
+	}
+
+	// Both leads: Claude Code gets its command too, and the workers go back to the default table.
+	_, err = Install(InstallOptions{Lead: "both"})
+	must(t, err)
+	cfg, _ = config.Load()
+	if _, err := os.Stat(filepath.Join(claude, "commands", "dev.md")); err != nil || cfg.Profile != "" || len(cfg.Leads) != 2 {
+		t.Fatalf("both leads are installed with the default workers: %+v %q", cfg.Leads, cfg.Profile)
+	}
+	if _, err := Install(InstallOptions{Lead: "gemini"}); err == nil {
+		t.Fatal("an unknown lead is refused")
+	}
+	_, err = Install(InstallOptions{Uninstall: true})
+	must(t, err)
+	hooks, _ = os.ReadFile(filepath.Join(codexDir(), "hooks.json"))
+	if _, err := os.Stat(filepath.Join(home, ".agents", "skills", "dev")); err == nil || strings.Contains(string(hooks), selfPath()+" hook") ||
+		!strings.Contains(string(hooks), "other-tool stop") {
+		t.Fatalf("uninstall removes the skill, the rule and our hook, and nothing else: %s", hooks)
+	}
+	if _, err := os.Stat(codexRulePath()); err == nil {
+		t.Fatal("uninstall removes the rule")
+	}
+}
+
+func TestTheLeadIsTheSessionThatCalls(t *testing.T) {
+	f := newFixture(t)
+	t.Setenv("AGENTGATE_SESSION", "")
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "claude-1")
+	if config.Lead() != "claude" || session() != "claude-1" {
+		t.Fatalf("a Claude Code session leads: %s %s", config.Lead(), session())
+	}
+	// A Codex tool call wins over whatever the environment inherited from a terminal.
+	t.Setenv("CODEX_THREAD_ID", "codex-1")
+	t.Setenv("CODEX_TOOL_CALL_ID", "call-1")
+	if config.Lead() != "codex" || session() != "codex-1" {
+		t.Fatalf("inside a Codex tool call the Codex thread leads: %s %s", config.Lead(), session())
+	}
+	f.launch(f.plan("-l change the line"))
+	if gate := Current(); gate == nil || gate.Session != "codex-1" {
+		t.Fatal("the task belongs to the Codex thread")
+	}
+	if hook := StopHook(Current().Cwd, "codex-1"); hook["decision"] != "block" {
+		t.Fatalf("the Stop hook holds the Codex thread to its unfinished task: %v", hook)
+	}
+	t.Setenv("CODEX_TOOL_CALL_ID", "")
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	if config.Lead() != "codex" {
+		t.Fatal("a Codex thread without a Claude session is a Codex lead")
+	}
+	if Confined() {
+		t.Fatal("a process that can write its state is not confined, whatever variables Codex set")
+	}
+	locked := filepath.Join(t.TempDir(), "locked")
+	must(t, os.MkdirAll(locked, 0o500))
+	previous := Root
+	Root = func() string { return filepath.Join(locked, "state") }
+	defer func() { Root = previous }()
+	if !Confined() {
+		t.Fatal("a process that cannot write its state is inside someone's sandbox")
+	}
+}
+
+func TestWhatTheOldNameLeftIsAdopted(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	must(t, os.MkdirAll(filepath.Join(root, "state", "claude-dev", "abc"), 0o700))
+	must(t, os.MkdirAll(filepath.Join(root, "config", "claude-dev"), 0o700))
+	must(t, os.WriteFile(filepath.Join(root, "config", "claude-dev", "config.json"), []byte(`{"max_parallel": 3}`), 0o600))
+	AdoptLegacy()
+	AdoptLegacy()
+	if target, _ := os.Readlink(filepath.Join(root, "state", "claude-dev")); target != filepath.Join(root, "state", "agentgate") {
+		t.Fatalf("the state moves and a link stays at the old place: %q", target)
+	}
+	if _, err := os.Stat(filepath.Join(root, "state", "claude-dev", "abc")); err != nil {
+		t.Fatal("paths under the old name still resolve")
+	}
+	t.Chdir(root)
+	cfg, err := config.Load()
+	if err != nil || cfg.MaxParallel != 3 {
+		t.Fatalf("the settings are read from their new place: %v %v", cfg, err)
+	}
+	// A repository set up under the old name keeps its plans and its settings file.
+	must(t, os.MkdirAll(".claude-dev/plans/old-plan", 0o755))
+	must(t, os.WriteFile(".claude-dev/plans/old-plan/plan.json", []byte(`{"request":"x","brief":"b","streams":[]}`), 0o644))
+	must(t, os.WriteFile(".claude-dev.json", []byte(`{"max_parallel": 5}`), 0o644))
+	cfg, err = config.Load()
+	listed, _ := PlanList()
+	if err != nil || cfg.MaxParallel != 5 || config.RepoDir() != ".claude-dev" || !strings.Contains(fmt.Sprint(listed), "old-plan") {
+		t.Fatalf("old repository files are read: %v %v", cfg, listed)
+	}
+	if !ownNotes(".claude-dev/plans/x") || !ownNotes(".agentgate") || ownNotes("src/.agentgate.go") {
+		t.Fatal("the tool's own directory is never part of a change, under either name")
+	}
+	must(t, os.MkdirAll(".agentgate", 0o755))
+	if config.RepoDir() != ".agentgate" {
+		t.Fatal("the new name wins once it exists")
 	}
 }

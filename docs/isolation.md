@@ -13,11 +13,11 @@ same file. With `-w` a task works somewhere else, and your checkout changes only
 ## What happens
 
 1. **Start.** The tool creates a branch `dev/<task>-<id>` from your current `HEAD` and a git worktree for it
-   under `~/.local/state/claude-dev/…/worktrees/`. Your uncommitted edits are not part of it.
+   under `~/.local/state/agentgate/…/worktrees/`. Your uncommitted edits are not part of it.
 2. **Work.** Writers, declared checks and reviewers all run inside that worktree. For the sandboxed workers
    your checkout is read-only like the rest of the machine. `git status` in your checkout stays clean.
 3. **Several tasks.** Every session has its own worktree and branch, so tasks may change the same files.
-   `claude-dev watch` and `claude-dev status` in the repository show them all.
+   `agentgate watch` and `agentgate status` in the repository show them all.
 4. **Finish.** The task passes the usual gate — checks, review, triage — and is committed on its own branch.
    The lead reports what was done and asks you how to bring it in.
 5. **Land**, on your word:
@@ -49,7 +49,7 @@ own uncommitted edits in the files the task lands; commit or stash them, or land
 ## Preparing a worktree
 
 A worktree holds only what git tracks: no `node_modules`, no generated code, no local env files. Say what a
-fresh one needs in the repository's `.claude-dev.json` (or in your user file):
+fresh one needs in the repository's `.agentgate.json` (or in your user file):
 
 ```json
 {
@@ -62,10 +62,10 @@ fresh one needs in the repository's `.claude-dev.json` (or in your user file):
 ```
 
 `copy` brings untracked files or directories from your checkout; `setup` commands run once in the new worktree,
-outside the sandbox, like the repository's own scripts. They see `CLAUDE_DEV_CHECKOUT` (your checkout) and
-`CLAUDE_DEV_WORKTREE`. The checkout's `.claude-dev` directory is linked into the worktree, so plans and helper
+outside the sandbox, like the repository's own scripts. They see `AGENTGATE_CHECKOUT` (your checkout) and
+`AGENTGATE_WORKTREE`. The checkout's `.agentgate` directory is linked into the worktree, so plans and helper
 scripts kept there stay reachable. Settings that are yours rather than the team's go into
-`.claude-dev/config.json`. A failing setup command stops the launch and removes
+`.agentgate/config.json`. A failing setup command stops the launch and removes
 the worktree. `"default": true` isolates every writing task without the flag.
 
 Do not link `node_modules` from the checkout into the worktree in a workspace monorepo: workspace packages in it
@@ -74,7 +74,7 @@ when the checkout's dependencies are current and on the same filesystem, copy th
 seconds and no disk space, and keeps the relative workspace links pointing into the worktree:
 
 ```json
-{"worktree": {"setup": [["sh", "-c", "cp -al \"$CLAUDE_DEV_CHECKOUT/node_modules\" node_modules"]]}}
+{"worktree": {"setup": [["sh", "-c", "cp -al \"$AGENTGATE_CHECKOUT/node_modules\" node_modules"]]}}
 ```
 
 Hard-linked files are shared with the checkout: fine for reading, wrong for a task that changes dependencies.

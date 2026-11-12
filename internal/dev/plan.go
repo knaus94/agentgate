@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/knaus94/claude-dev/internal/config"
+	"github.com/knaus94/agentgate/internal/config"
 )
 
 // Stream is one disjoint piece of work owned by one writer.

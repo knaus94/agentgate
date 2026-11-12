@@ -23,7 +23,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/knaus94/claude-dev/internal/config"
+	"github.com/knaus94/agentgate/internal/config"
 )
 
 // Window is one limit of an account: how much is used and when it resets.
@@ -153,7 +153,7 @@ func probeClaude(account config.Account) Status {
 	request, _ := http.NewRequest(http.MethodGet, usageURL, nil)
 	request.Header.Set("Authorization", "Bearer "+credentials.OAuth.AccessToken)
 	request.Header.Set("anthropic-beta", "oauth-2025-04-20")
-	request.Header.Set("User-Agent", "claude-dev")
+	request.Header.Set("User-Agent", "agentgate")
 	response, err := (&http.Client{Timeout: 15 * time.Second}).Do(request)
 	if err != nil {
 		status.Note = "limits unknown: " + err.Error()
@@ -287,7 +287,7 @@ func codexRateLimits(home string) ([]byte, error) {
 		close(replies)
 	}()
 	call := func(id int, method string) ([]byte, error) {
-		fmt.Fprintf(stdin, `{"id":%d,"method":%q,"params":{"clientInfo":{"name":"claude_dev","version":"1"}}}`+"\n", id, method)
+		fmt.Fprintf(stdin, `{"id":%d,"method":%q,"params":{"clientInfo":{"name":"agentgate","version":"1"}}}`+"\n", id, method)
 		deadline := time.After(12 * time.Second)
 		for {
 			select {
@@ -403,10 +403,15 @@ type Manager struct {
 
 // New makes a manager for the configured accounts. path is where readings and cooldowns are kept between runs.
 func New(accounts []config.Account, path string) *Manager {
-	lead := os.Getenv("CLAUDE_CONFIG_DIR")
+	// The lead session draws on the profile of its own CLI: Claude's config directory, or Codex's home.
+	variable, fallback := "CLAUDE_CONFIG_DIR", ".claude"
+	if config.Lead() == "codex" {
+		variable, fallback = "CODEX_HOME", ".codex"
+	}
+	lead := os.Getenv(variable)
 	if lead == "" {
 		home, _ := os.UserHomeDir()
-		lead = filepath.Join(home, ".claude")
+		lead = filepath.Join(home, fallback)
 	}
 	return &Manager{accounts: accounts, path: path, leadHome: clean(lead), known: map[string]*Status{}, inflight: map[string]int{}}
 }
@@ -551,7 +556,7 @@ func (m *Manager) order(route config.Route, prefer string, tried map[string]bool
 			room = 50
 		}
 		score := room - inflightWeight*float64(m.inflight[account.Name])
-		if account.Provider == "claude" && clean(account.Home) == m.leadHome {
+		if account.Provider == config.Lead() && clean(account.Home) == m.leadHome {
 			score -= leadWeight
 		}
 		if account.Name == prefer {

@@ -185,3 +185,45 @@ func TestExtensionsPlugInWithoutEditingTheConfiguration(t *testing.T) {
 		t.Fatalf("a broken extension is named in the error: %v", err)
 	}
 }
+
+func TestProfilesAreLaidUnderTheUsersSettings(t *testing.T) {
+	isolate(t)
+	if err := Set("profile", "no-such-profile"); err == nil {
+		t.Fatal("an unknown profile is rejected")
+	}
+	if err := Set("profile", "codex"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Set("modes.medium.backend", "sol:high"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Modes["medium"].Backend != "sol:high" || cfg.Modes["heavy"].Backend != "astra:high" || cfg.Models["terra"].Model == "" {
+		t.Fatalf("the profile replaces the default table and the user's own setting still wins: %+v", cfg.Modes["medium"])
+	}
+	if _, known := cfg.Models["fable"]; known {
+		t.Fatal("null in a layer removes what a lower layer defined")
+	}
+	// A profile of the user's own is a file; it shadows a built-in one of the same name.
+	if err := os.MkdirAll(ProfileDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ProfileDir(), "mine.json"), []byte(`{"about": "my table", "max_parallel": 7, "accounts": [{"name": "x", "provider": "claude", "home": "/x"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Set("profile", "mine"); err != nil {
+		t.Fatal(err)
+	}
+	_ = Unset("modes.medium.backend")
+	cfg, err = Load()
+	if err != nil || cfg.MaxParallel != 7 || len(cfg.Accounts) != 0 || cfg.Modes["medium"].Backend != "opus:medium" {
+		t.Fatalf("a user profile is loaded, without accounts: %+v %v", cfg, err)
+	}
+	listed := Profiles()
+	if listed["mine"] != "my table" || !strings.Contains(listed["codex"], "Codex only") {
+		t.Fatalf("profiles are listed with what they say about themselves: %v", listed)
+	}
+}

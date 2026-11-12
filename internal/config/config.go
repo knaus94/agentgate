@@ -12,7 +12,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/knaus94/claude-dev/internal/assets"
+	"github.com/knaus94/agentgate/internal/assets"
 )
 
 // ModeNames lists the modes from cheapest to most thorough.
@@ -107,8 +107,10 @@ type Config struct {
 	Consultant        string               `json:"consultant"`
 	PlaywrightMCP     string               `json:"playwright_mcp"`
 	Accounts          []Account            `json:"accounts"`
-	PlansHome         string               `json:"plans_home"`
-	WorkerMCP         map[string]WorkerMCP `json:"worker_mcp"` // synced directory that holds the .claude-dev of each repository
+	PlansHome         string               `json:"plans_home"` // synced directory that holds the .agentgate of each repository
+	WorkerMCP         map[string]WorkerMCP `json:"worker_mcp"`
+	Profile           string               `json:"profile"` // a named alternative mode table laid under the user's settings, e.g. "codex"
+	Leads             []string             `json:"leads"`   // which CLIs the lead command is installed into: claude, codex
 	Worktree          Worktree             `json:"worktree"`
 	Modes             map[string]Mode      `json:"modes"`
 }
@@ -132,15 +134,92 @@ func UserPath() string {
 	if base == "" {
 		base = filepath.Join(os.Getenv("HOME"), ".config")
 	}
-	return filepath.Join(base, "claude-dev", "config.json")
+	return filepath.Join(base, "agentgate", "config.json")
 }
 
 // ProjectFile is the optional per-repository override, read from the working directory.
-const ProjectFile = ".claude-dev.json"
+const ProjectFile = ".agentgate.json"
 
 // PersonalFile is the user's own override for one repository. It lives next to the saved plans, so it is
 // never committed with the team's file and travels with the plans when that directory is synced.
-const PersonalFile = ".claude-dev/config.json"
+const PersonalFile = ".agentgate/config.json"
+
+// Lead says which CLI the calling session is. Inside a Codex tool call it is "codex", whatever else the
+// environment inherited; otherwise it is "claude".
+func Lead() string {
+	if os.Getenv("CODEX_THREAD_ID") != "" && (os.Getenv("CODEX_TOOL_CALL_ID") != "" || os.Getenv("CLAUDE_CODE_SESSION_ID") == "") {
+		return "codex"
+	}
+	return "claude"
+}
+
+// The tool was called claude-dev before it could be led from Codex. A repository set up under that name keeps
+// working: the old names are read where the new ones are absent.
+const legacyName = "claude-dev"
+
+func exists(path string) bool { _, err := os.Lstat(path); return err == nil }
+
+// RepoDir is the repository's directory of plans, personal settings and extensions.
+func RepoDir() string {
+	if !exists(".agentgate") && exists("."+legacyName) {
+		return "." + legacyName
+	}
+	return ".agentgate"
+}
+
+func projectFile() string {
+	if !exists(ProjectFile) && exists("."+legacyName+".json") {
+		return "." + legacyName + ".json"
+	}
+	return ProjectFile
+}
+
+func personalFile() string { return filepath.Join(RepoDir(), "config.json") }
+
+// ProfileDir holds the user's own profiles, next to the built-in ones.
+func ProfileDir() string { return filepath.Join(filepath.Dir(UserPath()), "profiles") }
+
+// profileLayer returns the named profile: the user's file when there is one, otherwise the built-in.
+func profileLayer(name string) (map[string]any, error) {
+	raw, err := os.ReadFile(filepath.Join(ProfileDir(), name+".json"))
+	if err != nil {
+		builtin, ok := assets.Profile(name)
+		if !ok {
+			return nil, fmt.Errorf("unknown profile %q; built-in: %s; your own go to %s", name, strings.Join(assets.Profiles(), ", "), ProfileDir())
+		}
+		raw = builtin
+	}
+	var layer map[string]any
+	if err := json.Unmarshal(raw, &layer); err != nil {
+		return nil, fmt.Errorf("profile %s: %w", name, err)
+	}
+	delete(layer, "about")
+	delete(layer, "accounts")
+	return layer, nil
+}
+
+// Profiles lists the profiles that can be selected, with what each says about itself.
+func Profiles() map[string]string {
+	out := map[string]string{}
+	read := func(name string, raw []byte) {
+		var layer struct {
+			About string `json:"about"`
+		}
+		_ = json.Unmarshal(raw, &layer)
+		out[name] = layer.About
+	}
+	for _, name := range assets.Profiles() {
+		raw, _ := assets.Profile(name)
+		read(name, raw)
+	}
+	paths, _ := filepath.Glob(filepath.Join(ProfileDir(), "*.json"))
+	for _, path := range paths {
+		if raw, err := os.ReadFile(path); err == nil {
+			read(strings.TrimSuffix(filepath.Base(path), ".json"), raw)
+		}
+	}
+	return out
+}
 
 // Load returns the built-in table with the user's and then the repository's overrides merged in.
 func Load() (*Config, error) {
@@ -148,7 +227,18 @@ func Load() (*Config, error) {
 	if err := json.Unmarshal(assets.Config, &merged); err != nil {
 		return nil, fmt.Errorf("built-in config: %w", err)
 	}
-	for _, path := range []string{UserPath(), ProjectFile, PersonalFile} {
+	// The profile is chosen in the user's file and laid under it: a profile replaces the default table, and
+	// the user's own settings still win over the profile.
+	if user, err := readUser(); err == nil {
+		if name, _ := user["profile"].(string); name != "" {
+			layer, err := profileLayer(name)
+			if err != nil {
+				return nil, err
+			}
+			merge(merged, layer)
+		}
+	}
+	for _, path := range []string{UserPath(), projectFile(), personalFile()} {
 		raw, err := os.ReadFile(path)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
@@ -298,7 +388,7 @@ type Extension struct {
 
 // ExtensionDirs are where extensions are picked up: the user's, for every repository, and the repository's own.
 func ExtensionDirs() []string {
-	return []string{filepath.Join(filepath.Dir(UserPath()), "extensions"), filepath.Join(filepath.Dir(PersonalFile), "extensions")}
+	return []string{filepath.Join(filepath.Dir(UserPath()), "extensions"), filepath.Join(RepoDir(), "extensions")}
 }
 
 // Extensions reads every *.json of the extension directories, in name order within each directory.
@@ -366,6 +456,10 @@ func extend(dst, src map[string]any) {
 // merge overlays src on dst: objects merge key by key, everything else is replaced.
 func merge(dst, src map[string]any) {
 	for key, value := range src {
+		if value == nil {
+			delete(dst, key) // null removes what a lower layer defined, e.g. a model a profile does not use
+			continue
+		}
 		if child, ok := value.(map[string]any); ok {
 			if existing, ok := dst[key].(map[string]any); ok {
 				merge(existing, child)
@@ -379,6 +473,11 @@ func merge(dst, src map[string]any) {
 func (c *Config) validate() error {
 	if c.MaxParallel < 1 || c.WorkerMemoryMiB < 1 {
 		return errors.New("config: max_parallel and worker_memory_mib must be positive")
+	}
+	for _, lead := range c.Leads {
+		if lead != "claude" && lead != "codex" {
+			return fmt.Errorf("config: leads are claude and codex, not %q", lead)
+		}
 	}
 	for alias, model := range c.Models {
 		if (model.Provider != "claude" && model.Provider != "codex") || model.Model == "" || model.Pool == "" {

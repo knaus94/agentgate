@@ -18,9 +18,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/knaus94/claude-dev/internal/config"
-	"github.com/knaus94/claude-dev/internal/ops"
-	"github.com/knaus94/claude-dev/internal/provider"
+	"github.com/knaus94/agentgate/internal/config"
+	"github.com/knaus94/agentgate/internal/ops"
+	"github.com/knaus94/agentgate/internal/provider"
 )
 
 // FileState is the content and mode of one file; a nil entry in a Snapshot means the file is absent.
@@ -208,6 +208,47 @@ type Gate struct {
 	CreatedAt     int64                   `json:"created_at"`
 }
 
+// AdoptLegacy brings over what an installation under the tool's earlier name left: its state and its settings
+// move to the new directories, and a link stays at the old place so paths recorded in unfinished tasks, and a
+// binary of the old name that is still running, keep working.
+func AdoptLegacy() {
+	home, _ := os.UserHomeDir()
+	bases := map[string]string{"XDG_STATE_HOME": filepath.Join(home, ".local", "state"), "XDG_CONFIG_HOME": filepath.Join(home, ".config")}
+	for variable, fallback := range bases {
+		base := os.Getenv(variable)
+		if base == "" {
+			base = fallback
+		}
+		old, current := filepath.Join(base, "claude-dev"), filepath.Join(base, "agentgate")
+		info, err := os.Lstat(old)
+		if err != nil || !info.IsDir() {
+			continue // nothing to adopt, or already a link
+		}
+		if _, err := os.Lstat(current); err == nil {
+			continue
+		}
+		if os.Rename(old, current) == nil {
+			_ = os.Symlink(current, old)
+		}
+	}
+}
+
+// Confined reports that the process cannot write its own state: it was started inside the caller's sandbox.
+// Codex marks every command of a session with its sandbox variables, also the ones a rule lets out, so the
+// only reliable sign is the thing itself.
+func Confined() bool {
+	if err := os.MkdirAll(Root(), 0o700); err != nil {
+		return true
+	}
+	probe, err := os.CreateTemp(Root(), ".writable-*")
+	if err != nil {
+		return true
+	}
+	probe.Close()
+	_ = os.Remove(probe.Name())
+	return false
+}
+
 // Root is where gates, receipts and designs live; tests replace it.
 var Root = func() string {
 	base := os.Getenv("XDG_STATE_HOME")
@@ -215,7 +256,7 @@ var Root = func() string {
 		home, _ := os.UserHomeDir()
 		base = filepath.Join(home, ".local", "state")
 	}
-	return filepath.Join(base, "claude-dev")
+	return filepath.Join(base, "agentgate")
 }
 
 func digest(value any) string {
@@ -231,8 +272,11 @@ func newID() string {
 
 // session identifies the lead conversation that owns a gate.
 func session() string {
-	if value := os.Getenv("CLAUDE_DEV_SESSION"); value != "" {
+	if value := os.Getenv("AGENTGATE_SESSION"); value != "" {
 		return value
+	}
+	if config.Lead() == "codex" {
+		return os.Getenv("CODEX_THREAD_ID")
 	}
 	return os.Getenv("CLAUDE_CODE_SESSION_ID")
 }
@@ -285,7 +329,7 @@ func requireLead(gate *Gate) error {
 		return errors.New("a worker cannot approve, triage or complete the gate")
 	}
 	if session() == "" {
-		return errors.New("no lead session: run inside Claude Code or set CLAUDE_DEV_SESSION")
+		return errors.New("no lead session: run inside Claude Code or Codex, or set AGENTGATE_SESSION")
 	}
 	if gate != nil && gate.Session != session() {
 		return errors.New("the gate belongs to another lead session")
@@ -399,11 +443,21 @@ func manifest() (map[string]string, error) {
 	}
 	out := map[string]string{}
 	for _, name := range strings.Split(changed+untracked, "\x00") {
-		if name != "" && name != ".claude-dev" && !strings.HasPrefix(name, ".claude-dev/") { // saved plans are notes about the work, not the work
+		if name != "" && !ownNotes(name) { // saved plans are notes about the work, not the work
 			out[name] = entry(name)
 		}
 	}
 	return out, nil
+}
+
+// ownNotes says whether a path is the tool's own directory in the repository, under its present or earlier name.
+func ownNotes(name string) bool {
+	for _, dir := range []string{".agentgate", ".claude-dev"} {
+		if name == dir || strings.HasPrefix(name, dir+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // auditScope records changes outside the task's files. They are reported, not fatal:

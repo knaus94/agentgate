@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/knaus94/claude-dev/internal/config"
-	"github.com/knaus94/claude-dev/internal/ops"
+	"github.com/knaus94/agentgate/internal/config"
+	"github.com/knaus94/agentgate/internal/ops"
 )
 
 // An isolated task works in its own git worktree on its own branch. The user's checkout does not change until
@@ -129,8 +129,10 @@ func (g *Gate) isolate(cfg *config.Config) error {
 	}
 	// Plans, the personal settings and helper scripts kept next to them are not tracked: the worktree sees the
 	// checkout's own copy.
-	if _, err := os.Stat(filepath.Join(main, ".claude-dev")); err == nil {
-		_ = os.Symlink(filepath.Join(main, ".claude-dev"), filepath.Join(g.Worktree, ".claude-dev"))
+	for _, notes := range []string{".agentgate", ".claude-dev"} {
+		if _, err := os.Stat(filepath.Join(main, notes)); err == nil {
+			_ = os.Symlink(filepath.Join(main, notes), filepath.Join(g.Worktree, notes))
+		}
 	}
 	if err := g.enter(); err != nil {
 		return fail(err)
@@ -144,7 +146,7 @@ func (g *Gate) isolate(cfg *config.Config) error {
 		}
 		cmd := exec.Command(argv[0], argv[1:]...)
 		cmd.Stdout, cmd.Stderr = output, output
-		cmd.Env = append(os.Environ(), "CLAUDE_DEV_CHECKOUT="+main, "CLAUDE_DEV_WORKTREE="+g.Worktree)
+		cmd.Env = append(os.Environ(), "AGENTGATE_CHECKOUT="+main, "AGENTGATE_WORKTREE="+g.Worktree)
 		err = ops.Run(cmd, seconds(cfg.Worktree.SetupTimeoutS))
 		output.Close()
 		if err != nil {

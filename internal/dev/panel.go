@@ -13,14 +13,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/knaus94/claude-dev/internal/accounts"
-	"github.com/knaus94/claude-dev/internal/config"
-	"github.com/knaus94/claude-dev/internal/ops"
+	"github.com/knaus94/agentgate/internal/accounts"
+	"github.com/knaus94/agentgate/internal/config"
+	"github.com/knaus94/agentgate/internal/ops"
 )
 
-// The panel is the interactive `claude-dev watch`: every task of the checkout (or of every checkout), the
+// The panel is the interactive `agentgate watch`: every task of the checkout (or of every checkout), the
 // stages each went through with their timings, its workers, checks and findings, and — one keypress deeper —
-// what a worker is doing right now. It only reads state; the owning Claude Code session drives the task.
+// what a worker is doing right now. It only reads state; the owning lead session drives the task.
 
 // laneView is one worker process of a task.
 type laneView struct {
@@ -550,7 +550,7 @@ func (m *panel) refresh() {
 	m.limits = limitsLine(filepath.Join(Root(), "accounts.json"))
 }
 
-// limitsLine is the last known use of each subscription, from the readings `claude-dev accounts` and the
+// limitsLine is the last known use of each subscription, from the readings `agentgate accounts` and the
 // workers leave behind. The panel itself never asks a provider.
 func limitsLine(path string) string {
 	var saved struct {
@@ -716,7 +716,7 @@ func (m *panel) frame() []string {
 	if m.global {
 		scope = "every checkout"
 	}
-	left := " claude-dev · " + scope
+	left := " agentgate · " + scope
 	right := now.Format("15:04:05") + " "
 	if m.limits != "" {
 		right = m.limits + "  " + right

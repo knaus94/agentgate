@@ -9,10 +9,10 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/knaus94/claude-dev/internal/assets"
-	"github.com/knaus94/claude-dev/internal/config"
-	"github.com/knaus94/claude-dev/internal/ops"
-	"github.com/knaus94/claude-dev/internal/provider"
+	"github.com/knaus94/agentgate/internal/assets"
+	"github.com/knaus94/agentgate/internal/config"
+	"github.com/knaus94/agentgate/internal/ops"
+	"github.com/knaus94/agentgate/internal/provider"
 )
 
 // Issue is a risk an architect names in its own design, or a blocker a critic finds in the other one.
@@ -244,7 +244,7 @@ func (r *Resolved) requireArchitecture() error {
 	}
 	accepted := r.Plan.Architecture
 	if accepted == nil || strings.TrimSpace(accepted.Acceptance) == "" {
-		return fmt.Errorf("%s needs an architecture pass: run `claude-dev architecture` and add architecture {id, acceptance}", r.Mode)
+		return fmt.Errorf("%s needs an architecture pass: run `agentgate architecture` and add architecture {id, acceptance}", r.Mode)
 	}
 	receipt, err := loadReceipt(accepted.ID, "architecture")
 	if err != nil {

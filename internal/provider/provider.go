@@ -17,13 +17,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/knaus94/claude-dev/internal/accounts"
-	"github.com/knaus94/claude-dev/internal/config"
-	"github.com/knaus94/claude-dev/internal/ops"
+	"github.com/knaus94/agentgate/internal/accounts"
+	"github.com/knaus94/agentgate/internal/config"
+	"github.com/knaus94/agentgate/internal/ops"
 )
 
 // WorkerEnv marks a spawned model process; such a process may not drive the gate.
-const WorkerEnv = "CLAUDE_DEV_WORKER"
+const WorkerEnv = "AGENTGATE_WORKER"
 
 // MCPServer is one stdio MCP server exposed to a Codex process with an explicit tool allowlist.
 type MCPServer struct {
@@ -139,8 +139,11 @@ func environment(extra ...string) []string {
 	for _, entry := range os.Environ() {
 		name, _, _ := strings.Cut(entry, "=")
 		switch name {
-		case "TMUX", "TMUX_PANE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_DEV_SESSION", "CLAUDE_CODE_EFFORT_LEVEL",
-			"CODEX_HOME", "CLAUDE_CONFIG_DIR":
+		case "TMUX", "TMUX_PANE", "CLAUDE_CODE_SESSION_ID", "AGENTGATE_SESSION", "CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CONFIG_DIR":
+			continue
+		}
+		// A worker must not inherit the lead's Codex session: its thread, its sandbox marks, its home.
+		if strings.HasPrefix(name, "CODEX_") {
 			continue
 		}
 		env = append(env, entry)

@@ -32,7 +32,7 @@
 `public-contract`. Риск называется, только когда изменение действительно его затрагивает. «У модуля много
 вызывающих» — не риск, а обычная работа, то есть medium.
 
-`claude-dev route --file plan.json` показывает решение и его причины до запуска чего-либо.
+`agentgate route --file plan.json` показывает решение и его причины до запуска чего-либо.
 
 ## Что запускает каждый режим
 
@@ -94,9 +94,9 @@ ultra это два архитектора, писатели и четыре р�
 ## Изменить режим
 
 ```sh
-claude-dev config set modes.medium.review '[{"axes":["correctness","architecture"],"route":"fable:high"}]'
-claude-dev config set modes.heavy.blocking '["P0","P1"]'
-claude-dev modes
+agentgate config set modes.medium.review '[{"axes":["correctness","architecture"],"route":"fable:high"}]'
+agentgate config set modes.heavy.blocking '["P0","P1"]'
+agentgate modes
 ```
 
 Пустой `review` (`[]`) означает, что дифф ревьюит сам лид, как в light.

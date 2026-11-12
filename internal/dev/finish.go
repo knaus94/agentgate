@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/knaus94/claude-dev/internal/config"
-	"github.com/knaus94/claude-dev/internal/ops"
+	"github.com/knaus94/agentgate/internal/config"
+	"github.com/knaus94/agentgate/internal/ops"
 )
 
 type FixInput struct {
@@ -462,6 +462,6 @@ func StopHook(cwd, sessionID string) map[string]any {
 	if record := ops.Status(sessionDir(cwd, sessionID)); record != nil && record.Live {
 		return map[string]any{}
 	}
-	return map[string]any{"decision": "block", "reason": "/dev task is " + gate.Phase + ". Run `claude-dev status` and follow its `next`. " +
-		"If you are waiting for the user's decision or were stopped, `claude-dev hold` with the true reason and report INCOMPLETE. Do not claim it is done."}
+	return map[string]any{"decision": "block", "reason": "/dev task is " + gate.Phase + ". Run `agentgate status` and follow its `next`. " +
+		"If you are waiting for the user's decision or were stopped, `agentgate hold` with the true reason and report INCOMPLETE. Do not claim it is done."}
 }

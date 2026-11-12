@@ -1,4 +1,4 @@
-// claude-dev runs the /dev workflow for Claude Code: a quality gate around sandboxed model workers.
+// agentgate is a quality gate around sandboxed model workers, led from a Claude Code or a Codex session.
 package main
 
 import (
@@ -9,32 +9,36 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
-	"github.com/knaus94/claude-dev/internal/accounts"
-	"github.com/knaus94/claude-dev/internal/assets"
-	"github.com/knaus94/claude-dev/internal/config"
-	"github.com/knaus94/claude-dev/internal/dev"
-	"github.com/knaus94/claude-dev/internal/provider"
-	"github.com/knaus94/claude-dev/internal/update"
+	"github.com/knaus94/agentgate/internal/accounts"
+	"github.com/knaus94/agentgate/internal/assets"
+	"github.com/knaus94/agentgate/internal/config"
+	"github.com/knaus94/agentgate/internal/dev"
+	"github.com/knaus94/agentgate/internal/provider"
+	"github.com/knaus94/agentgate/internal/update"
 )
 
-const usage = `claude-dev — the /dev workflow for Claude Code
+const usage = `agentgate — a quality gate around sandboxed model workers, led from Claude Code or Codex
 
-In Claude Code:   /dev [-l|-m|-h|-x] [-w] <task>   (the mode is chosen automatically without a flag;
-                                                    -w works in an isolated worktree until you land it)
+In a session:     /dev [-l|-m|-h|-x] [-w] <task>   in Claude Code, $dev ... in Codex
+                  (the mode is chosen automatically without a flag; -w works in an isolated worktree
+                  until you land it)
 
 Setup
-  install [--zed] [--uninstall]   put the /dev command and the Stop hook into Claude Code
+    install [--lead claude|codex|both] [--zed] [--uninstall]
+                                  put the lead command and the Stop hook into Claude Code (/dev), Codex ($dev)
+                                  or both; "codex" also makes every worker a Codex model
   doctor                          check the environment
   update [--check]                install the latest release
   modes                           show which model does what in each mode
-      config show|path|init|set <key> <value>|unset <key>|extensions
+        config show|path|init|set <key> <value>|unset <key>|extensions|profiles|profile <name>
   accounts [discover [--save] | add <name> <claude|codex> <home> | remove <name> | reset <name>]
                                   several subscriptions: limits, load spreading, failover
       plan save [name] | list | show <name> | link [synced directory]
-                                  keep a plan and its readable brief in .claude-dev/plans/;
-                                  link moves .claude-dev into a synced folder
+                                  keep a plan and its readable brief in .agentgate/plans/;
+                                  link moves .agentgate into a synced folder
     watch [--all] [--once]          interactive panel: tasks, stages and timings, workers, checks, findings,
                                   and what each worker is doing; --all shows every checkout
   status | stop | prune | version
@@ -51,6 +55,7 @@ type arguments struct {
 	file   string
 	flags  map[string]bool
 	rest   []string
+	lead   string
 }
 
 func parseArgs(args []string) (arguments, error) {
@@ -63,6 +68,12 @@ func parseArgs(args []string) (arguments, error) {
 			}
 			index++
 			out.file = args[index]
+		case value == "--lead":
+			if index+1 >= len(args) {
+				return out, errors.New("--lead needs claude, codex or both")
+			}
+			index++
+			out.lead = args[index]
 		case value == "--plan":
 			if index+1 >= len(args) {
 				return out, errors.New("--plan needs the name of a saved plan")
@@ -141,13 +152,25 @@ func gated(cfg *config.Config, action string, run func(gate *dev.Gate) (any, err
 	})
 }
 
+// sandboxSafe are the actions that only read or print: they work inside a caller's sandbox too.
+var sandboxSafe = []string{"", "help", "--help", "-h", "version", "guide", "reference", "parse", "preview", "route", "modes", "status", "watch", "hook"}
+
 func run(args arguments) (any, int, error) {
+	if config.Lead() == "codex" && !slices.Contains(sandboxSafe, args.action) && dev.Confined() {
+		return nil, 0, errors.New("running inside the Codex sandbox, where agentgate cannot start its own sandbox, reach a provider or " +
+			"write its state. Call it as one plain command — `agentgate " + args.action + " --file <path>` — with no pipe, heredoc, `&&`, `;` or " +
+			"redirection, so the rule installed by `agentgate install --lead codex` applies; write the input to a file first")
+	}
+	dev.AdoptLegacy()
 	switch args.action {
 	case "", "help", "--help", "-h":
 		return usage, 0, nil
 	case "version":
 		return update.Version + "\n", 0, nil
 	case "guide":
+		if config.Lead() == "codex" {
+			return assets.Guide + assets.GuideCodex, 0, nil
+		}
 		return assets.Guide, 0, nil
 	case "reference":
 		return assets.Reference, 0, nil
@@ -158,7 +181,7 @@ func run(args arguments) (any, int, error) {
 		}
 		return result, 0, nil
 	case "install":
-		value, err := dev.Install(args.flags["uninstall"], args.flags["zed"])
+		value, err := dev.Install(dev.InstallOptions{Uninstall: args.flags["uninstall"], Zed: args.flags["zed"], Lead: args.lead, Ask: askLead()})
 		return value, 0, err
 	case "update":
 		return selfUpdate(args.flags["check"])
@@ -348,7 +371,7 @@ func run(args arguments) (any, int, error) {
 		value, err := gated(cfg, "resume", func(gate *dev.Gate) (any, error) { return dev.Resume(cfg, gate) })
 		return value, 0, err
 	}
-	return nil, 0, fmt.Errorf("unknown command %q; run `claude-dev help`", args.action)
+	return nil, 0, fmt.Errorf("unknown command %q; run `agentgate help`", args.action)
 }
 
 func planCommand(cfg *config.Config, args arguments) (any, int, error) {
@@ -377,7 +400,7 @@ func planCommand(cfg *config.Config, args arguments) (any, int, error) {
 		value, err := dev.PlanLink(cfg, name)
 		return value, 0, err
 	}
-	return nil, 0, errors.New("usage: claude-dev plan save [name] --file <path>|- | plan list | plan show <name> | plan link [synced directory]")
+	return nil, 0, errors.New("usage: agentgate plan save [name] --file <path>|- | plan list | plan show <name> | plan link [synced directory]")
 }
 
 func configCommand(rest []string) (any, int, error) {
@@ -389,19 +412,38 @@ func configCommand(rest []string) (any, int, error) {
 		return config.UserPath() + "\n", 0, nil
 	case "init":
 		path, err := config.Init()
-		return map[string]any{"created": path, "next": "Edit models and fallbacks there, or use `claude-dev config set`."}, 0, err
+		return map[string]any{"created": path, "next": "Edit models and fallbacks there, or use `agentgate config set`."}, 0, err
 	case "set":
 		if len(rest) != 3 {
-			return nil, 0, errors.New("usage: claude-dev config set <key> <value>, e.g. config set modes.medium.backend sonnet:high")
+			return nil, 0, errors.New("usage: agentgate config set <key> <value>, e.g. config set modes.medium.backend sonnet:high")
 		}
 		if err := config.Set(rest[1], rest[2]); err != nil {
 			return nil, 0, err
 		}
 	case "unset":
 		if len(rest) != 2 {
-			return nil, 0, errors.New("usage: claude-dev config unset <key>")
+			return nil, 0, errors.New("usage: agentgate config unset <key>")
 		}
 		if err := config.Unset(rest[1]); err != nil {
+			return nil, 0, err
+		}
+	case "profiles":
+		cfg, _ := config.Load()
+		active := ""
+		if cfg != nil {
+			active = cfg.Profile
+		}
+		return map[string]any{"active": active, "available": config.Profiles(), "your_own": config.ProfileDir(),
+			"note": "A profile is a complete mode table laid under your settings: `agentgate config profile <name>` selects one, `config profile default` returns to the built-in table."}, 0, nil
+	case "profile":
+		if len(rest) != 2 {
+			return nil, 0, errors.New("usage: agentgate config profile <name>|default")
+		}
+		if rest[1] == "default" {
+			if err := config.Unset("profile"); err != nil {
+				return nil, 0, err
+			}
+		} else if err := config.Set("profile", rest[1]); err != nil {
 			return nil, 0, err
 		}
 	case "extensions":
@@ -409,10 +451,29 @@ func configCommand(rest []string) (any, int, error) {
 			"note": "One *.json file per integration. Objects merge into the configuration; lists add their items. Remove or rename a file to switch it off."}, 0, nil
 	case "show":
 	default:
-		return nil, 0, errors.New("usage: claude-dev config show|path|init|set <key> <value>|unset <key>|extensions")
+		return nil, 0, errors.New("usage: agentgate config show|path|init|set <key> <value>|unset <key>|extensions|profiles|profile <name>")
 	}
 	cfg, err := config.Load()
 	return cfg, 0, err
+}
+
+// askLead asks which lead to install when a person is at the terminal; otherwise there is nobody to ask.
+func askLead() func() string {
+	in, _ := os.Stdin.Stat()
+	out, _ := os.Stderr.Stat()
+	if in == nil || out == nil || in.Mode()&os.ModeCharDevice == 0 || out.Mode()&os.ModeCharDevice == 0 {
+		return nil
+	}
+	return func() string {
+		fmt.Fprint(os.Stderr, `Which sessions lead the work?
+  1) Claude Code leads; Claude and Codex models work   (default)
+  2) Codex only: Codex leads, Codex models work
+  3) both: /dev in Claude Code and $dev in Codex, Claude and Codex models work
+Choose 1, 2 or 3: `)
+		var answer string
+		_, _ = fmt.Fscanln(os.Stdin, &answer)
+		return map[string]string{"2": "codex", "codex": "codex", "3": "both", "both": "both"}[strings.TrimSpace(answer)]
+	}
 }
 
 func selfUpdate(checkOnly bool) (any, int, error) {
@@ -447,6 +508,6 @@ func main() {
 			os.Exit(code)
 		}
 	}
-	fmt.Fprintln(os.Stderr, "claude-dev: "+err.Error())
+	fmt.Fprintln(os.Stderr, "agentgate: "+err.Error())
 	os.Exit(1)
 }

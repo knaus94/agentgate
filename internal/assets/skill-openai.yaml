@@ -1,0 +1,5 @@
+interface:
+  display_name: "dev"
+  short_description: "Lead a task through agentgate's quality gate"
+policy:
+  allow_implicit_invocation: false

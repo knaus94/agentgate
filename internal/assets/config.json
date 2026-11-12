@@ -65,7 +65,7 @@
   "ui_designer": "opus:medium",
   "visual_reviewer": "astra:medium",
   "consultant": "sonnet:medium",
-  "playwright_mcp": "~/.local/share/claude-dev/playwright-mcp/node_modules/@playwright/mcp/cli.js",
+  "playwright_mcp": "~/.local/share/agentgate/playwright-mcp/node_modules/@playwright/mcp/cli.js",
   "modes": {
     "light": {
       "scout": "",

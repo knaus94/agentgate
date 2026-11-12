@@ -33,11 +33,15 @@ jobs:
           flags="-s -w -X github.com/${GITHUB_REPOSITORY}/internal/update.Version=${version} -X github.com/${GITHUB_REPOSITORY}/internal/update.Repo=${GITHUB_REPOSITORY}"
           mkdir -p dist
           for arch in amd64 arm64; do
-            GOOS=linux GOARCH="$arch" go build -trimpath -ldflags "$flags" -o "dist/$arch/claude-dev" ./cmd/claude-dev
+            GOOS=linux GOARCH="$arch" go build -trimpath -ldflags "$flags" -o "dist/$arch/agentgate" ./cmd/agentgate
+            tar -C "dist/$arch" -czf "dist/agentgate_linux_${arch}.tar.gz" agentgate
+            # The tool was called claude-dev. An install under that name updates by fetching an archive of
+            # that name; it gets this same binary and renames itself on the next `install`.
+            cp "dist/$arch/agentgate" "dist/$arch/claude-dev"
             tar -C "dist/$arch" -czf "dist/claude-dev_linux_${arch}.tar.gz" claude-dev
           done
-          (cd dist && sha256sum claude-dev_linux_*.tar.gz > checksums.txt)
+          (cd dist && sha256sum agentgate_linux_*.tar.gz claude-dev_linux_*.tar.gz > checksums.txt)
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/claude-dev_linux_*.tar.gz dist/checksums.txt --generate-notes --verify-tag
+        run: gh release create "$GITHUB_REF_NAME" dist/agentgate_linux_*.tar.gz dist/claude-dev_linux_*.tar.gz dist/checksums.txt --generate-notes --verify-tag

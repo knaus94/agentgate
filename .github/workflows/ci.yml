@@ -28,6 +28,6 @@ jobs:
       - name: Test
         run: go test -race ./...
       - name: Build
-        run: go build ./cmd/claude-dev
+        run: go build ./cmd/agentgate
       - name: Installer syntax
         run: sh -n scripts/install.sh

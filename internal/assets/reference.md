@@ -1,4 +1,4 @@
-# claude-dev reference
+# agentgate reference
 
 Every command prints JSON. Inputs are read from `--file <path>`, `--file -` (stdin) or `--plan <name>` (a plan
 saved with `plan save`). Unknown fields are rejected.
@@ -9,9 +9,9 @@ saved with `plan save`). Unknown fields are rejected.
 |---|---|---|
 | `parse` | raw request | parse the `/dev` arguments |
 | `preview` | raw request | show mode handling and routes; no files, no models |
-| `plan save [name]` | plan | validate and keep the plan in `.claude-dev/plans/<name>/` with a readable `brief.md` |
+| `plan save [name]` | plan | validate and keep the plan in `.agentgate/plans/<name>/` with a readable `brief.md` |
 | `plan list`, `plan show <name>` | — | saved plans of this repository; print a brief |
-| `plan link [folder]` | — | user's setup: keep `.claude-dev` in a synced folder and link it here |
+| `plan link [folder]` | — | user's setup: keep `.agentgate` in a synced folder and link it here |
 | `route` | plan | mode decision, reasons and models; read-only |
 | `architecture` | plan | design passes of heavy and ultra |
 | `design` | design input | read-only UI designer |
@@ -138,8 +138,8 @@ resolved or rejected with evidence.
 
 ## Configuration
 
-Built-in table, then `~/.config/claude-dev/config.json`, then `.claude-dev.json` in the repository; objects
-merge key by key. `claude-dev config show` prints the effective result.
+Built-in table, then `~/.config/agentgate/config.json`, then `.agentgate.json` in the repository; objects
+merge key by key. `agentgate config show` prints the effective result.
 
 ```json
 {
@@ -151,9 +151,9 @@ merge key by key. `claude-dev config show` prints the effective result.
 ```
 
 A route is `<model alias>:<effort>` with effort `low medium high xhigh max`. Providers: `claude`, `codex`.
-`claude-dev config set modes.medium.backend sonnet:high` edits the user file.
+`agentgate config set modes.medium.backend sonnet:high` edits the user file.
 
 ## Phases
 
 `implementing → awaiting-review → reviewed → (correcting → awaiting-review → reviewed)* → complete`;
-`held` and `cancelled` from any active phase. State lives in `~/.local/state/claude-dev/`.
+`held` and `cancelled` from any active phase. State lives in `~/.local/state/agentgate/`.

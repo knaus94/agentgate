@@ -1,12 +1,15 @@
-# claude-dev
+# agentgate
 
 [Русский](README.ru.md)
 
-**`/dev` for Claude Code: your session leads, sandboxed Claude and Codex workers write and review, and a
-quality gate decides when the task is done.**
+**A quality gate around sandboxed model workers: your Claude Code or Codex session leads, Claude and Codex
+workers write and review, and the gate decides when the task is done.**
 
-You type `/dev add rate limiting to the export endpoint` in Claude Code. Your session becomes the lead: it
-reads the code, writes the brief and splits the work. `claude-dev` then runs the writers and reviewers as
+*Formerly `claude-dev`. The tool can now be led from Codex as well, so the name no longer fit; an existing
+install renames itself on `claude-dev update`.*
+
+You type `/dev add rate limiting to the export endpoint` in Claude Code (`$dev …` in Codex). Your session becomes the lead: it
+reads the code, writes the brief and splits the work. `agentgate` then runs the writers and reviewers as
 separate processes on the models you configured, keeps receipts of everything they did, and refuses to close
 the task while a review, a check or a blocking finding is outstanding.
 
@@ -69,25 +72,34 @@ risks: `authorization`, `security`, `money`, `data-integrity`, `concurrency`, `m
 
 ## Install
 
-Linux, x86-64 or arm64. Requires [Claude Code](https://claude.com/claude-code),
-[Codex CLI](https://github.com/openai/codex), `bwrap` (bubblewrap), `git` and `diff`.
+Linux, x86-64 or arm64. Requires `bwrap` (bubblewrap), `git`, `diff`, and the CLIs you use:
+[Claude Code](https://claude.com/claude-code), [Codex CLI](https://github.com/openai/codex), or both.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/knaus94/claude-dev/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/knaus94/agentgate/main/scripts/install.sh | sh
 ```
 
-The script downloads the release binary into `~/.local/bin`, verifies its checksum and runs
-`claude-dev install`, which adds the `/dev` command and a Stop hook to Claude Code. Then:
+The script downloads the release binary into `~/.local/bin`, verifies its checksum and asks which sessions
+lead the work:
+
+| Choice | Lead | Workers |
+|---|---|---|
+| `claude` (default) | `/dev` in Claude Code | Claude and Codex models |
+| `codex` | `$dev` in Codex | Codex models only |
+| `both` | `/dev` and `$dev` | Claude and Codex models |
+
+`agentgate install --lead <choice>` changes it later. [Leading from Codex](docs/codex.md) explains the
+Codex side and the Codex-only model table. Then:
 
 ```sh
-claude-dev doctor     # verify the environment
-claude-dev modes      # see which model does what
+agentgate doctor     # verify the environment
+agentgate modes      # see which model does what
 ```
 
-Start a new Claude Code session and type `/dev help`.
+Start a new session and type `/dev help` (Claude Code) or `$dev help` (Codex).
 
-Update with `claude-dev update`. Remove with `claude-dev install --uninstall` and delete the binary.
-Build from source with `go build ./cmd/claude-dev` (Go 1.25+).
+Update with `agentgate update`. Remove with `agentgate install --uninstall` and delete the binary.
+Build from source with `go build ./cmd/agentgate` (Go 1.25+).
 
 ## Use
 
@@ -105,17 +117,17 @@ Build from source with `go build ./cmd/claude-dev` (Go 1.25+).
 Watch every task from any terminal in the repository:
 
 ```sh
-claude-dev watch
+agentgate watch
 ```
 
 An interactive panel: the tasks of all sessions, the stages each went through with timings, its workers, checks
 and findings — and, one `enter` deeper, what a worker is doing right now, command by command.
 See [docs/watch.md](docs/watch.md).
 
-Zed users: `claude-dev install --zed` adds `claude-dev: watch`, `status` and `stop` to Zed's tasks.
+Zed users: `agentgate install --zed` adds `agentgate: watch`, `status` and `stop` to Zed's tasks.
 
-The plan of a task is kept in the repository, in `.claude-dev/plans/<name>/`: `plan.json` is what runs,
-`brief.md` is the same plan for a person to read. `claude-dev plan list` shows them; a saved plan can be
+The plan of a task is kept in the repository, in `.agentgate/plans/<name>/`: `plan.json` is what runs,
+`brief.md` is the same plan for a person to read. `agentgate plan list` shows them; a saved plan can be
 launched from a later session.
 
 ## Isolated tasks
@@ -132,8 +144,8 @@ See [docs/isolation.md](docs/isolation.md).
 ## Several subscriptions
 
 ```sh
-claude-dev accounts discover --save   # pick up every logged-in CLI profile on this machine
-claude-dev accounts                   # live limits of each account
+agentgate accounts discover --save   # pick up every logged-in CLI profile on this machine
+agentgate accounts                   # live limits of each account
 ```
 
 With more than one Claude or Codex subscription, workers are spread over the accounts by remaining quota, an
@@ -143,13 +155,13 @@ it. See [docs/accounts.md](docs/accounts.md).
 ## Configure
 
 ```sh
-claude-dev config init                               # create ~/.config/claude-dev/config.json
-claude-dev config set models.sol.model gpt-6.1-sol   # point an alias at another model
-claude-dev config set modes.medium.backend sonnet:high  # change who does what
-claude-dev config show
+agentgate config init                               # create ~/.config/agentgate/config.json
+agentgate config set models.sol.model gpt-6.1-sol   # point an alias at another model
+agentgate config set modes.medium.backend sonnet:high  # change who does what
+agentgate config show
 ```
 
-A repository can carry its own `.claude-dev.json`. See [docs/configuration.md](docs/configuration.md).
+A repository can carry its own `.agentgate.json`. See [docs/configuration.md](docs/configuration.md).
 
 ## Documentation
 
@@ -159,11 +171,12 @@ A repository can carry its own `.claude-dev.json`. See [docs/configuration.md](d
 - [Why these models](docs/model-selection.md) — the public data behind the defaults
 - [Configuration](docs/configuration.md) — models, pools, fallbacks, per-repository overrides
 - [Several subscriptions](docs/accounts.md) — accounts, limits, load spreading, failover
+- [Leading from Codex](docs/codex.md) — `$dev`, the Codex-only setup and its model table
 - [Extensions](docs/extensions.md) — plug tools into the workers with one file: a code graph, the Nx project graph
-- [The panel](docs/watch.md) — `claude-dev watch`: tasks, timings, live worker activity
+- [The panel](docs/watch.md) — `agentgate watch`: tasks, timings, live worker activity
 - [Isolated tasks](docs/isolation.md) — `-w`: worktrees, landing, catching up, preparing dependencies
 - [Releasing](docs/releasing.md) — how versions are published and installed
-- `claude-dev guide` and `claude-dev reference` print what the lead reads
+- `agentgate guide` and `agentgate reference` print what the lead reads
 
 ## License
 

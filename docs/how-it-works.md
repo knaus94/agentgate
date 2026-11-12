@@ -6,14 +6,14 @@
 
 | Role | Who | Can do |
 |---|---|---|
-| Lead | your Claude Code session | everything a normal session can: your MCP servers, plugins and skills stay available |
+| Lead | your Claude Code or Codex session | everything a normal session can: your MCP servers, plugins and skills stay available |
 | Scout | a fresh, cheap model process | read the repository once, return a context pack |
 | Architect | a fresh model process | read the repository, return a design |
 | Writer | a fresh model process, one per stream | edit the files of its stream |
 | Reviewer | a fresh model process | read the diff, return findings |
 
-`claude-dev` is the only thing that starts workers. The lead never spawns agents for the task; it calls
-`claude-dev` and follows the `next` field of every answer.
+`agentgate` is the only thing that starts workers. The lead never spawns agents for the task; it calls
+`agentgate` and follows the `next` field of every answer.
 
 ## The stages
 
@@ -41,11 +41,11 @@ default (one optional revision, then the lead decides).
 
 ## Where the plan lives
 
-The lead writes the plan as JSON and saves it with `claude-dev plan save <name>`:
+The lead writes the plan as JSON and saves it with `agentgate plan save <name>`:
 
 ```
-<repository>/.claude-dev/plans/<name>/plan.json   what the tool runs
-<repository>/.claude-dev/plans/<name>/brief.md    the same plan for a person: brief, mode and why, streams with
+<repository>/.agentgate/plans/<name>/plan.json   what the tool runs
+<repository>/.agentgate/plans/<name>/brief.md    the same plan for a person: brief, mode and why, streams with
                                                   their writers and files, checks, the accepted design
 ```
 
@@ -55,15 +55,15 @@ will run. The directory is yours to commit or to ignore; the gate never counts i
 To have the same plans on every computer, keep the directory in a synced folder:
 
 ```sh
-claude-dev plan link ~/iCloud/claude-dev    # once per repository and computer; the folder is remembered
+agentgate plan link ~/iCloud/agentgate    # once per repository and computer; the folder is remembered
 ```
 
-This moves `.claude-dev` to `<folder>/<repository name>/` and leaves a link in its place. On the second
-computer the same command links the checkout to what is already there. `.claude-dev/config.json` — your own
-settings for this repository, read after the team's `.claude-dev.json` — travels with it.
+This moves `.agentgate` to `<folder>/<repository name>/` and leaves a link in its place. On the second
+computer the same command links the checkout to what is already there. `.agentgate/config.json` — your own
+settings for this repository, read after the team's `.agentgate.json` — travels with it.
 
 Design receipts and the scout's context pack belong to the checkout, not to one conversation
-(`~/.local/state/claude-dev/<checkout>/designs`, `…/scout`). A plan designed today can therefore be launched
+(`~/.local/state/agentgate/<checkout>/designs`, `…/scout`). A plan designed today can therefore be launched
 from a new session tomorrow without paying for the design again; a receipt stays bound to its brief, files and
 mode by a fingerprint.
 
@@ -97,7 +97,7 @@ the axis from turning into a style campaign.
 
 ## The gate
 
-A task is a *gate*: one JSON state file per lead session and checkout, under `~/.local/state/claude-dev/`.
+A task is a *gate*: one JSON state file per lead session and checkout, under `~/.local/state/agentgate/`.
 
 ```
 implementing ──▶ awaiting-review ──▶ reviewed ──▶ complete

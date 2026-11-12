@@ -2,11 +2,11 @@
 
 [Русский](ru/watch.md)
 
-`claude-dev watch` is a live, read-only view of what `/dev` is doing. Run it in any terminal inside the
-repository (Zed: the `claude-dev: watch` task). It never drives a task and never calls a model or a provider.
+`agentgate watch` is a live, read-only view of what `/dev` is doing. Run it in any terminal inside the
+repository (Zed: the `agentgate: watch` task). It never drives a task and never calls a model or a provider.
 
 ```
- claude-dev · this checkout                                        claude 47% · codex 23%  21:50:18
+ agentgate · this checkout                                        claude 47% · codex 23%  21:50:18
 ────────────────────────────────────────────────────────────────────────────────────────────────────
  TASKS 2
 ▸ ▶ medium reviewing        27s     fix the calculator                             ▶ review 13s
@@ -57,5 +57,5 @@ with `enter`, go back with `esc`.
 The activity comes from the event stream each CLI writes while it works, so it is exactly what the worker
 did, not a summary. Long paths into the tool's own state are shortened to `task:/…` and `state:/…`.
 
-`claude-dev watch --once` prints the same picture as plain text, for scripts and for output that is not a
+`agentgate watch --once` prints the same picture as plain text, for scripts and for output that is not a
 terminal. `--all` starts with every checkout.

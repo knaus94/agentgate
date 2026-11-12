@@ -1,12 +1,15 @@
-# claude-dev
+# agentgate
 
 [English](README.md)
 
-**`/dev` для Claude Code: ваша сессия руководит, изолированные воркеры Claude и Codex пишут и проверяют код,
-а гейт качества решает, когда задача закончена.**
+**Гейт качества вокруг изолированных воркеров: ваша сессия Claude Code или Codex руководит, воркеры Claude и
+Codex пишут и проверяют код, а гейт решает, когда задача закончена.**
 
-Вы пишете в Claude Code `/dev добавь ограничение частоты на экспорт`. Ваша сессия становится лидом: читает
-код, формулирует бриф, делит работу на потоки. Дальше `claude-dev` запускает писателей и ревьюеров отдельными
+*Раньше назывался `claude-dev`. Теперь лидом может быть и Codex, поэтому прежнее имя перестало подходить;
+существующая установка переименуется сама по `claude-dev update`.*
+
+Вы пишете в Claude Code `/dev добавь ограничение частоты на экспорт` (в Codex — `$dev …`). Ваша сессия становится лидом: читает
+код, формулирует бриф, делит работу на потоки. Дальше `agentgate` запускает писателей и ревьюеров отдельными
 процессами на выбранных вами моделях, хранит квитанции обо всём, что они сделали, и не даёт закрыть задачу,
 пока нет актуального ревью, проходящих проверок и остаются блокирующие замечания.
 
@@ -68,22 +71,34 @@
 
 ## Установка
 
-Linux, x86-64 или arm64. Нужны Claude Code, Codex CLI, `bwrap` (bubblewrap), `git` и `diff`.
+Linux, x86-64 или arm64. Нужны `bwrap` (bubblewrap), `git`, `diff` и те CLI, которыми вы пользуетесь:
+Claude Code, Codex CLI или оба.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/knaus94/claude-dev/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/knaus94/agentgate/main/scripts/install.sh | sh
 ```
 
-Скрипт скачивает бинарник в `~/.local/bin`, сверяет контрольную сумму и запускает `claude-dev install`,
-который добавляет в Claude Code команду `/dev` и Stop-хук.
+Скрипт скачивает бинарник в `~/.local/bin`, сверяет контрольную сумму и запускает `agentgate install`,
+который ставит команду лида и Stop-хук в выбранный CLI.
 
 ```sh
-claude-dev doctor     # проверить окружение
-claude-dev modes      # какая модель что делает
-claude-dev update     # обновиться до последней версии
+agentgate doctor     # проверить окружение
+agentgate modes      # какая модель что делает
+agentgate update     # обновиться до последней версии
 ```
 
-Откройте новую сессию Claude Code и наберите `/dev help`.
+Откройте новую сессию и наберите `/dev help` (Claude Code) или `$dev help` (Codex).
+
+Скрипт спрашивает, какие сессии ведут работу:
+
+| Выбор | Лид | Воркеры |
+|---|---|---|
+| `claude` (по умолчанию) | `/dev` в Claude Code | модели Claude и Codex |
+| `codex` | `$dev` в Codex | только модели Codex |
+| `both` | `/dev` и `$dev` | модели Claude и Codex |
+
+Позже выбор меняется командой `agentgate install --lead <выбор>`. Сторона Codex и таблица моделей «только
+Codex» описаны в [docs/ru/codex.md](docs/ru/codex.md).
 
 ## Использование
 
@@ -98,13 +113,13 @@ claude-dev update     # обновиться до последней верси�
 `-N` ограничивает число одновременных процессов. `--preview` показывает, что запустится, ничего не запуская.
 `plan`, `research` и `verify` только читают. `review` оценивает готовый дифф; `--fix` разрешает исправлять.
 
-Живая панель — в любом терминале внутри репозитория: `claude-dev watch`. Она показывает задачи всех сессий,
+Живая панель — в любом терминале внутри репозитория: `agentgate watch`. Она показывает задачи всех сессий,
 этапы каждой с таймингами, воркеров, проверки и замечания, а по `enter` — что воркер делает прямо сейчас,
 команда за командой. Подробнее: [docs/ru/watch.md](docs/ru/watch.md).
-Для Zed: `claude-dev install --zed` добавит задачи `claude-dev: watch`, `status` и `stop`.
+Для Zed: `agentgate install --zed` добавит задачи `agentgate: watch`, `status` и `stop`.
 
-План задачи хранится в репозитории, в `.claude-dev/plans/<имя>/`: `plan.json` — то, что запускается,
-`brief.md` — тот же план для чтения человеком. `claude-dev plan list` показывает сохранённые планы; план можно
+План задачи хранится в репозитории, в `.agentgate/plans/<имя>/`: `plan.json` — то, что запускается,
+`brief.md` — тот же план для чтения человеком. `agentgate plan list` показывает сохранённые планы; план можно
 запустить из более поздней сессии.
 
 ## Изолированные задачи
@@ -121,8 +136,8 @@ claude-dev update     # обновиться до последней верси�
 ## Несколько подписок
 
 ```sh
-claude-dev accounts discover --save   # подхватить все профили CLI на машине, в которых выполнен вход
-claude-dev accounts                   # текущие лимиты каждого аккаунта
+agentgate accounts discover --save   # подхватить все профили CLI на машине, в которых выполнен вход
+agentgate accounts                   # текущие лимиты каждого аккаунта
 ```
 
 Когда подписок Claude или Codex несколько, воркеры распределяются по аккаунтам по остатку квоты, аккаунт,
@@ -132,13 +147,13 @@ claude-dev accounts                   # текущие лимиты каждог
 ## Настройка моделей
 
 ```sh
-claude-dev config init                               # создать ~/.config/claude-dev/config.json
-claude-dev config set models.sol.model gpt-6.1-sol   # привязать псевдоним к другой модели
-claude-dev config set modes.medium.backend sonnet:high  # поменять, кто что делает
-claude-dev config show
+agentgate config init                               # создать ~/.config/agentgate/config.json
+agentgate config set models.sol.model gpt-6.1-sol   # привязать псевдоним к другой модели
+agentgate config set modes.medium.backend sonnet:high  # поменять, кто что делает
+agentgate config show
 ```
 
-Репозиторий может иметь свой `.claude-dev.json`.
+Репозиторий может иметь свой `.agentgate.json`.
 
 ## Документация
 
@@ -147,12 +162,13 @@ claude-dev config show
 - [Почему именно эти модели](docs/ru/model-selection.md) — публичные данные, на которых построены значения по умолчанию
 - [Настройка](docs/ru/configuration.md) — модели, бюджеты, замены
 - [Несколько подписок](docs/ru/accounts.md) — аккаунты, лимиты, распределение нагрузки, переключение
+- [Работа из Codex](docs/ru/codex.md) — `$dev`, вариант «только Codex» и его таблица моделей
 - [Расширения](docs/ru/extensions.md) — подключение инструментов воркерам одним файлом: граф кода, граф проектов Nx
-- [Панель](docs/ru/watch.md) — `claude-dev watch`: задачи, тайминги, действия воркеров вживую
+- [Панель](docs/ru/watch.md) — `agentgate watch`: задачи, тайминги, действия воркеров вживую
 - [Изолированные задачи](docs/ru/isolation.md) — `-w`: worktree, вливание, догоняющее слияние, подготовка зависимостей
 - [Релизы](docs/ru/releasing.md) — публикация и обновление версий
 
-`claude-dev guide` и `claude-dev reference` печатают то, что читает лид; эти два текста — инструкции для
+`agentgate guide` и `agentgate reference` печатают то, что читает лид; эти два текста — инструкции для
 модели и существуют только на английском.
 
 Лицензия MIT.

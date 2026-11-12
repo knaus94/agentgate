@@ -22,7 +22,7 @@ import (
 // Version and Repo are set at build time with -ldflags.
 var (
 	Version = "dev"
-	Repo    = "knaus94/claude-dev"
+	Repo    = "knaus94/agentgate"
 )
 
 // The release endpoints; tests point them at a local server.
@@ -35,7 +35,7 @@ var client = &http.Client{Timeout: 60 * time.Second}
 
 func get(url string) ([]byte, error) {
 	request, _ := http.NewRequest(http.MethodGet, url, nil)
-	request.Header.Set("User-Agent", "claude-dev/"+Version)
+	request.Header.Set("User-Agent", "agentgate/"+Version)
 	if token := os.Getenv("GITHUB_TOKEN"); token != "" && strings.HasPrefix(url, apiBase) {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -51,7 +51,7 @@ func get(url string) ([]byte, error) {
 }
 
 // AssetName is the release archive for this platform.
-func AssetName() string { return fmt.Sprintf("claude-dev_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH) }
+func AssetName() string { return fmt.Sprintf("agentgate_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH) }
 
 // Latest returns the tag of the newest release.
 func Latest() (string, error) {
@@ -133,9 +133,9 @@ func extract(archive []byte) ([]byte, error) {
 	for {
 		header, err := reader.Next()
 		if err != nil {
-			return nil, errors.New("the archive has no claude-dev binary")
+			return nil, errors.New("the archive has no agentgate binary")
 		}
-		if filepath.Base(header.Name) == "claude-dev" && header.Typeflag == tar.TypeReg {
+		if filepath.Base(header.Name) == "agentgate" && header.Typeflag == tar.TypeReg {
 			return io.ReadAll(io.LimitReader(reader, 200<<20))
 		}
 	}

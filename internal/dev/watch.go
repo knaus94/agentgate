@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/knaus94/claude-dev/internal/config"
+	"github.com/knaus94/agentgate/internal/config"
 )
 
 type paint struct{ on bool }

@@ -19,7 +19,7 @@ func archive(t *testing.T, content string) []byte {
 	var buffer bytes.Buffer
 	zipped := gzip.NewWriter(&buffer)
 	packed := tar.NewWriter(zipped)
-	_ = packed.WriteHeader(&tar.Header{Name: "claude-dev", Mode: 0o755, Size: int64(len(content)), Typeflag: tar.TypeReg})
+	_ = packed.WriteHeader(&tar.Header{Name: "agentgate", Mode: 0o755, Size: int64(len(content)), Typeflag: tar.TypeReg})
 	_, _ = packed.Write([]byte(content))
 	_ = packed.Close()
 	_ = zipped.Close()
@@ -53,7 +53,7 @@ func TestUpdateReplacesTheBinaryOnlyWhenTheChecksumMatches(t *testing.T) {
 	if err != nil || tag != "v9.9.9" || Current(tag) {
 		t.Fatalf("latest: %q %v", tag, err)
 	}
-	target := filepath.Join(t.TempDir(), "claude-dev")
+	target := filepath.Join(t.TempDir(), "agentgate")
 	if err := os.WriteFile(target, []byte("old binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestUpdateReplacesTheBinaryOnlyWhenTheChecksumMatches(t *testing.T) {
 
 func TestUpdateRefusesACorruptedDownload(t *testing.T) {
 	serve(t, archive(t, "tampered"), strings.Repeat("0", 64))
-	target := filepath.Join(t.TempDir(), "claude-dev")
+	target := filepath.Join(t.TempDir(), "agentgate")
 	_ = os.WriteFile(target, []byte("old binary"), 0o755)
 	if err := ApplyTo("v9.9.9", target); err == nil || !strings.Contains(err.Error(), "checksum") {
 		t.Fatalf("want a checksum error, got %v", err)

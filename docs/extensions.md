@@ -2,18 +2,18 @@
 
 [Русский](ru/extensions.md)
 
-An extension is one JSON file that plugs something into `claude-dev` without touching its source or your main
+An extension is one JSON file that plugs something into `agentgate` without touching its source or your main
 configuration: a code graph for the workers, a workspace index, what a worktree needs for them. Drop the file
 in, and it is on; remove it (or rename it to something that does not end in `.json`), and it is off.
 
 ```
-~/.config/claude-dev/extensions/*.json     yours, for every repository
-<repository>/.claude-dev/extensions/*.json  for one repository (travels with the plans when that directory is synced)
+~/.config/agentgate/extensions/*.json     yours, for every repository
+<repository>/.agentgate/extensions/*.json  for one repository (travels with the plans when that directory is synced)
 ```
 
 ```sh
-claude-dev config extensions    # which files are loaded and what each adds
-claude-dev config show          # the configuration after they are merged in
+agentgate config extensions    # which files are loaded and what each adds
+agentgate config show          # the configuration after they are merged in
 ```
 
 An extension holds ordinary configuration keys. Objects merge into the configuration key by key. Lists **add**

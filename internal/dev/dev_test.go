@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/knaus94/claude-dev/internal/config"
-	"github.com/knaus94/claude-dev/internal/ops"
-	"github.com/knaus94/claude-dev/internal/provider"
+	"github.com/knaus94/agentgate/internal/config"
+	"github.com/knaus94/agentgate/internal/ops"
+	"github.com/knaus94/agentgate/internal/provider"
 )
 
 // fixture is a throwaway repository with an isolated state root and a scripted model.
@@ -38,8 +38,9 @@ func newFixture(t *testing.T) *fixture {
 	repo := filepath.Join(root, "repo")
 	must(t, os.MkdirAll(repo, 0o755))
 	t.Chdir(repo)
-	t.Setenv("CLAUDE_DEV_SESSION", "fixture-session")
+	t.Setenv("AGENTGATE_SESSION", "fixture-session")
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	isolateHomes(t)
 	os.Unsetenv(provider.WorkerEnv)
 	previousRoot, previousRun := Root, provider.Run
 	Root = func() string { return filepath.Join(root, "state") }
@@ -59,6 +60,19 @@ func newFixture(t *testing.T) *fixture {
 	must(t, err)
 	f.cfg = cfg
 	return f
+}
+
+// isolateHomes gives a test its own home directories. Installing writes into the homes of both CLIs, and a
+// test must never reach the real ones; it also must not inherit the session of whoever runs the tests.
+func isolateHomes(t *testing.T) {
+	t.Helper()
+	home := filepath.Join(t.TempDir(), "home")
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
+	for _, name := range []string{"CODEX_THREAD_ID", "CODEX_TOOL_CALL_ID", "CODEX_SANDBOX", "CODEX_SANDBOX_NETWORK_DISABLED", "CLAUDE_CODE_SESSION_ID"} {
+		t.Setenv(name, "")
+	}
 }
 
 func must(t *testing.T, err error) {
@@ -563,7 +577,7 @@ func TestBaselineFailureDoesNotHoldTheTaskHostage(t *testing.T) {
 func TestAnotherSessionCannotClaimOwnedFiles(t *testing.T) {
 	f := newFixture(t)
 	f.launch(f.plan("change the line"))
-	t.Setenv("CLAUDE_DEV_SESSION", "other-session")
+	t.Setenv("AGENTGATE_SESSION", "other-session")
 	f.fails("launch", "another session", func() (any, error) { return Launch(f.cfg, f.plan("change it too")) })
 	other := f.plan("change the neighbour", Stream{Name: "core", Domain: "backend", Files: []string{"b.txt"}})
 	if summary := f.launch(other); summary["phase"] != "awaiting-review" {
@@ -616,14 +630,15 @@ func TestStopCancelsTheRealProcessAndHoldsTheGate(t *testing.T) {
 }
 
 func TestInstallIsIdempotentAndKeepsOtherHooks(t *testing.T) {
+	isolateHomes(t)
 	dir := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", dir)
 	settings := `{"model":"opus","hooks":{"Stop":[{"hooks":[{"type":"command","command":"/old/claude-dev quality-hook"},` +
 		`{"type":"command","command":"other-tool stop"}]}]}}`
 	must(t, os.WriteFile(filepath.Join(dir, "settings.json"), []byte(settings), 0o600))
-	_, err := Install(false, false)
+	_, err := Install(InstallOptions{})
 	must(t, err)
-	second, err := Install(false, false)
+	second, err := Install(InstallOptions{})
 	must(t, err)
 	if second.(map[string]any)["note"] != "already up to date" {
 		t.Fatalf("a second install must change nothing: %v", second)
@@ -634,10 +649,10 @@ func TestInstallIsIdempotentAndKeepsOtherHooks(t *testing.T) {
 		!strings.Contains(text, `"model": "opus"`) {
 		t.Fatalf("exactly one hook of ours, foreign hooks and settings kept: %s", text)
 	}
-	if command, _ := os.ReadFile(filepath.Join(dir, "commands", "dev.md")); !strings.Contains(string(command), "claude-dev guide") {
+	if command, _ := os.ReadFile(filepath.Join(dir, "commands", "dev.md")); !strings.Contains(string(command), "agentgate guide") {
 		t.Fatal("the /dev command must be installed")
 	}
-	_, err = Install(true, false)
+	_, err = Install(InstallOptions{Uninstall: true})
 	must(t, err)
 	if raw, _ := os.ReadFile(filepath.Join(dir, "settings.json")); strings.Contains(string(raw), selfPath()+" hook") {
 		t.Fatal("uninstall must remove the hook")

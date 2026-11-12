@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/knaus94/claude-dev/internal/accounts"
-	"github.com/knaus94/claude-dev/internal/config"
+	"github.com/knaus94/agentgate/internal/accounts"
+	"github.com/knaus94/agentgate/internal/config"
 )
 
 // The fakes stand in for the provider CLIs inside the real sandbox. They record how they were called
@@ -21,7 +21,7 @@ printf '%s\n' "$@" > "$lane/argv.txt"
 env > "$lane/env.txt"
 cat > "$lane/stdin.txt"
 (echo probe > "$PWD/probe.txt") 2>/dev/null && echo yes > "$lane/wrote-checkout" || echo no > "$lane/wrote-checkout"
-(echo probe > "$HOME/.claude-dev-probe") 2>/dev/null && echo yes > "$lane/wrote-home" || echo no > "$lane/wrote-home"
+(echo probe > "$HOME/.agentgate-probe") 2>/dev/null && echo yes > "$lane/wrote-home" || echo no > "$lane/wrote-home"
 [ -f "$PWD/refresh-token" ] && echo refreshed >> "$CODEX_HOME/auth.json"
 if [ -f "$PWD/limit-codex" ]; then echo "You've hit your usage limit. Try again later." >&2; exit 1; fi
 out=""; prev=""

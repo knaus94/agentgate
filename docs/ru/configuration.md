@@ -5,10 +5,10 @@
 Три слоя, каждый следующий переопределяет предыдущий по ключам:
 
 1. встроенная таблица ([internal/assets/config.json](../../internal/assets/config.json))
-2. `~/.config/claude-dev/config.json` — ваша, на этой машине
-3. `.claude-dev.json` в репозитории — проектная
+2. `~/.config/agentgate/config.json` — ваша, на этой машине
+3. `.agentgate.json` в репозитории — проектная
 
-`claude-dev config show` печатает итог слияния, `claude-dev modes` — его же таблицей.
+`agentgate config show` печатает итог слияния, `agentgate modes` — его же таблицей.
 Почему значения по умолчанию такие — в [Почему именно эти модели](model-selection.md).
 
 ## Модели
@@ -33,14 +33,14 @@
 Привязать псевдоним к другой модели:
 
 ```sh
-claude-dev config set models.sol.model gpt-6.1-sol
+agentgate config set models.sol.model gpt-6.1-sol
 ```
 
 Добавить модель и использовать её:
 
 ```sh
-claude-dev config set models.haiku '{"provider":"claude","model":"claude-haiku-5-5","pool":"claude"}'
-claude-dev config set modes.light.backend haiku:medium
+agentgate config set models.haiku '{"provider":"claude","model":"claude-haiku-5-5","pool":"claude"}'
+agentgate config set modes.light.backend haiku:medium
 ```
 
 ### Только Claude или только Codex
@@ -48,9 +48,9 @@ claude-dev config set modes.light.backend haiku:medium
 Псевдонимы — просто имена. С одним провайдером направьте каждый псевдоним на доступные модели:
 
 ```sh
-claude-dev config set models.sol   '{"provider":"claude","model":"claude-sonnet-5-5","pool":"claude"}'
-claude-dev config set models.astra '{"provider":"claude","model":"claude-opus-5-5","pool":"claude"}'
-claude-dev config set reviewers_excluded '[]'
+agentgate config set models.sol   '{"provider":"claude","model":"claude-sonnet-5-5","pool":"claude"}'
+agentgate config set models.astra '{"provider":"claude","model":"claude-opus-5-5","pool":"claude"}'
+agentgate config set reviewers_excluded '[]'
 ```
 
 Ревьюер по-прежнему должен быть другой моделью, чем писатель бэкенда, так что оставьте минимум две разные.
@@ -60,8 +60,8 @@ claude-dev config set reviewers_excluded '[]'
 Маршрут — это `<псевдоним>:<усилие>`, усилие одно из `low`, `medium`, `high`, `xhigh`, `max`:
 
 ```sh
-claude-dev config set modes.medium.backend sonnet:high
-claude-dev config set ui_designer opus:high
+agentgate config set modes.medium.backend sonnet:high
+agentgate config set ui_designer opus:high
 ```
 
 | Ключ | Для чего |
@@ -96,17 +96,17 @@ claude-dev config set ui_designer opus:high
 | `max_parallel` | 4 | процессов моделей одновременно, если в запросе нет `-N` |
 | `worker_memory_mib` | 512 | свободной памяти на воркера; лимиты cgroup учитываются |
 | `retention_days` | 14 | завершённые задачи старше этого срока удаляются |
-| `playwright_mcp` | `~/.local/share/claude-dev/playwright-mcp/…/cli.js` | браузерный инструмент для необязательной визуальной проверки |
+| `playwright_mcp` | `~/.local/share/agentgate/playwright-mcp/…/cli.js` | браузерный инструмент для необязательной визуальной проверки |
 | `worktree` | `{default: false, copy: [], setup: [], setup_timeout_s: 1800}` | изолированные задачи (`-w`): что нужно свежему worktree — см. [изоляцию](isolation.md) |
 | `worker_mcp` | нет | MCP-серверы, выдаваемые воркерам по ролям; обычно добавляются файлом-расширением — см. [расширения](extensions.md) |
-| `plans_home` | нет | синхронизируемая папка с каталогами `.claude-dev` репозиториев; задаётся командой `claude-dev plan link <папка>` |
-| `accounts` | нет | несколько подписок на провайдера; управляются через `claude-dev accounts`, только в пользовательском файле — см. [аккаунты](accounts.md) |
+| `plans_home` | нет | синхронизируемая папка с каталогами `.agentgate` репозиториев; задаётся командой `agentgate plan link <папка>` |
+| `accounts` | нет | несколько подписок на провайдера; управляются через `agentgate accounts`, только в пользовательском файле — см. [аккаунты](accounts.md) |
 
 ## Сброс
 
 ```sh
-claude-dev config unset modes.medium.backend   # вернуть встроенное значение
-rm ~/.config/claude-dev/config.json           # вернуть всё по умолчанию
+agentgate config unset modes.medium.backend   # вернуть встроенное значение
+rm ~/.config/agentgate/config.json           # вернуть всё по умолчанию
 ```
 
 Правка, которая сделала бы таблицу некорректной, отклоняется, и ничего не меняется.
@@ -114,7 +114,7 @@ rm ~/.config/claude-dev/config.json           # вернуть всё по ум�
 ## Браузерная проверка (необязательно)
 
 ```sh
-mkdir -p ~/.local/share/claude-dev/playwright-mcp && cd ~/.local/share/claude-dev/playwright-mcp
+mkdir -p ~/.local/share/agentgate/playwright-mcp && cd ~/.local/share/agentgate/playwright-mcp
 npm init -y && npm install @playwright/mcp && npx playwright install chromium
 ```
 

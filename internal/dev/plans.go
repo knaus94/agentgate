@@ -12,12 +12,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/knaus94/claude-dev/internal/config"
+	"github.com/knaus94/agentgate/internal/config"
 )
 
 // PlansDir is where saved plans live inside the repository: the plan the tool runs and a brief a person reads.
 // Whether to commit the directory is the repository's choice; the gate never counts it as part of a change.
-const PlansDir = ".claude-dev/plans"
+const PlansDir = ".agentgate/plans"
+
+// plansDir is PlansDir, or the same directory under the tool's earlier name in a repository set up before the rename.
+func plansDir() string { return filepath.Join(config.RepoDir(), "plans") }
 
 var planName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 
@@ -26,7 +29,7 @@ func PlanFile(name string) (string, error) {
 	if !planName.MatchString(name) {
 		return "", fmt.Errorf("a plan name is lowercase letters, digits and dashes: %q", name)
 	}
-	return filepath.Join(PlansDir, name, "plan.json"), nil
+	return filepath.Join(plansDir(), name, "plan.json"), nil
 }
 
 // slug derives a plan name from the request when the lead gave none.
@@ -75,7 +78,7 @@ func PlanSave(cfg *config.Config, plan *Plan, name string) (any, error) {
 
 // PlanList names the saved plans of this repository, newest first.
 func PlanList() (any, error) {
-	paths, _ := filepath.Glob(filepath.Join(PlansDir, "*", "plan.json"))
+	paths, _ := filepath.Glob(filepath.Join(plansDir(), "*", "plan.json"))
 	type item struct {
 		Name    string `json:"name"`
 		Request string `json:"request"`
@@ -95,7 +98,7 @@ func PlanList() (any, error) {
 			Updated: info.ModTime().Format("2006-01-02 15:04"), stamp: info.ModTime()})
 	}
 	sort.Slice(items, func(a, b int) bool { return items[a].stamp.After(items[b].stamp) })
-	return map[string]any{"dir": PlansDir, "plans": items}, nil
+	return map[string]any{"dir": plansDir(), "plans": items}, nil
 }
 
 // PlanShow prints the brief of a saved plan.
@@ -106,7 +109,7 @@ func PlanShow(name string) (any, error) {
 	}
 	raw, err := os.ReadFile(filepath.Join(filepath.Dir(path), "brief.md"))
 	if err != nil {
-		return nil, errors.New("no such plan; `claude-dev plan list` shows the saved ones")
+		return nil, errors.New("no such plan; `agentgate plan list` shows the saved ones")
 	}
 	return string(raw), nil
 }
@@ -125,7 +128,7 @@ func renderBrief(name string, resolved *Resolved) string {
 	var out strings.Builder
 	line := func(format string, values ...any) { fmt.Fprintf(&out, format+"\n", values...) }
 	line("# %s\n", name)
-	line("> Written by `claude-dev plan save`; edit `plan.json` and save again rather than this file.\n")
+	line("> Written by `agentgate plan save`; edit `plan.json` and save again rather than this file.\n")
 	if plan.Request != "" {
 		line("**Request:** %s\n", strings.TrimSpace(plan.Request))
 	}
@@ -212,7 +215,7 @@ func renderBrief(name string, resolved *Resolved) string {
 		}
 		line("")
 	}
-	line("---\n\nRun it: `claude-dev launch --plan %s` (inside `/dev`, any session of this checkout).", name)
+	line("---\n\nRun it: `agentgate launch --plan %s` (inside `/dev`, any session of this checkout).", name)
 	return out.String()
 }
 
@@ -228,7 +231,7 @@ func architectureLane(plan *Plan) string {
 	return ""
 }
 
-// PlanLink keeps this repository's .claude-dev directory (plans, personal settings, helper scripts) inside a
+// PlanLink keeps this repository's .agentgate directory (plans, personal settings, helper scripts) inside a
 // synced folder and leaves a link in its place, so the same plans are there on every computer.
 // home is the synced folder; the repository gets a subdirectory named after itself.
 func PlanLink(cfg *config.Config, home string) (any, error) {
@@ -236,14 +239,14 @@ func PlanLink(cfg *config.Config, home string) (any, error) {
 		home = cfg.PlansHome
 	}
 	if home == "" {
-		return nil, errors.New("usage: claude-dev plan link <synced directory>, e.g. ~/iCloud/claude-dev (remembered for other repositories)")
+		return nil, errors.New("usage: agentgate plan link <synced directory>, e.g. ~/iCloud/agentgate (remembered for other repositories)")
 	}
 	top, err := git("rev-parse", "--show-toplevel")
 	if err != nil {
 		return nil, errors.New("run inside a git repository")
 	}
 	top = strings.TrimSpace(top)
-	local := filepath.Join(top, ".claude-dev")
+	local := filepath.Join(top, config.RepoDir())
 	target := filepath.Join(config.ExpandHome(home), filepath.Base(top))
 	info, localErr := os.Lstat(local)
 	_, targetErr := os.Stat(target)
@@ -251,7 +254,7 @@ func PlanLink(cfg *config.Config, home string) (any, error) {
 	case localErr == nil && info.Mode()&os.ModeSymlink != 0:
 		current, _ := os.Readlink(local)
 		if current != target {
-			return nil, fmt.Errorf(".claude-dev already links to %s; remove that link first to move it", current)
+			return nil, fmt.Errorf(".agentgate already links to %s; remove that link first to move it", current)
 		}
 	case localErr == nil && targetErr == nil:
 		return nil, fmt.Errorf("both %s and %s hold data; merge them by hand, remove one, then link again", local, target)

@@ -5,10 +5,10 @@
 Three layers, later ones override earlier ones key by key:
 
 1. the built-in table ([internal/assets/config.json](../internal/assets/config.json))
-2. `~/.config/claude-dev/config.json` — yours, on this machine
-3. `.claude-dev.json` in the repository — the project's
+2. `~/.config/agentgate/config.json` — yours, on this machine
+3. `.agentgate.json` in the repository — the project's
 
-`claude-dev config show` prints the merged result. `claude-dev modes` prints it as a table.
+`agentgate config show` prints the merged result. `agentgate modes` prints it as a table.
 [Why these models](model-selection.md) explains the defaults.
 
 ## Models
@@ -33,14 +33,14 @@ Three layers, later ones override earlier ones key by key:
 Point an alias at another model:
 
 ```sh
-claude-dev config set models.sol.model gpt-6.1-sol
+agentgate config set models.sol.model gpt-6.1-sol
 ```
 
 Add a model and use it:
 
 ```sh
-claude-dev config set models.haiku '{"provider":"claude","model":"claude-haiku-5-5","pool":"claude"}'
-claude-dev config set modes.light.backend haiku:medium
+agentgate config set models.haiku '{"provider":"claude","model":"claude-haiku-5-5","pool":"claude"}'
+agentgate config set modes.light.backend haiku:medium
 ```
 
 ### Only Claude, or only Codex
@@ -48,9 +48,9 @@ claude-dev config set modes.light.backend haiku:medium
 Aliases are just names. With a single provider, point every alias at models you have:
 
 ```sh
-claude-dev config set models.sol   '{"provider":"claude","model":"claude-sonnet-5-5","pool":"claude"}'
-claude-dev config set models.astra '{"provider":"claude","model":"claude-opus-5-5","pool":"claude"}'
-claude-dev config set reviewers_excluded '[]'
+agentgate config set models.sol   '{"provider":"claude","model":"claude-sonnet-5-5","pool":"claude"}'
+agentgate config set models.astra '{"provider":"claude","model":"claude-opus-5-5","pool":"claude"}'
+agentgate config set reviewers_excluded '[]'
 ```
 
 Reviewers must still be a different model from the backend writer, so keep at least two distinct models.
@@ -60,8 +60,8 @@ Reviewers must still be a different model from the backend writer, so keep at le
 A route is `<alias>:<effort>`, effort one of `low`, `medium`, `high`, `xhigh`, `max`:
 
 ```sh
-claude-dev config set modes.medium.backend sonnet:high
-claude-dev config set ui_designer opus:high
+agentgate config set modes.medium.backend sonnet:high
+agentgate config set ui_designer opus:high
 ```
 
 | Key | Used for |
@@ -96,17 +96,17 @@ real-repository tasks).
 | `max_parallel` | 4 | model processes at once when the request has no `-N` |
 | `worker_memory_mib` | 512 | free memory required per worker; cgroup limits are honoured |
 | `retention_days` | 14 | finished tasks older than this are removed |
-| `playwright_mcp` | `~/.local/share/claude-dev/playwright-mcp/…/cli.js` | browser tooling for optional visual verification |
+| `playwright_mcp` | `~/.local/share/agentgate/playwright-mcp/…/cli.js` | browser tooling for optional visual verification |
 | `worktree` | `{default: false, copy: [], setup: [], setup_timeout_s: 1800}` | isolated tasks (`-w`): what a fresh worktree needs — see [isolation](isolation.md) |
 | `worker_mcp` | none | MCP servers handed to workers by role; usually added by an extension file — see [extensions](extensions.md) |
-| `plans_home` | none | synced folder holding each repository's `.claude-dev`; set by `claude-dev plan link <folder>` |
-| `accounts` | none | several subscriptions per provider; managed with `claude-dev accounts`, user file only — see [accounts](accounts.md) |
+| `plans_home` | none | synced folder holding each repository's `.agentgate`; set by `agentgate plan link <folder>` |
+| `accounts` | none | several subscriptions per provider; managed with `agentgate accounts`, user file only — see [accounts](accounts.md) |
 
 ## Reset
 
 ```sh
-claude-dev config unset modes.medium.backend   # back to the built-in value
-rm ~/.config/claude-dev/config.json           # back to defaults entirely
+agentgate config unset modes.medium.backend   # back to the built-in value
+rm ~/.config/agentgate/config.json           # back to defaults entirely
 ```
 
 An edit that would make the table invalid is rejected and nothing changes.
@@ -114,7 +114,7 @@ An edit that would make the table invalid is rejected and nothing changes.
 ## Browser verification (optional)
 
 ```sh
-mkdir -p ~/.local/share/claude-dev/playwright-mcp && cd ~/.local/share/claude-dev/playwright-mcp
+mkdir -p ~/.local/share/agentgate/playwright-mcp && cd ~/.local/share/agentgate/playwright-mcp
 npm init -y && npm install @playwright/mcp && npx playwright install chromium
 ```
 

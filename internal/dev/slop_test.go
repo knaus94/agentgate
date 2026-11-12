@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/knaus94/claude-dev/internal/provider"
+	"github.com/knaus94/agentgate/internal/provider"
 )
 
 func state(text string) *FileState {

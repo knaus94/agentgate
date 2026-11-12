@@ -32,7 +32,7 @@ Named risks: `authorization`, `security`, `money`, `data-integrity`, `concurrenc
 `public-contract`. A risk is named only when the change really touches it. "This module has many callers" is
 not a risk; it is ordinary work, and ordinary work is medium.
 
-`claude-dev route --file plan.json` prints the decision with its reasons before anything starts.
+`agentgate route --file plan.json` prints the decision with its reasons before anything starts.
 
 ## What each mode runs
 
@@ -91,9 +91,9 @@ means long turns, tight elsewhere so a pass cannot quietly take half an hour.
 ## Changing a mode
 
 ```sh
-claude-dev config set modes.medium.review '[{"axes":["correctness","architecture"],"route":"fable:high"}]'
-claude-dev config set modes.heavy.blocking '["P0","P1"]'
-claude-dev modes
+agentgate config set modes.medium.review '[{"axes":["correctness","architecture"],"route":"fable:high"}]'
+agentgate config set modes.heavy.blocking '["P0","P1"]'
+agentgate modes
 ```
 
 Leave `review` empty (`[]`) and the lead reviews the diff itself, as in light.

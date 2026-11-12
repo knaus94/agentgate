@@ -1,14 +1,15 @@
 #!/bin/sh
-# Install claude-dev from the latest GitHub release.
-#   CLAUDE_DEV_VERSION=v0.1.0   pin a version
-#   CLAUDE_DEV_BIN=/some/dir    install directory (default ~/.local/bin)
-#   CLAUDE_DEV_BASE_URL=...     release mirror (default https://github.com/knaus94/claude-dev/releases)
+# Install agentgate from the latest GitHub release.
+#   AGENTGATE_VERSION=v0.1.0   pin a version
+#   AGENTGATE_BIN=/some/dir    install directory (default ~/.local/bin)
+#   AGENTGATE_LEAD=claude|codex|both   which sessions lead (asked when a terminal is attached)
+#   AGENTGATE_BASE_URL=...     release mirror (default https://github.com/knaus94/agentgate/releases)
 set -eu
 
-REPO="knaus94/claude-dev"
-BIN="${CLAUDE_DEV_BIN:-$HOME/.local/bin}"
+REPO="knaus94/agentgate"
+BIN="${AGENTGATE_BIN:-$HOME/.local/bin}"
 
-fail() { echo "claude-dev install: $*" >&2; exit 1; }
+fail() { echo "agentgate install: $*" >&2; exit 1; }
 
 [ "$(uname -s)" = "Linux" ] || fail "only Linux is supported (the sandbox needs bubblewrap)"
 case "$(uname -m)" in
@@ -20,34 +21,56 @@ for tool in curl tar sha256sum; do
   command -v "$tool" >/dev/null 2>&1 || fail "$tool is required"
 done
 
-RELEASES="${CLAUDE_DEV_BASE_URL:-https://github.com/$REPO/releases}"
-VERSION="${CLAUDE_DEV_VERSION:-}"
+RELEASES="${AGENTGATE_BASE_URL:-https://github.com/$REPO/releases}"
+VERSION="${AGENTGATE_VERSION:-}"
 if [ -z "$VERSION" ]; then
   VERSION=$(curl -fsSL -o /dev/null -w '%{url_effective}' "$RELEASES/latest" | sed 's#.*/tag/##')
   [ -n "$VERSION" ] || fail "could not find the latest release"
 fi
 
-ASSET="claude-dev_linux_$ARCH.tar.gz"
+ASSET="agentgate_linux_$ARCH.tar.gz"
 BASE="$RELEASES/download/$VERSION"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-echo "Downloading claude-dev $VERSION ($ARCH)"
+echo "Downloading agentgate $VERSION ($ARCH)"
 curl -fsSL -o "$TMP/$ASSET" "$BASE/$ASSET" || fail "download failed: $BASE/$ASSET"
 curl -fsSL -o "$TMP/checksums.txt" "$BASE/checksums.txt" || fail "download failed: checksums.txt"
 (cd "$TMP" && grep " $ASSET\$" checksums.txt | sha256sum -c - >/dev/null) || fail "checksum mismatch; nothing was installed"
 
-tar -xzf "$TMP/$ASSET" -C "$TMP" claude-dev
+tar -xzf "$TMP/$ASSET" -C "$TMP" agentgate
 mkdir -p "$BIN"
-install -m 0755 "$TMP/claude-dev" "$BIN/claude-dev"
-echo "Installed $BIN/claude-dev"
+install -m 0755 "$TMP/agentgate" "$BIN/agentgate"
+echo "Installed $BIN/agentgate"
 
 case ":$PATH:" in
   *":$BIN:"*) ;;
   *) echo "Note: $BIN is not in PATH. Add it, for example: export PATH=\"$BIN:\$PATH\"" ;;
 esac
 
-"$BIN/claude-dev" install
+# Which sessions lead the work: AGENTGATE_LEAD=claude|codex|both, or a question when a terminal is attached.
+LEAD="${AGENTGATE_LEAD:-}"
+if [ -z "$LEAD" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
+  {
+    echo
+    echo "Which sessions lead the work?"
+    echo "  1) Claude Code leads; Claude and Codex models work   (default)"
+    echo "  2) Codex only: Codex leads, Codex models work"
+    echo "  3) both: /dev in Claude Code and \$dev in Codex"
+    printf "Choose 1, 2 or 3: "
+  } > /dev/tty
+  read -r answer < /dev/tty || answer=""
+  case "$answer" in
+    2) LEAD=codex ;;
+    3) LEAD=both ;;
+    *) LEAD=claude ;;
+  esac
+fi
+if [ -n "$LEAD" ]; then
+  "$BIN/agentgate" install --lead "$LEAD"
+else
+  "$BIN/agentgate" install
+fi
 echo
-"$BIN/claude-dev" doctor >/dev/null 2>&1 && echo "Environment looks good. Open a new Claude Code session and type: /dev help" \
-  || echo "Run '$BIN/claude-dev doctor' to see what is missing (bwrap, claude, codex)."
+"$BIN/agentgate" doctor >/dev/null 2>&1 && echo "Environment looks good. Start a new session and type /dev help (Claude Code) or \$dev help (Codex)." \
+  || echo "Run '$BIN/agentgate doctor' to see what is missing (bwrap, claude, codex)."

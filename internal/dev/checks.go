@@ -12,8 +12,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/knaus94/claude-dev/internal/ops"
-	"github.com/knaus94/claude-dev/internal/provider"
+	"github.com/knaus94/agentgate/internal/ops"
+	"github.com/knaus94/agentgate/internal/provider"
 )
 
 func checkID(argv []string) string { return digest(argv)[:16] }
@@ -178,7 +178,7 @@ func (g *Gate) execCheck(check *Check, label string) (int, string, error) {
 	}
 	code := cmd.ProcessState.ExitCode()
 	if errors.Is(err, ops.ErrTimeout) || code < 0 {
-		fmt.Fprintf(output, "\n[claude-dev] %v\n", err)
+		fmt.Fprintf(output, "\n[agentgate] %v\n", err)
 		code = 124
 	}
 	return code, log, nil

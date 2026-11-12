@@ -1,0 +1,150 @@
+{
+  "about": "Codex only: every worker is an OpenAI model run through the Codex CLI. Astra creates, Sol verifies, Terra reads.",
+  "models": {
+    "opus": null,
+    "sonnet": null,
+    "fable": null,
+    "terra": {
+      "provider": "codex",
+      "model": "gpt-6.1-terra",
+      "pool": "codex"
+    }
+  },
+  "fallbacks": {
+    "opus": null,
+    "sonnet": null,
+    "fable": null,
+    "astra": [
+      "sol",
+      "terra"
+    ],
+    "sol": [
+      "astra",
+      "terra"
+    ],
+    "terra": [
+      "sol",
+      "astra"
+    ]
+  },
+  "reviewers_excluded": [],
+  "consultant": "sol:medium",
+  "ui_designer": "astra:medium",
+  "visual_reviewer": "terra:high",
+  "modes": {
+    "light": {
+      "scout": "",
+      "architecture": [],
+      "critique": false,
+      "backend": "sol:medium",
+      "frontend": "sol:medium",
+      "review": [],
+      "blocking": [
+        "P0",
+        "P1"
+      ],
+      "escalate_to": "high"
+    },
+    "medium": {
+      "scout": "terra:medium",
+      "architecture": [],
+      "critique": false,
+      "backend": "astra:medium",
+      "frontend": "astra:medium",
+      "review": [
+        {
+          "axes": [
+            "architecture",
+            "simplicity"
+          ],
+          "route": "sol:high"
+        },
+        {
+          "axes": [
+            "correctness"
+          ],
+          "route": "sol:high"
+        }
+      ],
+      "blocking": [
+        "P0",
+        "P1"
+      ],
+      "escalate_to": "high"
+    },
+    "heavy": {
+      "scout": "terra:medium",
+      "architecture": [
+        "astra:high",
+        "sol:xhigh"
+      ],
+      "critique": false,
+      "backend": "astra:high",
+      "frontend": "astra:high",
+      "review": [
+        {
+          "axes": [
+            "architecture",
+            "simplicity"
+          ],
+          "route": "sol:xhigh"
+        },
+        {
+          "axes": [
+            "correctness"
+          ],
+          "route": "sol:xhigh"
+        }
+      ],
+      "blocking": [
+        "P0",
+        "P1",
+        "P2"
+      ],
+      "escalate_to": "max"
+    },
+    "ultra": {
+      "scout": "terra:high",
+      "architecture": [
+        "astra:max",
+        "sol:max"
+      ],
+      "critique": true,
+      "backend": "astra:high",
+      "frontend": "astra:high",
+      "review": [
+        {
+          "axes": [
+            "architecture",
+            "simplicity"
+          ],
+          "route": "sol:xhigh"
+        },
+        {
+          "axes": [
+            "correctness"
+          ],
+          "route": "sol:max"
+        },
+        {
+          "axes": [
+            "correctness"
+          ],
+          "route": "terra:max"
+        },
+        {
+          "axes": [
+            "security"
+          ],
+          "route": "sol:xhigh"
+        }
+      ],
+      "blocking": [
+        "P0",
+        "P1",
+        "P2"
+      ],
+      "escalate_to": "max"
+    }
+  }
+}

@@ -3,23 +3,24 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/knaus94/claude-dev/internal/assets"
+	"github.com/knaus94/agentgate/internal/assets"
 )
 
 var binary string
 
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "claude-dev-bin-")
+	dir, err := os.MkdirTemp("", "agentgate-bin-")
 	if err != nil {
 		panic(err)
 	}
-	binary = filepath.Join(dir, "claude-dev")
+	binary = filepath.Join(dir, "agentgate")
 	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
 		panic(string(out))
 	}
@@ -86,9 +87,11 @@ func newSandbox(t *testing.T) *sandbox {
 			t.Fatalf("git %v: %s", args, out)
 		}
 	}
-	env := []string{"PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME"),
+	// The tool installs into the home directories of both CLIs; the test has its own.
+	env := []string{"PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH"), "HOME=" + filepath.Join(root, "home"),
+		"CODEX_HOME=" + filepath.Join(root, "home", ".codex"),
 		"XDG_STATE_HOME=" + filepath.Join(root, "state"), "XDG_CONFIG_HOME=" + filepath.Join(root, "config"),
-		"CLAUDE_CONFIG_DIR=" + filepath.Join(root, "claude"), "CLAUDE_DEV_SESSION=cli-session"}
+		"CLAUDE_CONFIG_DIR=" + filepath.Join(root, "claude"), "AGENTGATE_SESSION=cli-session"}
 	return &sandbox{t: t, repo: repo, env: env}
 }
 
@@ -134,7 +137,7 @@ func TestCommandLineBasics(t *testing.T) {
 	if _, stderr, code := s.run("", "frobnicate"); code != 1 || !strings.Contains(stderr, "unknown command") {
 		t.Fatalf("an unknown command fails with a message: %s", stderr)
 	}
-	if guide, _, _ := s.run("", "guide"); guide != assets.Guide || !strings.Contains(guide, "claude-dev reference") {
+	if guide, _, _ := s.run("", "guide"); guide != assets.Guide || !strings.Contains(guide, "agentgate reference") {
 		t.Fatal("guide prints the lead guide")
 	}
 	parsed := s.ok("-h fix the totals; rm -rf /", "parse", "--file", "-")
@@ -182,7 +185,7 @@ func TestReferenceDocumentsEveryCommand(t *testing.T) {
 
 func TestConfigCommands(t *testing.T) {
 	s := newSandbox(t)
-	if path, _, _ := s.run("", "config", "path"); !strings.HasSuffix(strings.TrimSpace(path), "claude-dev/config.json") {
+	if path, _, _ := s.run("", "config", "path"); !strings.HasSuffix(strings.TrimSpace(path), "agentgate/config.json") {
 		t.Fatalf("config path: %s", path)
 	}
 	s.ok("", "config", "init")
@@ -273,5 +276,45 @@ func TestWholeTaskThroughTheCommandLine(t *testing.T) {
 	removed := s.ok("", "install", "--uninstall")
 	if len(removed["changed"].([]any)) != 2 {
 		t.Fatalf("uninstall removes the command and the hook: %v", removed)
+	}
+}
+
+func TestCodexLeadFromTheCommandLine(t *testing.T) {
+	s := newSandbox(t)
+	codex := &sandbox{t: t, repo: s.repo, env: append(append([]string{}, s.env...), "AGENTGATE_SESSION=", "CODEX_THREAD_ID=thread-1", "CODEX_TOOL_CALL_ID=call-1")}
+	guide, _, _ := codex.run("", "guide")
+	plain, _, _ := s.run("", "guide")
+	if !strings.Contains(guide, "## Leading from Codex") || strings.Contains(plain, "## Leading from Codex") {
+		t.Fatal("a Codex lead gets its own part of the guide, a Claude lead does not")
+	}
+	installed := codex.ok("", "install", "--lead", "codex")
+	if fmt.Sprint(installed["leads"]) != "[codex]" {
+		t.Fatalf("install --lead codex: %v", installed)
+	}
+	if table, _, _ := codex.run("", "modes"); !strings.Contains(table, "backend   astra:medium") || strings.Contains(table, "opus") {
+		t.Fatalf("a codex-only install uses the codex profile:\n%s", table)
+	}
+	profiles := codex.ok("", "config", "profiles")
+	if profiles["active"] != "codex" {
+		t.Fatalf("the active profile is reported: %v", profiles)
+	}
+	// Inside Codex's own sandbox the tool says what to do instead of failing somewhere deep.
+	locked := filepath.Join(t.TempDir(), "locked")
+	if err := os.MkdirAll(locked, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	// Codex sets its sandbox variables on every command, so they prove nothing; an unwritable state does.
+	if _, _, code := (&sandbox{t: t, repo: s.repo, env: append(append([]string{}, codex.env...), "CODEX_SANDBOX_NETWORK_DISABLED=1")}).run("", "config", "show"); code != 0 {
+		t.Fatal("the sandbox variable alone must not stop a command that a rule let out")
+	}
+	boxed := &sandbox{t: t, repo: s.repo, env: append(append([]string{}, codex.env...), "XDG_STATE_HOME="+filepath.Join(locked, "state"))}
+	if _, stderr, code := boxed.run("{}", "launch", "--file", "-"); code != 1 || !strings.Contains(stderr, "one plain command") {
+		t.Fatalf("a sandboxed call is refused with the way out: %s", stderr)
+	}
+	if out, _, code := boxed.run("", "version"); code != 0 || out == "" {
+		t.Fatal("reading commands still work inside the sandbox")
+	}
+	if _, stderr, code := s.run("", "install", "--lead", "gemini"); code != 1 || !strings.Contains(stderr, "claude, codex or both") {
+		t.Fatalf("an unknown lead is refused: %s", stderr)
 	}
 }
