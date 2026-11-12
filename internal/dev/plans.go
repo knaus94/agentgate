@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -147,23 +148,59 @@ func renderBrief(name string, resolved *Resolved) string {
 		line("**Assessment:** %s. %s\n", strings.Join(facts, "; "), strings.TrimSpace(assessment.Evidence))
 	}
 	line("## Brief\n\n%s\n", strings.TrimSpace(plan.Brief))
-	line("## Streams\n")
-	for _, stream := range plan.Streams {
-		title := fmt.Sprintf("### %s — %s, %s", stream.Name, stream.Domain, resolved.WriterRoute(stream, 0))
-		switch {
-		case stream.Done:
-			title = fmt.Sprintf("### %s — %s, already done", stream.Name, stream.Domain)
-		case len(stream.After) > 0:
-			title += ", after " + strings.Join(stream.After, ", ")
+	streams := func(resolved *Resolved, list []Stream, heading string) {
+		for _, stream := range list {
+			title := fmt.Sprintf("%s %s — %s, %s", heading, stream.Name, stream.Domain, resolved.WriterRoute(stream, 0))
+			switch {
+			case stream.Done:
+				title = fmt.Sprintf("%s %s — %s, already done", heading, stream.Name, stream.Domain)
+			case len(stream.After) > 0:
+				title += ", after " + strings.Join(stream.After, ", ")
+			}
+			line("%s\n", title)
+			if strings.TrimSpace(stream.Brief) != "" {
+				line("%s\n", strings.TrimSpace(stream.Brief))
+			}
+			for _, file := range stream.Files {
+				line("- `%s`", file)
+			}
+			line("")
 		}
-		line("%s\n", title)
-		if strings.TrimSpace(stream.Brief) != "" {
-			line("%s\n", strings.TrimSpace(stream.Brief))
+	}
+	if plan.staged() {
+		line("## Requirements\n")
+		for _, requirement := range plan.Requirements {
+			var where []string
+			for _, stage := range plan.Stages {
+				if slices.Contains(stage.Covers, requirement.ID) {
+					where = append(where, stage.Name)
+				}
+			}
+			line("- **%s** (%s): %s", requirement.ID, strings.Join(where, ", "), requirement.Text)
 		}
-		for _, file := range stream.Files {
-			line("- `%s`", file)
+		line("\n## Stages\n\nDone and reviewed one after another; a stage starts when the one before it is accepted.\n")
+		for index, stage := range plan.Stages {
+			line("### %d. %s — %s\n\n%s\n", index+1, stage.Name, resolved.Stages[index].Mode, strings.TrimSpace(stage.Goal))
+			for _, item := range stage.Acceptance {
+				line("- accepted when: %s", item)
+			}
+			if len(stage.Acceptance) > 0 {
+				line("")
+			}
+			streams(resolved.Stages[index], stage.Streams, "####")
+			for _, check := range stage.Checks {
+				line("- check: `%s`", strings.Join(check.Argv, " "))
+			}
+			if len(stage.Checks) > 0 {
+				line("")
+			}
 		}
-		line("")
+		if integrationNeeded(resolved.Mode, len(plan.Stages)) {
+			line("After the last stage the whole change gets one more review, for the seams between the stages.\n")
+		}
+	} else {
+		line("## Streams\n")
+		streams(resolved, plan.Streams, "###")
 	}
 	if len(plan.Checks) > 0 {
 		line("## Checks\n")

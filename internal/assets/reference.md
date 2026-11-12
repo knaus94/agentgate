@@ -37,7 +37,10 @@ Setup: `doctor`, `install [--zed] [--uninstall]`, `update [--check]`, `modes`,
 
 ## Request
 
-`[-N] [-l|-m|-h|-x] [-w] [plan|research|fix|review|clean|verify|status|stop|help] [--fix] [--grill|--no-grill] [--preview] <task>`
+`[-N] [-l|-m|-h|-x] [-w] [--staged|--single] [--step] [plan|research|fix|review|clean|verify|status|stop|help] [--fix] [--grill|--no-grill] [--preview] <task>`
+
+`--staged` demands a plan in stages; `--single` allows one pass past the size limits; `--step` holds the task
+after every accepted stage until the user says to go on.
 
 `-w` (`--worktree`) isolates a writing task in its own git worktree; the checkout changes only at `land`.
 
@@ -70,6 +73,32 @@ Setup: `doctor`, `install [--zed] [--uninstall]`, `update [--check]`, `modes`,
   "visual": {"enabled": false, "reason": "User chose code-based verification"},
   "architecture": {"id": "<receipt id>", "base": "fable", "acceptance": "Your amendments to that design",
                    "blockers": {"astra/b1": "Resolved by ..."}}
+}
+```
+
+A staged plan has no top-level `streams`: it lists `requirements` and `stages`, and every requirement is
+covered by a stage. Each stage has `name`, `goal`, `covers`, `streams`, and optionally `acceptance`, `checks`
+(added to the plan's) and its own `assessment`.
+
+```json
+{
+  "request": "<the raw /dev arguments>",
+  "assessment": {"size": "complex", "evidence": "..."},
+  "brief": "What the whole task is, its invariants and non-goals",
+  "requirements": [
+    {"id": "R1", "text": "Totals are stored as integer cents"},
+    {"id": "R2", "text": "The invoice page shows the new totals"}
+  ],
+  "stages": [
+    {"name": "schema", "goal": "Store totals as integer cents", "covers": ["R1"],
+     "acceptance": ["Existing invoices read back unchanged"],
+     "assessment": {"size": "ordinary", "risks": ["migration"], "irreversible": true, "evidence": "..."},
+     "streams": [{"name": "db", "domain": "backend", "files": ["prisma/schema.prisma"]}],
+     "checks": [["yarn", "nx", "test", "billing"]]},
+    {"name": "page", "goal": "Show the new totals", "covers": ["R2"],
+     "streams": [{"name": "web", "domain": "frontend", "files": ["app/Invoice.tsx"]}]}
+  ],
+  "checks": [["yarn", "nx", "typecheck", "billing"]]
 }
 ```
 

@@ -77,21 +77,24 @@ type Accepted struct {
 }
 
 type Plan struct {
-	Request          string      `json:"request"`
-	Assessment       *Assessment `json:"assessment,omitempty"`
-	Brief            string      `json:"brief"`
-	Streams          []Stream    `json:"streams"`
-	Context          []string    `json:"context,omitempty"`
-	Checks           []Check     `json:"checks,omitempty"`
-	UI               *UI         `json:"ui,omitempty"`
-	Visual           *Visual     `json:"visual,omitempty"`
-	Architecture     *Accepted   `json:"architecture,omitempty"`
-	Update           string      `json:"update,omitempty"`   // what changed, for a continuation of an unfinished task
-	BaseRef          string      `json:"base_ref,omitempty"` // review and clean: the commit the diff starts from
-	WriterTimeoutS   int         `json:"writer_timeout_s,omitempty"`
-	ReviewerTimeoutS int         `json:"reviewer_timeout_s,omitempty"`
-	Revise           string      `json:"revise,omitempty"`          // architecture only: receipt to revise
-	ReviseBlockers   []string    `json:"revise_blockers,omitempty"` // architecture only: blockers the lead verified
+	Request          string        `json:"request"`
+	Requirements     []Requirement `json:"requirements,omitempty"` // staged plans: what the specification asks for
+	Stages           []Stage       `json:"stages,omitempty"`       // staged plans: the parts, done and reviewed one after another
+	View             bool          `json:"stage_view,omitempty"`   // set by the tool: a stage of a staged plan, seen as a plan of its own
+	Assessment       *Assessment   `json:"assessment,omitempty"`
+	Brief            string        `json:"brief"`
+	Streams          []Stream      `json:"streams"`
+	Context          []string      `json:"context,omitempty"`
+	Checks           []Check       `json:"checks,omitempty"`
+	UI               *UI           `json:"ui,omitempty"`
+	Visual           *Visual       `json:"visual,omitempty"`
+	Architecture     *Accepted     `json:"architecture,omitempty"`
+	Update           string        `json:"update,omitempty"`   // what changed, for a continuation of an unfinished task
+	BaseRef          string        `json:"base_ref,omitempty"` // review and clean: the commit the diff starts from
+	WriterTimeoutS   int           `json:"writer_timeout_s,omitempty"`
+	ReviewerTimeoutS int           `json:"reviewer_timeout_s,omitempty"`
+	Revise           string        `json:"revise,omitempty"`          // architecture only: receipt to revise
+	ReviseBlockers   []string      `json:"revise_blockers,omitempty"` // architecture only: blockers the lead verified
 }
 
 // Assessment is what the lead found in the code. The mode is computed from these facts, not chosen by taste.
@@ -151,7 +154,7 @@ const (
 // Files is every path owned by the plan.
 func (p *Plan) Files() []string {
 	var files []string
-	for _, stream := range p.Streams {
+	for _, stream := range p.allStreams() {
 		files = append(files, stream.Files...)
 	}
 	sort.Strings(files)
@@ -198,6 +201,7 @@ func timeoutSeconds(values ...int) (int, error) {
 
 // Resolved is a validated plan with its request and mode.
 type Resolved struct {
+	Stages   []*Resolved // staged plans: each stage, resolved as a plan of its own
 	Plan     *Plan
 	Request  Request
 	Mode     string
@@ -219,6 +223,12 @@ func Resolve(cfg *config.Config, plan *Plan) (*Resolved, error) {
 	resolved := &Resolved{Plan: plan, Request: request, Mode: request.Mode, Config: cfg}
 	if strings.TrimSpace(plan.Brief) == "" {
 		return nil, errors.New("brief is required: the accepted requirements, invariants and acceptance criteria")
+	}
+	if plan.staged() {
+		return resolveStaged(cfg, plan, request)
+	}
+	if request.Staged && !plan.View {
+		return nil, errors.New("--staged asks for the work in stages: give stages [{name, goal, covers, streams}] and requirements")
 	}
 	if len(plan.Streams) == 0 {
 		return nil, errors.New("streams are required: at least one named stream with its files")
@@ -262,6 +272,15 @@ func Resolve(cfg *config.Config, plan *Plan) (*Resolved, error) {
 	}
 	if err := resolved.decideMode(); err != nil {
 		return nil, err
+	}
+	// A change this large is not reviewed well in one piece: past the limits it has to come in stages.
+	if limits := cfg.Staging; !plan.View && !request.Single && request.Writes() && !request.ReviewFirst() {
+		files, streams := len(plan.Files()), len(plan.Streams)
+		if (limits.MaxFiles > 0 && files > limits.MaxFiles) || (limits.MaxStreams > 0 && streams > limits.MaxStreams) {
+			return nil, fmt.Errorf("this plan changes %d files in %d streams, more than one pass reviews well (limits: %d files, %d streams). "+
+				"Split it into stages [{name, goal, covers, streams}] with requirements, or pass --single when it really is one mechanical change",
+				files, streams, limits.MaxFiles, limits.MaxStreams)
+		}
 	}
 	ceiling := resolved.ModeConfig().EscalateTo
 	for _, stream := range plan.Streams {

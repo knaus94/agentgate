@@ -336,6 +336,11 @@ func (t *taskView) describe(cfg *config.Config) {
 		if lane.Kind == "" {
 			continue // an earlier review round: its lanes were superseded
 		}
+		// A staged task shows the workers of its present stage; those of accepted stages are in the archive.
+		if t.Gate != nil && t.Gate.Epic != nil && lane.Kind == "writer" && !lane.Live &&
+			!slices.ContainsFunc(t.Gate.Writers, func(writer *Writer) bool { return writer.Dir == lane.Dir }) {
+			continue
+		}
 		if t.Gate != nil {
 			for _, writer := range t.Gate.Writers {
 				if writer.Dir == lane.Dir && !lane.Live {
@@ -794,6 +799,27 @@ func (m *panel) frame() []string {
 			lines = append(lines, " "+p.yellow(line))
 		}
 	}
+	if gate != nil && gate.Epic != nil {
+		// The parts of a staged task: accepted, the present one, still ahead.
+		lines = append(lines, "", p.bold(" STAGES")+p.dim(fmt.Sprintf("  %d of %d accepted", len(gate.StageRecords), len(gate.Epic.Stages))))
+		for index, stage := range gate.Epic.Stages {
+			mark, mode, note := p.dim("○"), "", oneLine(stage.Goal)
+			switch {
+			case index < len(gate.StageRecords):
+				record := gate.StageRecords[index]
+				mark, mode, note = p.green("✔"), record.Mode, oneLine(record.Summary)
+				if record.Commit != "" {
+					note = record.Commit + " " + note
+				}
+			case index == gate.StageIndex && !gate.Integration:
+				mark, mode = p.cyan("▶"), gate.Mode
+			}
+			lines = append(lines, "   "+mark+" "+fit(fmt.Sprintf("%d. %s", index+1, stage.Name), 28)+p.dim(fit(mode, 8))+fit(note, max(10, width-42)))
+		}
+		if gate.Integration {
+			lines = append(lines, "   "+p.cyan("▶")+" "+fit("the whole change", 28)+p.dim(fit(gate.Mode, 8))+"review of the seams between the stages")
+		}
+	}
 	if len(task.Stages) > 0 {
 		var parts []string
 		for _, stage := range task.Stages {
@@ -811,7 +837,7 @@ func (m *panel) frame() []string {
 		for index, line := range wrap(strings.Join(parts, " › "), width-12) {
 			label := "          "
 			if index == 0 {
-				label = " stages   "
+				label = " steps    "
 			}
 			lines = append(lines, p.dim(label)+line)
 		}

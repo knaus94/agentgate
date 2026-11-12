@@ -3,6 +3,11 @@
   "max_parallel": 4,
   "worker_memory_mib": 512,
   "retention_days": 14,
+  "staging": {
+    "max_files": 25,
+    "max_streams": 5,
+    "isolate": "auto"
+  },
   "worktree": {
     "default": false,
     "copy": [],

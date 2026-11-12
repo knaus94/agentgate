@@ -86,6 +86,13 @@ func (w WorkerMCP) RolesOrDefault() []string {
 	return w.Roles
 }
 
+// Staging configures when work has to be split into stages.
+type Staging struct {
+	MaxFiles   int    `json:"max_files"`   // a single-pass plan may change this many files; 0: no limit
+	MaxStreams int    `json:"max_streams"` // and have this many streams; 0: no limit
+	Isolate    string `json:"isolate"`     // staged tasks in their own worktree: auto (when the repository prepares one), always, never
+}
+
 // Worktree configures isolated tasks (`/dev -w`): what a fresh worktree needs before code in it can be checked.
 type Worktree struct {
 	Default       bool       `json:"default"`         // isolate every writing task, without the flag
@@ -112,6 +119,7 @@ type Config struct {
 	Profile           string               `json:"profile"` // a named alternative mode table laid under the user's settings, e.g. "codex"
 	Leads             []string             `json:"leads"`   // which CLIs the lead command is installed into: claude, codex
 	Worktree          Worktree             `json:"worktree"`
+	Staging           Staging              `json:"staging"`
 	Modes             map[string]Mode      `json:"modes"`
 }
 
@@ -473,6 +481,9 @@ func merge(dst, src map[string]any) {
 func (c *Config) validate() error {
 	if c.MaxParallel < 1 || c.WorkerMemoryMiB < 1 {
 		return errors.New("config: max_parallel and worker_memory_mib must be positive")
+	}
+	if !slices.Contains([]string{"auto", "always", "never"}, c.Staging.Isolate) || c.Staging.MaxFiles < 0 || c.Staging.MaxStreams < 0 {
+		return errors.New("config: staging.isolate is auto, always or never, and its limits are not negative")
 	}
 	for _, lead := range c.Leads {
 		if lead != "claude" && lead != "codex" {

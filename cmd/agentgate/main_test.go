@@ -256,7 +256,7 @@ func TestWholeTaskThroughTheCommandLine(t *testing.T) {
 		t.Fatalf("a misspelled plan field must be an error, got %q", stderr)
 	}
 	panel, _, _ := s.run("", "watch", "--once")
-	for _, want := range []string{"TASKS 1", "medium", "reviewed", "writer  core", "opus:medium", "review  architecture", "fable:medium", "passed", "failed (7)", "stages"} {
+	for _, want := range []string{"TASKS 1", "medium", "reviewed", "writer  core", "opus:medium", "review  architecture", "fable:medium", "passed", "failed (7)", "steps"} {
 		if !strings.Contains(panel, want) {
 			t.Errorf("watch lacks %q:\n%s", want, panel)
 		}

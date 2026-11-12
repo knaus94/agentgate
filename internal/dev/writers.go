@@ -97,20 +97,54 @@ func Launch(cfg *config.Config, plan *Plan) (any, error) {
 		if err := gate.baselineChecks(); err != nil {
 			return nil, err
 		}
+	case gate.Epic != nil && !plan.staged(), gate.Epic == nil && plan.staged():
+		return nil, errors.New("a task keeps its shape: one that started in stages continues in stages, and one that did not, does not")
+	case gate.Phase == "staged":
+		// The next stage of a staged task. The plan may have been revised for what is still ahead.
+		if err := gate.replan(plan); err != nil {
+			return nil, err
+		}
+		stage, err := gate.present(cfg, resolved)
+		if err != nil {
+			return nil, err
+		}
+		if err := gate.enterStage(stage, nil); err != nil {
+			return nil, err
+		}
+		if err := gate.baselineChecks(); err != nil {
+			return nil, err
+		}
 	case gate.Phase == "implementing":
-		if err := gate.extend(resolved); err != nil {
+		if gate.Epic != nil {
+			if err := gate.replan(plan); err != nil {
+				return nil, err
+			}
+		}
+		continued, err := gate.present(cfg, resolved)
+		if err != nil {
+			return nil, err
+		}
+		if err := gate.extend(continued); err != nil {
 			return nil, err
 		}
 	default:
 		return nil, fmt.Errorf("the task is %s; finish it or use `fix` for accepted findings", gate.Phase)
 	}
+	if resolved, err = gate.present(cfg, resolved); err != nil {
+		return nil, err
+	}
+	plan = resolved.Plan
 	var streams []Stream
 	for _, stream := range plan.Streams {
 		if !stream.Done {
 			streams = append(streams, stream)
 		}
 	}
-	gate.Round = &Round{Batch: fmt.Sprintf("v%d", gate.PlanVersion), Streams: streams}
+	batch := fmt.Sprintf("v%d", gate.PlanVersion)
+	if gate.Epic != nil {
+		batch = fmt.Sprintf("s%d.%s", gate.StageIndex+1, batch)
+	}
+	gate.Round = &Round{Batch: batch, Streams: streams}
 	gate.Phase = "implementing"
 	if err := gate.gatherContext(resolved); err != nil {
 		return nil, err

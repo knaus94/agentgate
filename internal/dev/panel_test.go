@@ -102,7 +102,7 @@ func TestPanelShowsTasksStagesWorkersAndOpensDetails(t *testing.T) {
 	m := &panel{cfg: f.cfg, width: 120, height: 40, paint: paint{}}
 	m.refresh()
 	text := strings.Join(m.frame(), "\n")
-	for _, want := range []string{"TASKS 1", "awaiting-review", "stages   launch", "WORKERS", "writer  core", "review  correctness", "astra:medium @codex",
+	for _, want := range []string{"TASKS 1", "awaiting-review", "steps    launch", "WORKERS", "writer  core", "review  correctness", "astra:medium @codex",
 		"1m15s ×2", "✔ reported: correctness PASS, 0 findings", "CHECKS", "sh -c echo checked the line", "PLAN  1 streams", "enter open"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the panel lacks %q:\n%s", want, text)

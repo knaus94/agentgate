@@ -51,6 +51,37 @@ Report facts, not the mode you would like: name a risk only when the change real
 is not a risk. `agentgate route --file plan.json` shows the decision, its reasons and the models, without
 starting anything. Tell the user the mode and why before you launch.
 
+## Large work comes in stages
+
+When the specification is more than one logical outcome, do not write it in one breath: split the plan into
+`stages`. A stage is one outcome that leaves the declared checks green — foundations (schema, contracts) first,
+then behaviour, then the interface and the clean-up — and small enough that its diff is read in one sitting.
+List what the specification asks for in `requirements`, and say in each stage's `covers` which of them it
+delivers: a requirement that no stage covers is refused, so nothing is lost between the specification and the
+work. Each stage has its own `streams`, may add `checks`, and may carry its own `assessment`: the mode is
+computed per stage, so a data migration can be ultra while the form that follows it is medium.
+
+The tool refuses a single-pass plan past its size limits and tells you to stage it. `--single` in the request
+is the user's word that it really is one mechanical change; `--staged` is their demand for stages.
+
+The flow repeats per stage. `launch` writes the present stage only; `review`, `triage`, `fix` and `finish`
+apply to it; `finish` accepts the stage and opens the next one — `launch` again with the same plan.
+
+- Writers and reviewers of a stage are fresh. They get the whole brief, this stage's goal, what the earlier
+  stages delivered (their summaries and contracts) and what is left to later stages. So write the `summary` of
+  each `finish` as the handoff the next stage will read.
+- Reviewers see the stage's own change, measured from where the stage before it ended.
+- Between stages you may revise the stages still ahead: change them in the plan and say what and why in
+  `update`. Accepted stages are frozen.
+- Go on to the next stage without asking, unless the request has `--step` (the tool then holds after every
+  stage: report and wait for the user), a decision is missing, or what you learned makes the plan wrong.
+- After the last stage — in heavy and ultra, or with three or more stages — the whole change gets one more
+  `review`, for what no single stage shows: the seams between them. Then `finish` closes the task.
+- In heavy and ultra the architecture pass runs once, for the whole plan, before the first stage. Give the
+  architects the requirements and your split, and let them challenge the split.
+- A staged task works in an isolated worktree when the repository prepares one (section 8): every accepted
+  stage is a commit on the task's branch, and `land` brings the whole in.
+
 ## 3. Design (heavy, ultra)
 
 Accept any UI contract first (section 7), then `agentgate architecture --file plan.json`. A scout maps the

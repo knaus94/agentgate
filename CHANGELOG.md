@@ -2,6 +2,18 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.9.0
+
+- **Stages.** A large specification is split into stages, each written, checked, reviewed and accepted before
+  the next starts. The plan lists requirements and says which stage covers each; one that no stage covers is
+  refused. Every stage has its own mode, fresh workers and a review of its own change; accepted stages are
+  archived and, in an isolated task, committed one by one. The whole change gets a last review for the seams
+  (heavy, ultra, or three stages and more). `--step` waits for the user after each stage; the stages ahead can
+  be revised with a reason.
+- A single-pass plan past `staging.max_files` / `staging.max_streams` (25 files, 5 streams) is refused with the
+  advice to stage it; `--single` allows it, `--staged` demands stages.
+- The panel lists the stages; the timeline of operations is now labelled "steps".
+
 ## 0.8.1
 
 - **Fable reviews in heavy and ultra.** The architecture lane of both and the first correctness lane of ultra

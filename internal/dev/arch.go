@@ -80,6 +80,15 @@ func (r *Receipt) save() error {
 // fingerprint binds an architecture receipt to the contract, not to file contents:
 // source drift after a long pass must not throw the design away.
 func (r *Resolved) fingerprint() string {
+	if r.Plan.staged() {
+		// The design of a staged task is bound to what is asked and to the shape of the split, not to the
+		// file lists of stages that are still ahead and may be revised.
+		var names []string
+		for _, stage := range r.Plan.Stages {
+			names = append(names, stage.Name)
+		}
+		return digest(map[string]any{"brief": r.Plan.Brief, "requirements": r.Plan.Requirements, "stages": names, "ui": r.Plan.UI, "mode": r.Mode})
+	}
 	return digest(map[string]any{"brief": r.Plan.Brief, "files": r.Plan.Files(), "ui": r.Plan.UI, "mode": r.Mode})
 }
 
@@ -116,8 +125,11 @@ func Architecture(cfg *config.Config, plan *Plan) (any, error) {
 	if note == "cancelled" {
 		return nil, ops.Checkpoint()
 	}
-	packet := map[string]any{"brief": plan.Brief, "files": plan.Files(), "streams": plan.Streams, "context": plan.Context, "ui": ui,
+	packet := map[string]any{"brief": plan.Brief, "files": plan.Files(), "streams": plan.allStreams(), "context": plan.Context, "ui": ui,
 		"context_pack": pack}
+	if plan.staged() {
+		packet["requirements"], packet["stages"] = plan.Requirements, plan.Stages
+	}
 	run := func(round, name string, route config.Route, extra map[string]any, schema any) (ArchLane, error) {
 		body := map[string]any{"round": round}
 		for key, value := range packet {

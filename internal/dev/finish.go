@@ -259,6 +259,10 @@ func Finish(cfg *config.Config, gate *Gate, input FinishInput) (any, error) {
 	if err := ops.Checkpoint(); err != nil {
 		return nil, err
 	}
+	// A stage of a staged task is accepted, not finished: the task goes on to what follows it.
+	if gate.stage() != nil {
+		return gate.acceptStage(cfg, input)
+	}
 	gate.Final, gate.Phase = &Final{FinishInput: input, At: time.Now().Unix()}, "complete"
 	if gate.Worktree != "" {
 		if err := gate.commitTask("dev: " + firstLine(input.Summary)); err != nil {
@@ -379,12 +383,27 @@ func (g *Gate) Summary(cfg *config.Config) map[string]any {
 	if len(g.Signals) > 0 {
 		out["slop_signals"] = g.Signals
 	}
+	if g.Epic != nil {
+		out["stages"] = g.stagesSummary()
+		switch {
+		case !g.active():
+		case g.Integration:
+			out["stage"] = "integration: the whole change, after every stage was accepted"
+		case g.stage() != nil:
+			out["stage"] = fmt.Sprintf("%s (%d of %d)", g.stage().Name, g.StageIndex+1, len(g.Epic.Stages))
+		}
+	}
 	return out
 }
 
 // next tells the lead the one thing to do now, so the workflow does not live only in a document.
 func (g *Gate) next(cfg *config.Config, blocked bool) string {
 	switch g.Phase {
+	case "staged":
+		stage := g.stage()
+		return fmt.Sprintf("Stage %d of %d, %s (%s), is ready to start: `launch` with the same plan. The stages before it are accepted and "+
+			"committed to memory; if what you learned changes the stages still ahead, revise them in the plan with `update` first.",
+			g.StageIndex+1, len(g.Epic.Stages), stage.Name, g.Mode)
 	case "implementing", "correcting":
 		return "Writers have not finished this round: launch (or answer the blocked stream)."
 	case "awaiting-review":
@@ -394,6 +413,9 @@ func (g *Gate) next(cfg *config.Config, blocked bool) string {
 		}
 		if g.Request.Writes() && len(g.failing()) > 0 {
 			return "A declared check fails, so no reviewer was started. Read its output, then `fix` {brief}: the failure goes back to the writers in their own sessions."
+		}
+		if g.Integration && len(g.Reviews) == 0 {
+			return "Every stage is accepted. Run `review` for the pass over the whole change: it looks at the seams between the stages."
 		}
 		if len(cfg.Modes[g.Mode].Review) == 0 {
 			return "Run `review`: it returns the diffs for you to read, then call it again with lead_review."

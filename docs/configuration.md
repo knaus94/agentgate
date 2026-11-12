@@ -99,6 +99,7 @@ real-repository tasks).
 | `retention_days` | 14 | finished tasks older than this are removed |
 | `playwright_mcp` | `~/.local/share/agentgate/playwright-mcp/…/cli.js` | browser tooling for optional visual verification |
 | `worktree` | `{default: false, copy: [], setup: [], setup_timeout_s: 1800}` | isolated tasks (`-w`): what a fresh worktree needs — see [isolation](isolation.md) |
+| `staging` | `{max_files: 25, max_streams: 5, isolate: "auto"}` | when a plan has to be split into stages, and whether staged tasks are isolated — see [stages](stages.md) |
 | `worker_mcp` | none | MCP servers handed to workers by role; usually added by an extension file — see [extensions](extensions.md) |
 | `plans_home` | none | synced folder holding each repository's `.agentgate`; set by `agentgate plan link <folder>` |
 | `accounts` | none | several subscriptions per provider; managed with `agentgate accounts`, user file only — see [accounts](accounts.md) |

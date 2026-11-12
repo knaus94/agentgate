@@ -1,6 +1,6 @@
 ---
 description: Lead sandboxed model workers through agentgate's quality gate; the mode is chosen automatically.
-argument-hint: "[-N] [-l|-m|-h|-x] [-w] [plan|research|fix|review|clean|verify|status|stop|help] [--fix] [--grill|--no-grill] [--preview] <task>"
+argument-hint: "[-N] [-l|-m|-h|-x] [-w] [--staged|--single] [--step] [plan|research|fix|review|clean|verify|status|stop|help] [--fix] [--grill|--no-grill] [--preview] <task>"
 disable-model-invocation: true
 allowed-tools: Bash(agentgate:*), Read
 ---

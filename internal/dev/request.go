@@ -19,6 +19,9 @@ type Request struct {
 	Fix      bool   `json:"fix"`
 	Grill    string `json:"grill"`    // auto, force, skip
 	Worktree bool   `json:"worktree"` // work in an isolated worktree; the checkout changes only when the user lands it
+	Staged   bool   `json:"staged"`   // the plan must split the work into stages
+	Single   bool   `json:"single"`   // one pass, whatever the size
+	Step     bool   `json:"step"`     // wait for the user after every accepted stage
 }
 
 var actions = []string{"plan", "research", "fix", "review", "clean", "verify", "status", "stop", "help"}
@@ -52,6 +55,12 @@ func ParseRequest(raw string) (Request, error) {
 			request.Fix = true
 		case (token == "-w" || token == "--worktree") && !request.Worktree:
 			request.Worktree = true
+		case token == "--staged" && !request.Staged:
+			request.Staged = true
+		case token == "--single" && !request.Single:
+			request.Single = true
+		case token == "--step" && !request.Step:
+			request.Step = true
 		case (token == "--grill" || token == "--no-grill") && request.Grill == "auto":
 			request.Grill = map[string]string{"--grill": "force", "--no-grill": "skip"}[token]
 		case isMode && request.Mode == "":
@@ -80,13 +89,20 @@ done:
 	}
 	switch request.Action {
 	case "status", "stop", "help":
-		if request.Task != "" || request.Mode != "" || request.Parallel != 0 || request.Preview || request.Grill != "auto" || request.Worktree {
+		if request.Task != "" || request.Mode != "" || request.Parallel != 0 || request.Preview || request.Grill != "auto" || request.Worktree ||
+			request.Staged || request.Single || request.Step {
 			return request, fmt.Errorf("%s takes no task or flags", request.Action)
 		}
 	case "research", "verify":
 		if request.Mode != "" {
 			return request, fmt.Errorf("%s is read-only and has no mode; use plan, implement, fix, review or clean", request.Action)
 		}
+	}
+	if request.Staged && request.Single {
+		return request, fmt.Errorf("--staged and --single contradict each other")
+	}
+	if (request.Staged || request.Step) && request.Action != "implement" && request.Action != "fix" && request.Action != "plan" {
+		return request, fmt.Errorf("stages are for work that writes code; %s has none", request.Action)
 	}
 	if request.Worktree && request.Action != "implement" && request.Action != "fix" {
 		return request, fmt.Errorf("-w isolates a task that writes code; %s works on what is already in the checkout", request.Action)

@@ -100,6 +100,7 @@ Opus; Sol — на Sonnet. Замена пропускается, если он�
 | `retention_days` | 14 | завершённые задачи старше этого срока удаляются |
 | `playwright_mcp` | `~/.local/share/agentgate/playwright-mcp/…/cli.js` | браузерный инструмент для необязательной визуальной проверки |
 | `worktree` | `{default: false, copy: [], setup: [], setup_timeout_s: 1800}` | изолированные задачи (`-w`): что нужно свежему worktree — см. [изоляцию](isolation.md) |
+| `staging` | `{max_files: 25, max_streams: 5, isolate: "auto"}` | когда план обязан делиться на этапы и изолируются ли задачи с этапами — см. [этапы](stages.md) |
 | `worker_mcp` | нет | MCP-серверы, выдаваемые воркерам по ролям; обычно добавляются файлом-расширением — см. [расширения](extensions.md) |
 | `plans_home` | нет | синхронизируемая папка с каталогами `.agentgate` репозиториев; задаётся командой `agentgate plan link <папка>` |
 | `accounts` | нет | несколько подписок на провайдера; управляются через `agentgate accounts`, только в пользовательском файле — см. [аккаунты](accounts.md) |

@@ -174,6 +174,7 @@ A repository can carry its own `.agentgate.json`. See [docs/configuration.md](do
 - [Leading from Codex](docs/codex.md) — `$dev`, the Codex-only setup and its model table
 - [Extensions](docs/extensions.md) — plug tools into the workers with one file: a code graph, the Nx project graph
 - [The panel](docs/watch.md) — `agentgate watch`: tasks, timings, live worker activity
+- [Stages](docs/stages.md) — a large specification done and reviewed part by part
 - [Isolated tasks](docs/isolation.md) — `-w`: worktrees, landing, catching up, preparing dependencies
 - [Releasing](docs/releasing.md) — how versions are published and installed
 - `agentgate guide` and `agentgate reference` print what the lead reads

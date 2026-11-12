@@ -91,6 +91,22 @@ func Route(cfg *config.Config, plan *Plan) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if plan.staged() {
+		// A staged plan is shown stage by stage: each has its own mode and so its own models.
+		var stages []map[string]any
+		for index, stage := range resolved.Stages {
+			writers := map[string]string{}
+			for _, stream := range stage.Plan.Streams {
+				writers[stream.Name] = stage.WriterRoute(stream, 0).String()
+			}
+			table := modeTable(cfg, stage.Mode)
+			stages = append(stages, map[string]any{"stage": plan.Stages[index].Name, "decision": stage.Decision, "writers": writers,
+				"scout": table["scout"], "review": table["review"], "blocking": table["blocking"]})
+		}
+		return map[string]any{"decision": resolved.Decision, "design": modeTable(cfg, resolved.Mode)["design"], "stages": stages,
+			"integration_review": integrationNeeded(resolved.Mode, len(plan.Stages)), "isolated": resolved.Request.Worktree || isolateStaged(cfg),
+			"read_only": true}, nil
+	}
 	writers := map[string]string{}
 	for _, stream := range plan.Streams {
 		writers[stream.Name] = resolved.WriterRoute(stream, 0).String()

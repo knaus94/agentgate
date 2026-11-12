@@ -199,11 +199,16 @@ type Gate struct {
 	Foreign       []string                `json:"foreign_changes,omitempty"`
 	Substitutions []provider.Substitution `json:"substitutions,omitempty"`
 	Final         *Final                  `json:"final,omitempty"`
-	Worktree      string                  `json:"worktree,omitempty"`     // an isolated task works here, not in Cwd
-	Branch        string                  `json:"branch,omitempty"`       // the branch of that worktree
-	Landed        string                  `json:"landed,omitempty"`       // how an isolated task was closed: apply, commit, branch, drop
-	Conflicts     []string                `json:"conflicts,omitempty"`    // files left with merge markers by catching up with the checkout
-	Signals       []Signal                `json:"slop_signals,omitempty"` // mechanical hits on the lines the task added, as of the last review
+	Worktree      string                  `json:"worktree,omitempty"`      // an isolated task works here, not in Cwd
+	Branch        string                  `json:"branch,omitempty"`        // the branch of that worktree
+	Landed        string                  `json:"landed,omitempty"`        // how an isolated task was closed: apply, commit, branch, drop
+	Conflicts     []string                `json:"conflicts,omitempty"`     // files left with merge markers by catching up with the checkout
+	Epic          *Plan                   `json:"epic,omitempty"`          // staged tasks: the whole plan; Plan is the present stage
+	StageIndex    int                     `json:"stage_index,omitempty"`   // staged tasks: which stage is the present one
+	StageRecords  []StageRecord           `json:"stage_records,omitempty"` // staged tasks: the accepted stages
+	EpicBaseline  Snapshot                `json:"epic_baseline,omitempty"` // staged tasks: every file as the task found it
+	Integration   bool                    `json:"integration,omitempty"`   // staged tasks: the pass over the whole change is on
+	Signals       []Signal                `json:"slop_signals,omitempty"`  // mechanical hits on the lines the task added, as of the last review
 	Reported      bool                    `json:"completion_reported,omitempty"`
 	CreatedAt     int64                   `json:"created_at"`
 }
@@ -557,10 +562,16 @@ func begin(resolved *Resolved) (gate *Gate, err error) {
 	if previous := Current(); previous != nil && previous.Worktree != "" && previous.Landed == "" {
 		return nil, errors.New("this session's finished isolated task is not landed yet: `land` it (or drop it) before starting another")
 	}
+	// A staged task begins with its first stage; the gate keeps the whole plan beside it.
+	whole := resolved
+	if len(resolved.Stages) > 0 {
+		resolved = resolved.Stages[0]
+	}
 	plan := resolved.Plan
 	files := plan.Files()
 	gate = &Gate{ID: newID(), Session: session(), Request: resolved.Request, Cwd: base()}
-	if resolved.Request.Worktree || (resolved.Config.Worktree.Default && !resolved.Request.ReviewFirst()) {
+	if resolved.Request.Worktree || (resolved.Config.Worktree.Default && !resolved.Request.ReviewFirst()) ||
+		(len(whole.Stages) > 0 && isolateStaged(resolved.Config)) {
 		// An isolated task shares no file with anyone, so it claims none. Preparing the worktree can take
 		// minutes and must not hold the checkout's lock.
 		if err := gate.isolate(resolved.Config); err != nil {
@@ -618,6 +629,12 @@ func begin(resolved *Resolved) (gate *Gate, err error) {
 	gate.Files, gate.Context, gate.Baseline, gate.HeadBefore, gate.Manifest = files, context, baseline, strings.TrimSpace(head), files0
 	gate.WriteFiles, gate.Phase, gate.CreatedAt = files, phase, time.Now().Unix()
 	gate.Dispositions, gate.Resolutions, gate.Baselines = map[string]Disposition{}, map[string]string{}, map[string]int{}
+	if len(whole.Stages) > 0 {
+		gate.Epic = whole.Plan
+		if gate.EpicBaseline, err = capture(whole.Plan.Files()); err != nil {
+			return nil, err
+		}
+	}
 	ops.BindGate(gate.ID)
 	prune(resolved.Config.RetentionDays)
 	return gate, gate.save()

@@ -35,6 +35,14 @@ transaction and concurrency protections.
 
 Style preferences and "I would do it differently" are not blockers. An empty list is a valid result.
 
+## Staged work
+
+When the packet has `stages`, the work will be written and reviewed stage by stage, each stage starting from
+what the one before it left. Your design covers the whole. Say for every stage which contract it must leave
+for the next one, and challenge the split where it does not hold: a stage that cannot leave the declared
+checks green, one that needs something a later stage builds, or a requirement in `requirements` that no stage
+really delivers.
+
 ## Round: revision
 
 `verified_blockers` were confirmed against the code by the lead. Revise the design to resolve exactly those and
