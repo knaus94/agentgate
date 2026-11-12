@@ -151,7 +151,8 @@ func Doctor() map[string]any {
 	installed, _ := os.ReadFile(filepath.Join(claudeDir(), "commands", "dev.md"))
 	add("/dev command", string(installed) == assets.Command, true, "run `claude-dev install` when this is not ok")
 	settings, _ := os.ReadFile(filepath.Join(claudeDir(), "settings.json"))
-	add("Stop hook", strings.Contains(string(settings), hookMarker), true, "run `claude-dev install` when this is not ok")
+	add("Stop hook", strings.Contains(string(settings), hookMarker) || strings.Contains(string(settings), selfPath()+" hook"), true,
+		"run `claude-dev install` when this is not ok")
 	if cfg != nil {
 		_, statErr := os.Stat(expandHome(cfg.PlaywrightMCP))
 		add("browser tooling", statErr == nil, false, "optional, for browser verification: "+expandHome(cfg.PlaywrightMCP))
@@ -178,6 +179,12 @@ func suffix(err error) string {
 }
 
 const hookMarker = "claude-dev hook"
+
+// ourHook recognises a Stop hook of this tool: the current binary under whatever name it runs, any earlier
+// install of it, and the hook of the Python tool it replaces.
+func ourHook(command string) bool {
+	return command == selfPath()+" hook" || strings.Contains(command, hookMarker) || strings.Contains(command, "claude-dev quality-hook")
+}
 
 func selfPath() string {
 	if path, err := exec.LookPath("claude-dev"); err == nil {
@@ -258,7 +265,7 @@ func installHook(path string, uninstall bool) (string, error) {
 		list, _ := entry["hooks"].([]any)
 		for _, item := range list {
 			command, _ := item.(map[string]any)["command"].(string)
-			ours := strings.Contains(command, hookMarker) || strings.Contains(command, "claude-dev quality-hook")
+			ours := ourHook(command)
 			if ours && command == wanted && !uninstall && !present {
 				present = true
 				inner = append(inner, item)

@@ -624,7 +624,7 @@ func TestInstallIsIdempotentAndKeepsOtherHooks(t *testing.T) {
 	}
 	raw, _ := os.ReadFile(filepath.Join(dir, "settings.json"))
 	text := string(raw)
-	if strings.Count(text, hookMarker) != 1 || strings.Contains(text, "quality-hook") || !strings.Contains(text, "other-tool stop") ||
+	if strings.Count(text, selfPath()+" hook") != 1 || strings.Contains(text, "quality-hook") || !strings.Contains(text, "other-tool stop") ||
 		!strings.Contains(text, `"model": "opus"`) {
 		t.Fatalf("exactly one hook of ours, foreign hooks and settings kept: %s", text)
 	}
@@ -633,7 +633,7 @@ func TestInstallIsIdempotentAndKeepsOtherHooks(t *testing.T) {
 	}
 	_, err = Install(true, false)
 	must(t, err)
-	if raw, _ := os.ReadFile(filepath.Join(dir, "settings.json")); strings.Contains(string(raw), hookMarker) {
+	if raw, _ := os.ReadFile(filepath.Join(dir, "settings.json")); strings.Contains(string(raw), selfPath()+" hook") {
 		t.Fatal("uninstall must remove the hook")
 	}
 }
