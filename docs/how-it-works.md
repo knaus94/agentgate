@@ -67,6 +67,34 @@ Design receipts and the scout's context pack belong to the checkout, not to one 
 from a new session tomorrow without paying for the design again; a receipt stays bound to its brief, files and
 mode by a fingerprint.
 
+## Keeping model-written code lean
+
+Code written by a model tends to carry extras that look diligent and cost maintenance: comments that narrate
+the code, checks for states that cannot happen, a wrapper around one call, a leftover `console.log`. Three
+layers deal with it, cheapest first.
+
+1. **The writer is told what not to add**, with the reason: every added line is read now and maintained later.
+   Scope, comments, defensive code, abstractions, type escapes, leftovers and "results that are not real" each
+   have a rule, and the writer reads its own diff as a reviewer before reporting.
+2. **A scan of the added lines, before any reviewer runs.** It costs no model call. It looks only at lines the
+   task added, in code files, for literal leftovers: placeholders, TODOs, debug output, disabled tests, type and
+   lint suppressions, swallowed errors, comments that narrate the change, conflict markers. The hits are
+   `slop_signals`: leads for the reviewers and the lead, never verdicts — the same text can be right.
+3. **The `simplicity` axis of the review**, judged in the same process as the design, so it costs no extra
+   lane. The reviewer asks of each added piece whether the task would be done, and the code just as safe,
+   without it — and must prove it: quote the line and name the fact that makes it unneeded (its only caller,
+   the type that rules the state out, the helper that already exists). The remedy is a deletion. Faked results
+   and hidden failures are P1; code someone must keep for no benefit is P2. Naming and formatting taste, what a
+   linter already reports and code the change did not add are out of scope.
+
+In light mode there is no reviewer process: the lead receives the signals with the diffs and applies the same
+test. `/dev clean` remains the way to simplify code that is already in the repository.
+
+The rules draw on public work: the community `/deslop` commands and the `code-slop` skill for the list of
+patterns, the Karpathy-inspired guidelines for "every changed line traces to the request", Anthropic's
+prompting guidance on over-engineering, and PhotoStructure's review rule "prove it or discard it" for keeping
+the axis from turning into a style campaign.
+
 ## The gate
 
 A task is a *gate*: one JSON state file per lead session and checkout, under `~/.local/state/claude-dev/`.

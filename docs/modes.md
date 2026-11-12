@@ -43,7 +43,7 @@ not a risk; it is ordinary work, and ordinary work is medium.
 | Blocker round | — | — | optional, once | optional, once |
 | Backend writer | `sol:medium` | `opus:medium` | `fable:high` | `fable:xhigh` |
 | Frontend writer | `sonnet:medium` | `opus:medium` | `fable:high` | `fable:xhigh` |
-| Review lanes | the lead | architecture `fable:medium` ∥ correctness `astra:medium` | architecture `opus:high` ∥ correctness `astra:high` | architecture `opus:high` ∥ correctness `opus:xhigh` ∥ correctness `astra:xhigh` ∥ security `astra:high` |
+| Review lanes | the lead | architecture+simplicity `fable:medium` ∥ correctness `astra:medium` | architecture+simplicity `opus:high` ∥ correctness `astra:high` | architecture+simplicity `opus:high` ∥ correctness `opus:xhigh` ∥ correctness `astra:xhigh` ∥ security `astra:high` |
 | Effort ceiling | `high` | `high` | `xhigh` | `max` |
 | Blocking severities | P0, P1 | P0, P1 | P0, P1, P2 | P0, P1, P2 |
 | Checks required to finish | optional | at least one | at least one | at least one |

@@ -376,6 +376,9 @@ func (g *Gate) Summary(cfg *config.Config) map[string]any {
 	if g.Worktree != "" {
 		out["isolated"] = g.landing()
 	}
+	if len(g.Signals) > 0 {
+		out["slop_signals"] = g.Signals
+	}
 	return out
 }
 

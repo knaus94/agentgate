@@ -526,16 +526,9 @@ func (m *Manager) Has(provider string) bool {
 	return false
 }
 
-// Order lists the accounts that may take a call for the route, best first: most room for that model, fewest
+// order lists the accounts that may take a call for the route, best first: most room for that model, fewest
 // calls already running, the lead's own account spared, and the same subscription never counted twice.
 // prefer names the account that holds the session being continued; it goes first while it is available.
-func (m *Manager) Order(route config.Route, prefer string) []config.Account {
-	m.refresh(false)
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.order(route, prefer, nil)
-}
-
 func (m *Manager) order(route config.Route, prefer string, tried map[string]bool) []config.Account {
 	type candidate struct {
 		account config.Account

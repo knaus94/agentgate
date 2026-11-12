@@ -199,10 +199,11 @@ type Gate struct {
 	Foreign       []string                `json:"foreign_changes,omitempty"`
 	Substitutions []provider.Substitution `json:"substitutions,omitempty"`
 	Final         *Final                  `json:"final,omitempty"`
-	Worktree      string                  `json:"worktree,omitempty"`  // an isolated task works here, not in Cwd
-	Branch        string                  `json:"branch,omitempty"`    // the branch of that worktree
-	Landed        string                  `json:"landed,omitempty"`    // how an isolated task was closed: apply, commit, branch, drop
-	Conflicts     []string                `json:"conflicts,omitempty"` // files left with merge markers by catching up with the checkout
+	Worktree      string                  `json:"worktree,omitempty"`     // an isolated task works here, not in Cwd
+	Branch        string                  `json:"branch,omitempty"`       // the branch of that worktree
+	Landed        string                  `json:"landed,omitempty"`       // how an isolated task was closed: apply, commit, branch, drop
+	Conflicts     []string                `json:"conflicts,omitempty"`    // files left with merge markers by catching up with the checkout
+	Signals       []Signal                `json:"slop_signals,omitempty"` // mechanical hits on the lines the task added, as of the last review
 	Reported      bool                    `json:"completion_reported,omitempty"`
 	CreatedAt     int64                   `json:"created_at"`
 }

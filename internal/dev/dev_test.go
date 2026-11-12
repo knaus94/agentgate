@@ -111,6 +111,12 @@ func (f *fixture) fitAxes(answer string, packet map[string]any) string {
 	if len(mine) == 0 {
 		return f.defaultAnswer("review", packet)
 	}
+	// An axis of the lane the script says nothing about passes, like a lane it says nothing about.
+	for _, axis := range packet["axes"].([]any) {
+		if !slices.ContainsFunc(mine, func(report map[string]any) bool { return report["axis"] == axis }) {
+			mine = append(mine, map[string]any{"axis": axis, "status": "PASS", "findings": []any{}, "checked": []string{"read the diff"}, "resolutions": []any{}})
+		}
+	}
 	raw, _ := json.Marshal(map[string]any{"reports": mine})
 	return string(raw)
 }
@@ -306,8 +312,8 @@ func TestMediumFlowReusesCurrentEvidence(t *testing.T) {
 		t.Fatalf("review ran %d times for identical content", f.count("review"))
 	}
 	lane := Current().Reviews[0].Lanes[0]
-	if lane.Route.Alias != "fable" || !slices.Equal(lane.Axes, []string{"architecture"}) || len(Current().Reviews[0].Lanes) != 2 {
-		t.Fatalf("medium reviews two axes on two models, got %+v", lane)
+	if lane.Route.Alias != "fable" || !slices.Equal(lane.Axes, []string{"architecture", "simplicity"}) || len(Current().Reviews[0].Lanes) != 2 {
+		t.Fatalf("medium reviews design and simplicity on one model and correctness on another, got %+v", lane)
 	}
 	runs := func() int { raw, _ := os.ReadFile(counter); return strings.Count(string(raw), "x") }
 	if runs() != 1 {

@@ -18,7 +18,44 @@ to find what the change could break instead of exploring from scratch; verify wh
   concurrency invariants hold.
 - `architecture`: the change respects the repository's real boundaries and the accepted design; no costly
   duplication or unjustified abstraction; nothing simpler would do the same.
+- `simplicity`: the change holds nothing the task does not need. See the next section.
 - `security`: trust boundaries, authorization, injection, secrets, data exposure and integrity under abuse.
+
+## Simplicity
+
+Code written by a model tends to carry extras that look diligent and cost maintenance. On this axis you look
+only at what the change added and ask of each piece: would the task be done, and the code just as safe,
+without it? Report:
+
+- unrequested scope: features, options, refactoring or reformatting the brief did not ask for;
+- structure with no second user: a helper, wrapper, interface, class or flag used once; a new dependency that
+  duplicates one the repository has; code written again where an existing helper would be called;
+- defensive code away from a boundary: checks for states the callers cannot produce, try/catch that only logs
+  or swallows, fallbacks and defaults that hide a failure;
+- comments that narrate the code or the change, docstrings that restate a signature, banners, and comments or
+  annotations added to code the change did not otherwise touch;
+- leftovers: unused imports, variables, parameters or functions; debug output; commented-out code;
+  compatibility shims for code that is gone; scratch files;
+- escapes: a type escape or lint suppression that hides a real problem;
+- results that are not real: a value hard-coded to satisfy a check, a skipped or weakened test, a stub or TODO
+  where the brief asked for behaviour.
+
+How to judge:
+
+- Prove it or drop it. Quote the line and state the fact that makes it unneeded: its only caller, the type or
+  caller that rules the state out, the helper that already exists. If you cannot state that fact after reading
+  the code, it is not a finding.
+- The remedy is a deletion or the simpler form, and `preserve` names the behaviour that must stay.
+- P1 when it hides a failure or fakes a result. P2 when it is code someone must read and keep for no benefit.
+- Out of scope: naming and formatting taste, anything the linters among the declared checks already report,
+  code the change did not add, and guessing who or what wrote the code. A real protection at a trust boundary
+  is not an extra; its absence where it matters is a `correctness` finding.
+
+`slop_signals`, when not empty, lists mechanical hits on added lines: placeholders, TODOs, debug output,
+disabled tests, suppressions, swallowed errors, comments that narrate the change. Each is a lead, not a
+verdict. Open the line and either report it under the axis it belongs to (a disabled test or a swallowed
+failure is `correctness`), or leave it out because it is legitimate there. Note in `checked` that you went
+through them.
 
 ## Findings
 

@@ -89,7 +89,8 @@
       "review": [
         {
           "axes": [
-            "architecture"
+            "architecture",
+            "simplicity"
           ],
           "route": "fable:medium"
         },
@@ -121,7 +122,8 @@
       "review": [
         {
           "axes": [
-            "architecture"
+            "architecture",
+            "simplicity"
           ],
           "route": "opus:high"
         },
@@ -154,7 +156,8 @@
       "review": [
         {
           "axes": [
-            "architecture"
+            "architecture",
+            "simplicity"
           ],
           "route": "opus:high"
         },

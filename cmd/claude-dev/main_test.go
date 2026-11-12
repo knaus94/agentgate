@@ -249,6 +249,9 @@ func TestWholeTaskThroughTheCommandLine(t *testing.T) {
 	if _, stderr, code := s.run(`{"summary":"done"}`, "finish", "--file", "-"); code != 1 || !strings.Contains(stderr, "exit 7") {
 		t.Fatalf("finish refuses while a check fails: %s", stderr)
 	}
+	if _, stderr, code := s.run(`{"request":"-m x","brief":"b","streams":[],"modee":"light"}`, "route", "--file", "-"); code != 1 || !strings.Contains(stderr, "modee") {
+		t.Fatalf("a misspelled plan field must be an error, got %q", stderr)
+	}
 	panel, _, _ := s.run("", "watch", "--once")
 	for _, want := range []string{"TASKS 1", "medium", "reviewed", "writer  core", "opus:medium", "review  architecture", "fable:medium", "passed", "failed (7)", "stages"} {
 		if !strings.Contains(panel, want) {

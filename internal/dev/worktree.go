@@ -72,6 +72,17 @@ func gitIn(dir string, args ...string) (string, error) {
 	return string(out), nil
 }
 
+// nulList splits git's NUL-separated output; a file name may hold spaces.
+func nulList(raw string) []string {
+	out := []string{}
+	for _, name := range strings.Split(raw, "\x00") {
+		if name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 // committed is a file as a commit has it, or nil when the commit has no such file.
 func committed(commit, file string) *FileState {
 	raw, err := exec.Command("git", "show", commit+":"+file).Output()
@@ -275,8 +286,8 @@ func Land(cfg *config.Config, gate *Gate, input LandInput) (any, error) {
 	if err := os.WriteFile(patch, diff, 0o600); err != nil {
 		return nil, err
 	}
-	changed, _ := git("diff", "--name-only", target, "HEAD")
-	files := strings.Fields(changed)
+	changed, _ := git("diff", "--name-only", "-z", target, "HEAD")
+	files := nulList(changed)
 	if len(diff) > 0 {
 		if _, err := gitIn(main, "apply", "--check", "--whitespace=nowarn", patch); err != nil {
 			return nil, fmt.Errorf("the checkout has its own uncommitted changes where the task lands, so nothing was applied: %v. "+
@@ -320,8 +331,8 @@ func (g *Gate) catchUp(cfg *config.Config, target string) (any, error) {
 	}
 	_, mergeErr := gitIn(".", "merge", "--no-edit", "--no-verify", "-q", target)
 	if mergeErr != nil {
-		names, _ := git("diff", "--name-only", "--diff-filter=U")
-		g.Conflicts = strings.Fields(names)
+		names, _ := git("diff", "--name-only", "-z", "--diff-filter=U")
+		g.Conflicts = nulList(names)
 		if len(g.Conflicts) == 0 {
 			_, _ = gitIn(".", "merge", "--abort")
 			return nil, mergeErr

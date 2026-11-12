@@ -142,14 +142,6 @@ func standOrigins(values []string) ([]string, error) {
 	return slices.Compact(out), nil
 }
 
-func expandHome(path string) string {
-	if rest, ok := strings.CutPrefix(path, "~/"); ok {
-		home, _ := os.UserHomeDir()
-		return filepath.Join(home, rest)
-	}
-	return path
-}
-
 // visualStage is a prepared browser pass: run only reads the gate, apply records the result on the lead's thread.
 type visualStage struct {
 	run   func() error
@@ -164,7 +156,7 @@ func (g *Gate) prepareVisual(cfg *config.Config, input VisualInput, now Snapshot
 	if err != nil || ui == nil {
 		return nil, errors.New("browser verification needs an accepted ui contract")
 	}
-	cli := expandHome(cfg.PlaywrightMCP)
+	cli := config.ExpandHome(cfg.PlaywrightMCP)
 	node, nodeErr := exec.LookPath("node")
 	if _, err := os.Stat(cli); err != nil || nodeErr != nil {
 		return nil, fmt.Errorf("browser tooling is missing: node and %s", cli)

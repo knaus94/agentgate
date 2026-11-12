@@ -65,6 +65,14 @@ func claude(names ...string) []config.Account {
 	return out
 }
 
+// Order is the ranking a call would be offered, without reserving an account.
+func (m *Manager) Order(route config.Route, prefer string) []config.Account {
+	m.refresh(false)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.order(route, prefer, nil)
+}
+
 func names(accounts []config.Account) string {
 	var out []string
 	for _, account := range accounts {

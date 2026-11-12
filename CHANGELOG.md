@@ -2,6 +2,16 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.5.0
+
+- **Filtering model-written extras.** Writers get explicit rules, with the reason, for what a change must not
+  carry. Before reviewers run, the added lines are scanned for literal leftovers at no model cost and the hits
+  are returned as `slop_signals`. Reviews gain a `simplicity` axis, judged in the design lane: unrequested
+  scope, structure with one user, defensive code away from a boundary, narrating comments, leftovers, results
+  that are not real — each proved from the code, with a deletion as the remedy. The panel lists the signals.
+- Fixed: landing an isolated task broke on file names with spaces.
+- Removed code that only tests used, and a duplicated helper.
+
 ## 0.4.0
 
 - **Interactive panel.** `claude-dev watch` is now a live terminal panel: every task of the checkout (or, with

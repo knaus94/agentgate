@@ -20,7 +20,7 @@ saved with `plan save`). Unknown fields are rejected.
 | `answer` | `{stream, answer}` | reply to a blocked writer in its own session |
 | `tell` | `{message}` | leave a note on the writers' shared board |
 | `check` | `{argv}` or `--all` | run declared checks; exit code 2 when one fails |
-| `review` | optional review input | declared checks, then review lanes and the optional browser pass; can finish |
+| `review` | optional review input | declared checks, a scan of the added lines (`slop_signals`), then review lanes and the optional browser pass; can finish |
 | `visual` | visual input | browser pass, or record the choice / a skip |
 | `triage` | `{dispositions}` | judge findings |
 | `fix` | `{brief, reassessment?, escalate?, streams?}` | send accepted findings and failing checks back to the writers |

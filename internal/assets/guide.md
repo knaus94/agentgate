@@ -84,6 +84,15 @@ Inspect the actual diff yourself. Then `claude-dev review`. It runs in this orde
 2. **Reviewers**, in parallel on different models, only on code that passes. In light mode `review` hands you
    the diffs instead; read them and call it again with `lead_review`.
 
+Extras are filtered in three places. Writers are told to add nothing the task does not need. Before any
+reviewer runs, the tool scans the added lines for literal leftovers (placeholders, TODOs, debug output,
+disabled tests, suppressions, swallowed errors, comments narrating the change) and returns them as
+`slop_signals`: leads, not verdicts. Reviewers then judge the `simplicity` axis next to the design: unrequested
+scope, structure with one user, defensive code away from a boundary, narrating comments, leftovers, results
+that are not real — each proved from the code, with a deletion as the remedy. Such findings arrive as P1 or P2
+like any other; triage them on the evidence, not on taste. In light mode you are the only reviewer: go through
+`slop_signals` yourself and ask of each added line whether the task needs it.
+
 Pass `finish` `{summary, ...}` to `review` and a clean result closes the task in the same call.
 
 `claude-dev triage`: judge each P0–P2 finding against the code — `accepted`, `rejected` (with contrary

@@ -153,7 +153,8 @@ A repository can carry its own `.claude-dev.json`. See [docs/configuration.md](d
 
 ## Documentation
 
-- [How it works](docs/how-it-works.md) — the gate, the sandbox, how agents talk to each other
+- [How it works](docs/how-it-works.md) — the gate, the sandbox, how agents talk to each other, how
+  model-written extras are filtered
 - [Modes](docs/modes.md) — the rule table and what each mode runs
 - [Why these models](docs/model-selection.md) — the public data behind the defaults
 - [Configuration](docs/configuration.md) — models, pools, fallbacks, per-repository overrides

@@ -155,8 +155,8 @@ func Doctor() map[string]any {
 	add("Stop hook", strings.Contains(string(settings), hookMarker) || strings.Contains(string(settings), selfPath()+" hook"), true,
 		"run `claude-dev install` when this is not ok")
 	if cfg != nil {
-		_, statErr := os.Stat(expandHome(cfg.PlaywrightMCP))
-		add("browser tooling", statErr == nil, false, "optional, for browser verification: "+expandHome(cfg.PlaywrightMCP))
+		_, statErr := os.Stat(config.ExpandHome(cfg.PlaywrightMCP))
+		add("browser tooling", statErr == nil, false, "optional, for browser verification: "+config.ExpandHome(cfg.PlaywrightMCP))
 		home, _ := os.UserHomeDir()
 		cache, _ := os.ReadFile(filepath.Join(home, ".codex", "models_cache.json"))
 		for alias, model := range cfg.Models {
@@ -365,32 +365,6 @@ func installZed() map[string]any {
 	}
 	return map[string]any{"changed": added > 0, "tasks_file": path, "run": "command palette → task: spawn → claude-dev: watch",
 		"optional_keymap_entry": keymap}
-}
-
-// newest returns the most recently touched gate of this checkout, for viewers that run outside the lead session.
-func newest() *Gate {
-	var found *Gate
-	var stamp time.Time
-	paths, _ := filepath.Glob(filepath.Join(checkoutDir(""), "*", "state.json"))
-	for _, path := range paths {
-		info, err := os.Stat(path)
-		raw, _ := os.ReadFile(path)
-		gate := &Gate{}
-		if err == nil && json.Unmarshal(raw, gate) == nil && info.ModTime().After(stamp) {
-			found, stamp = gate, info.ModTime()
-		}
-	}
-	return found
-}
-
-// Visible is the gate a read-only viewer should show: the session's own, or the newest of the checkout.
-func Visible() *Gate {
-	if session() != "" {
-		if gate := Current(); gate != nil {
-			return gate
-		}
-	}
-	return newest()
 }
 
 // Overview lists the gates of this checkout without touching any of them.

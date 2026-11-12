@@ -529,6 +529,9 @@ func (m *panel) items() []item {
 	if len(task.Open) > 0 || task.Notes > 0 {
 		out = append(out, item{"findings", 0})
 	}
+	if task.Gate != nil && len(task.Gate.Signals) > 0 {
+		out = append(out, item{"signals", 0})
+	}
 	if task.Gate != nil {
 		out = append(out, item{"plan", 0})
 	}
@@ -852,6 +855,9 @@ func (m *panel) frame() []string {
 		}
 		lines = append(lines, "", cursor("findings", 0)+p.bold("FINDINGS")+fmt.Sprintf("  P0 %d · P1 %d · P2 %d · notes %d · ", counts["P0"], counts["P1"], counts["P2"], task.Notes)+state)
 	}
+	if gate != nil && len(gate.Signals) > 0 {
+		lines = append(lines, cursor("signals", 0)+p.bold("SIGNALS")+p.dim(fmt.Sprintf("  %d leftovers found mechanically on added lines", len(gate.Signals))))
+	}
 	if gate != nil {
 		lines = append(lines, cursor("plan", 0)+p.bold("PLAN")+p.dim(fmt.Sprintf("  %d streams · %d files · %d checks", len(gate.Plan.Streams), len(gate.Files), len(gate.Plan.Checks))))
 	}
@@ -985,6 +991,11 @@ func (m *panel) detail(width, room int) []string {
 			text("what", finding.Evidence)
 			text("impact", finding.Impact)
 			text("remedy", finding.Remedy)
+		}
+	case m.view.Kind == "signals" && task.Gate != nil:
+		head = []string{" " + p.bold("SIGNALS") + p.dim("  leads for the reviewers, not verdicts")}
+		for _, signal := range task.Gate.Signals {
+			body = append(body, " "+p.yellow(fit(signal.Kind, 18))+p.dim(fmt.Sprintf("%s:%d", signal.Path, signal.Line)), "   "+fit(signal.Text, width-5))
 		}
 	case m.view.Kind == "plan" && task.Gate != nil:
 		plan := task.Gate.Plan

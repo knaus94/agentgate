@@ -288,8 +288,10 @@ func ReviewTask(cfg *config.Config, gate *Gate, input ReviewInput) (any, error) 
 	if err != nil {
 		return nil, err
 	}
+	// A free pass before any model reads the code: literal leftovers on the lines the task added.
+	gate.Signals = scanSignals(gate.Baseline, now, gate.Files)
 	packet := map[string]any{"task": gate.Request.Task, "brief": gate.Plan.Brief, "mode": gate.Mode, "context": gate.Context,
-		"changes": changes, "accepted_findings": accepted, "prior_decisions": gate.decisions(), "checks": gate.Checks,
+		"changes": changes, "slop_signals": gate.Signals, "accepted_findings": accepted, "prior_decisions": gate.decisions(), "checks": gate.Checks,
 		"architecture": architectureFor(gate.Plan), "writer_notes": gate.writerNotes(), "report_p3": false,
 		"context_pack": gate.ContextPack}
 	if ui, _ := loadUI(gate.Plan); ui != nil {
@@ -331,8 +333,12 @@ func ReviewTask(cfg *config.Config, gate *Gate, input ReviewInput) (any, error) 
 	}
 	if len(specs) == 0 && input.LeadReview == nil {
 		// Light mode: the lead is the reviewer. Hand over the evidence and wait for its reading.
-		return map[string]any{"mode": gate.Mode, "evidence": changes, "next": "Read these diffs yourself, then call review again " +
-			"with lead_review {summary, findings}. An empty findings list is a valid result."}, nil
+		if err := gate.save(); err != nil {
+			return nil, err
+		}
+		return map[string]any{"mode": gate.Mode, "evidence": changes, "slop_signals": gate.Signals,
+			"next": "Read these diffs yourself, then call review again with lead_review {summary, findings}. You are the only reviewer: " +
+				"judge every slop_signal, and ask of each added line whether the task needs it (guide, section 5). An empty findings list is a valid result."}, nil
 	}
 	timeout, err := timeoutSeconds(input.ReviewerTimeoutS, gate.Plan.ReviewerTimeoutS, cfg.Modes[gate.Mode].ReviewerTimeoutS)
 	if err != nil {

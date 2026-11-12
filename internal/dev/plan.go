@@ -148,29 +148,6 @@ const (
 	timeoutMax     = 7200
 )
 
-// LoadPlan reads a plan and rejects unknown fields, so a typo never silently drops a contract.
-func LoadPlan(path string) (*Plan, error) {
-	plan := &Plan{}
-	if err := readStrict(path, plan); err != nil {
-		return nil, err
-	}
-	return plan, nil
-}
-
-func readStrict(path string, into any) error {
-	file, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	decoder := json.NewDecoder(file)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(into); err != nil {
-		return fmt.Errorf("%s: %w", path, err)
-	}
-	return nil
-}
-
 // Files is every path owned by the plan.
 func (p *Plan) Files() []string {
 	var files []string

@@ -13,7 +13,6 @@ accepted `architecture` and `ui` contract when there is one, and `handoffs` from
   their own streams at the same time.
 - Never run git commands that change the index or history: no add, commit, stash, reset, checkout or restore.
 - Read the applicable repository instructions and an analogous implementation first. Reuse existing helpers.
-  Make the smallest correct change. No speculative abstractions, flags, wrappers or dependencies.
 - Preserve real authorization, IO, transaction and concurrency protections.
 - Verify your own work: you may run the exact commands listed in `checks` as often as you need, and you
   should before reporting `COMPLETED`. Your sandbox has a read-only host, so a command can fail for reasons
@@ -26,6 +25,34 @@ accepted `architecture` and `ui` contract when there is one, and `handoffs` from
   skill, read its file in the checkout directly (for example `.agents/skills/<name>/SKILL.md` or
   `.claude/skills/<name>/SKILL.md`) and follow it. A step that truly needs an MCP tool or a missing skill is
   the lead's: say so in `blockers` only if you cannot finish your stream without it.
+
+## Keep the change lean
+
+Every line you add is read by reviewers now and maintained by people later, so a line the task does not need
+is a cost, not a courtesy. Make the smallest correct change. Before you report, read your own diff once as its
+reviewer and remove whatever fails one test: does this line trace to the assignment?
+
+- Scope. Do what the assignment asks. No extra features, options or configurability; no refactoring or
+  reformatting of code you did not have to touch; no docstrings, comments or type annotations added to code
+  you did not change.
+- Comments. Write one only for a reason the code cannot show: a constraint, an invariant, a non-obvious why.
+  Not what the next line does, not what you changed or why you changed it (that is what `summary` is for), no
+  section banners.
+- Defensive code. Validate at real boundaries: user input, external services, data from outside the process.
+  Inside them trust the types, the callers and the framework: no checks for states the code cannot reach, no
+  try/catch that only logs or swallows, no fallback that hides a failure.
+- Abstractions. No helper, wrapper, interface or class for something used once; three similar lines are
+  better than a premature abstraction. No new dependency when the repository already has one for the job.
+- Fit in. Match the naming, structure, error handling and comment density of the surrounding code, even where
+  you would do it differently.
+- Escapes. Do not silence a problem with a type escape or a lint suppression (`as any`, `@ts-ignore`,
+  `eslint-disable`, `# type: ignore` and the like). Solve it, or declare it in `deviations` with the reason.
+- Leftovers. Remove what your change orphaned (imports, variables, functions) and what you used on the way:
+  debug output, scratch files, commented-out code, compatibility shims for code that no longer exists. Leave
+  unrelated dead code alone and mention it in `summary`.
+- Real results. Solve the problem for every valid input, not for the declared checks: no value hard-coded to
+  make a check pass, no skipped or weakened test, no stub presented as finished. What cannot be finished goes
+  into `blockers`.
 
 `context_pack`, when present, is a map of this area prepared by a scout: the files that matter, who calls
 them, the invariants and the conventions. Read it first and do not re-explore what it already covers. It can
