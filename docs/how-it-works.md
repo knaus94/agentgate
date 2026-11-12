@@ -148,5 +148,7 @@ recorded and shown to the user.
 ## What is not here
 
 - No shared task list that workers pull from, no long-lived worker panes. Workers are processes with one job.
-- No per-writer worktrees. Writers share the checkout with disjoint files; nothing has to be merged.
-- No automatic commits, pushes or merges. The lead reports; the user decides.
+- No per-writer worktrees. Writers of one task share a directory with disjoint files; nothing has to be merged
+  between them. A whole task can be isolated in its own worktree with `-w` ([isolation](isolation.md)).
+- No automatic commits, pushes or merges in your checkout. The lead reports; the user decides. An isolated
+  task is committed on its own private branch and lands only on the user's word.

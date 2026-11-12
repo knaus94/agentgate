@@ -3,6 +3,12 @@
   "max_parallel": 4,
   "worker_memory_mib": 512,
   "retention_days": 14,
+  "worktree": {
+    "default": false,
+    "copy": [],
+    "setup": [],
+    "setup_timeout_s": 1800
+  },
   "models": {
     "opus": {
       "provider": "claude",

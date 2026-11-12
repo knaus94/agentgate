@@ -31,6 +31,12 @@ func Execute(action string, run func() (any, error)) (any, error) {
 	if err := ops.Begin(home(), action, gateID); err != nil {
 		return nil, err
 	}
+	// An isolated task is driven from inside its worktree; the user's checkout is only where it was started.
+	defer leave()
+	if err := Current().enter(); err != nil && action != "land" {
+		ops.End(err)
+		return nil, err
+	}
 	value, err := run()
 	ops.End(err)
 	if ops.IsCancelled(err) {

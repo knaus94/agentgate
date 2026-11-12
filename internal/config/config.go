@@ -59,6 +59,14 @@ type Account struct {
 	Paid     bool   `json:"paid,omitempty"` // an API-key profile bills per token; it is used only when this is set
 }
 
+// Worktree configures isolated tasks (`/dev -w`): what a fresh worktree needs before code in it can be checked.
+type Worktree struct {
+	Default       bool       `json:"default"`         // isolate every writing task, without the flag
+	Copy          []string   `json:"copy"`            // untracked files and directories to bring from the checkout, e.g. env files
+	Setup         [][]string `json:"setup"`           // commands run once in the new worktree, e.g. installing dependencies
+	SetupTimeoutS int        `json:"setup_timeout_s"` // limit for each setup command
+}
+
 type Config struct {
 	Version           int                 `json:"version"`
 	MaxParallel       int                 `json:"max_parallel"`
@@ -72,6 +80,7 @@ type Config struct {
 	Consultant        string              `json:"consultant"`
 	PlaywrightMCP     string              `json:"playwright_mcp"`
 	Accounts          []Account           `json:"accounts"`
+	Worktree          Worktree            `json:"worktree"`
 	Modes             map[string]Mode     `json:"modes"`
 }
 
@@ -265,6 +274,19 @@ func (c *Config) validate() error {
 				return fmt.Errorf("config: fallbacks reference unknown model %q", other)
 			}
 		}
+	}
+	for _, path := range c.Worktree.Copy {
+		if path == "" || filepath.IsAbs(path) || strings.HasPrefix(filepath.Clean(path), "..") {
+			return fmt.Errorf("config: worktree.copy takes paths inside the repository: %q", path)
+		}
+	}
+	for _, argv := range c.Worktree.Setup {
+		if len(argv) == 0 || argv[0] == "" {
+			return errors.New("config: worktree.setup is a list of commands, each a non-empty argv array")
+		}
+	}
+	if c.Worktree.SetupTimeoutS < 1 {
+		return errors.New("config: worktree.setup_timeout_s must be positive")
 	}
 	names := map[string]bool{}
 	for _, account := range c.Accounts {

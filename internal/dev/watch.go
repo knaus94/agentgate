@@ -108,6 +108,16 @@ func Render(cfg *config.Config, gate *Gate, color bool) string {
 	}
 	line("%s  %s  %s  %s", p.bold("/dev"), p.bold(gate.Mode), p.status(gate.Phase), p.dim("round "+fmt.Sprint(gate.Iteration)))
 	line("%s", task)
+	if gate.Worktree != "" {
+		state := "isolated on " + gate.Branch
+		switch {
+		case gate.Landed != "":
+			state += " · closed: " + gate.Landed
+		case gate.Phase == "complete":
+			state += " · ready to land"
+		}
+		line("%s", p.cyan(state))
+	}
 	if gate.Phase == "held" {
 		line("%s %s", p.yellow("on hold:"), gate.HoldReason)
 	}
@@ -208,7 +218,13 @@ func Watch(cfg *config.Config, once bool) {
 	terminal := info != nil && info.Mode()&os.ModeCharDevice != 0
 	for {
 		// Tolerate a state file caught mid-rename: draw the previous picture again on the next tick.
-		text := Render(cfg, Visible(), terminal)
+		gate, text := Visible(), ""
+		if gate == nil {
+			text = Render(cfg, nil, terminal)
+		} else {
+			gate.Inside(func() { text = Render(cfg, gate, terminal) })
+			text += siblings(gate, paint{terminal})
+		}
 		if once || !terminal {
 			fmt.Print(text)
 			return
@@ -224,4 +240,35 @@ func onAccount(route config.Route) string {
 		return ""
 	}
 	return "  @" + route.Account
+}
+
+// siblings lists the other tasks of the checkout that still need attention: running ones, and isolated ones
+// that are finished but not landed. Several sessions work side by side, and one panel should show them all.
+func siblings(shown *Gate, p paint) string {
+	var out strings.Builder
+	paths, _ := filepath.Glob(filepath.Join(checkoutDir(shown.Cwd), "*", "state.json"))
+	sort.Strings(paths)
+	for _, path := range paths {
+		raw, _ := os.ReadFile(path)
+		gate := &Gate{}
+		if json.Unmarshal(raw, gate) != nil || gate.ID == shown.ID || !(gate.active() || (gate.Worktree != "" && gate.Landed == "")) {
+			continue
+		}
+		if out.Len() == 0 {
+			fmt.Fprintf(&out, "\n%s\n", p.bold("other tasks here"))
+		}
+		task := gate.Request.Task
+		if len([]rune(task)) > 50 {
+			task = string([]rune(task)[:50]) + "…"
+		}
+		state := gate.Phase
+		if gate.Worktree != "" {
+			state += ", isolated"
+			if gate.Phase == "complete" {
+				state = "ready to land"
+			}
+		}
+		fmt.Fprintf(&out, "  %-8s %-22s %s\n", gate.Mode, p.status(state), task)
+	}
+	return out.String()
 }

@@ -233,6 +233,10 @@ func ReviewTask(cfg *config.Config, gate *Gate, input ReviewInput) (any, error) 
 			return nil, errors.New("a writer is still running")
 		}
 	}
+	if left := gate.unresolved(); len(left) > 0 {
+		return nil, fmt.Errorf("conflict markers remain in %s; `fix` sends them to the writers", strings.Join(left, ", "))
+	}
+	gate.Conflicts = nil
 	if err := gate.auditScope(); err != nil {
 		return nil, err
 	}
@@ -262,7 +266,10 @@ func ReviewTask(cfg *config.Config, gate *Gate, input ReviewInput) (any, error) 
 		}
 		if !pending && input.Visual == nil {
 			gate.Phase = "reviewed"
-			return gate.Summary(cfg), gate.save()
+			if err := gate.save(); err != nil {
+				return nil, err
+			}
+			return gate.closeWith(cfg, input.Finish)
 		}
 	}
 	changed := false
@@ -408,17 +415,21 @@ func ReviewTask(cfg *config.Config, gate *Gate, input ReviewInput) (any, error) 
 	if err := gate.save(); err != nil {
 		return nil, err
 	}
-	// A clean review can close the task in the same call, saving the lead a round trip.
-	if input.Finish != nil {
-		value, err := Finish(cfg, gate, *input.Finish)
+	return gate.closeWith(cfg, input.Finish)
+}
+
+// closeWith ends a review call. A clean review can close the task in the same call, saving the lead a round trip.
+func (g *Gate) closeWith(cfg *config.Config, finish *FinishInput) (any, error) {
+	if finish != nil {
+		value, err := Finish(cfg, g, *finish)
 		if err == nil {
 			return value, nil
 		}
-		summary := gate.Summary(cfg)
+		summary := g.Summary(cfg)
 		summary["finish_refused"] = err.Error()
 		return summary, nil
 	}
-	return gate.Summary(cfg), nil
+	return g.Summary(cfg), nil
 }
 
 func (g *Gate) writerNotes() []map[string]any {

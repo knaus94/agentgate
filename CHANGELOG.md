@@ -2,6 +2,14 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.3.0
+
+- **Isolated tasks.** `/dev -w` runs a task in its own git worktree and branch: the checkout stays clean,
+  several sessions may change the same files, and the finished work comes in with `claude-dev land` on the
+  user's word — `apply` (uncommitted, default), `commit`, `branch` or `drop`. When the checkout moved on it is
+  merged inside the worktree: checks rerun, changed overlap is reviewed again, conflicts go back to the writers.
+  `worktree.copy` and `worktree.setup` prepare a fresh worktree; `worktree.default` isolates every task.
+
 ## 0.2.0
 
 - **Several subscriptions.** `claude-dev accounts` manages CLI profiles of Claude and Codex as accounts: live

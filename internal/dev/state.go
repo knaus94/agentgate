@@ -40,6 +40,7 @@ type Round struct {
 	Failures   []CheckFailure `json:"check_failures,omitempty"` // declared checks this correction must make pass
 	Findings   []Finding      `json:"findings,omitempty"`       // accepted findings this correction must resolve
 	Remedy     string         `json:"remedy,omitempty"`
+	Conflicts  []string       `json:"conflicts,omitempty"` // files whose merge markers this correction must resolve
 }
 
 // CheckFailure is a failing declared check handed back to the writers: the command and the end of its output.
@@ -198,6 +199,10 @@ type Gate struct {
 	Foreign       []string                `json:"foreign_changes,omitempty"`
 	Substitutions []provider.Substitution `json:"substitutions,omitempty"`
 	Final         *Final                  `json:"final,omitempty"`
+	Worktree      string                  `json:"worktree,omitempty"`  // an isolated task works here, not in Cwd
+	Branch        string                  `json:"branch,omitempty"`    // the branch of that worktree
+	Landed        string                  `json:"landed,omitempty"`    // how an isolated task was closed: apply, commit, branch, drop
+	Conflicts     []string                `json:"conflicts,omitempty"` // files left with merge markers by catching up with the checkout
 	Reported      bool                    `json:"completion_reported,omitempty"`
 	CreatedAt     int64                   `json:"created_at"`
 }
@@ -233,7 +238,7 @@ func session() string {
 
 func checkoutDir(cwd string) string {
 	if cwd == "" {
-		cwd, _ = os.Getwd()
+		cwd = base()
 	}
 	if real, err := filepath.EvalSymlinks(cwd); err == nil {
 		cwd = real
@@ -447,7 +452,7 @@ func owners(files []string) []string {
 	for _, path := range paths {
 		raw, err := os.ReadFile(path)
 		other := &Gate{}
-		if err != nil || json.Unmarshal(raw, other) != nil || other.Session == session() || !other.active() {
+		if err != nil || json.Unmarshal(raw, other) != nil || other.Session == session() || !other.active() || other.Worktree != "" {
 			continue
 		}
 		for _, file := range files {
@@ -490,18 +495,35 @@ func subtract(values, remove []string) []string {
 }
 
 // begin creates the gate and freezes the pre-task state of every owned file, including the user's uncommitted edits.
-func begin(resolved *Resolved) (*Gate, error) {
+func begin(resolved *Resolved) (gate *Gate, err error) {
+	if previous := Current(); previous != nil && previous.active() {
+		return nil, errors.New("an unfinished gate already exists; resume it or hold it explicitly")
+	}
+	if previous := Current(); previous != nil && previous.Worktree != "" && previous.Landed == "" {
+		return nil, errors.New("this session's finished isolated task is not landed yet: `land` it (or drop it) before starting another")
+	}
+	plan := resolved.Plan
+	files := plan.Files()
+	gate = &Gate{ID: newID(), Session: session(), Request: resolved.Request, Cwd: base()}
+	if resolved.Request.Worktree || (resolved.Config.Worktree.Default && !resolved.Request.ReviewFirst()) {
+		// An isolated task shares no file with anyone, so it claims none. Preparing the worktree can take
+		// minutes and must not hold the checkout's lock.
+		if err := gate.isolate(resolved.Config); err != nil {
+			return nil, err
+		}
+		defer func() {
+			if err != nil {
+				leave()
+				gate.discard()
+			}
+		}()
+	}
 	unlock, err := scopeLock()
 	if err != nil {
 		return nil, err
 	}
 	defer unlock()
-	if previous := Current(); previous != nil && previous.active() {
-		return nil, errors.New("an unfinished gate already exists; resume it or hold it explicitly")
-	}
-	plan := resolved.Plan
-	files := plan.Files()
-	if clash := owners(files); len(clash) > 0 {
+	if clash := owners(files); gate.Worktree == "" && len(clash) > 0 {
 		return nil, fmt.Errorf("files are owned by another session's gate: %s", strings.Join(clash, "; "))
 	}
 	context := subtract(append(slices.Clone(plan.Context), guidance(files)...), files)
@@ -537,11 +559,10 @@ func begin(resolved *Resolved) (*Gate, error) {
 	if err != nil {
 		return nil, err
 	}
-	gate := &Gate{ID: newID(), Session: session(), Request: resolved.Request, Mode: resolved.Mode, Plan: plan, PlanVersion: 1,
-		Files: files, Context: context, Baseline: baseline, HeadBefore: strings.TrimSpace(head), Manifest: files0,
-		WriteFiles: files, Phase: phase, Dispositions: map[string]Disposition{}, Resolutions: map[string]string{},
-		Baselines: map[string]int{}, CreatedAt: time.Now().Unix()}
-	gate.Cwd, _ = os.Getwd()
+	gate.Mode, gate.Plan, gate.PlanVersion = resolved.Mode, plan, 1
+	gate.Files, gate.Context, gate.Baseline, gate.HeadBefore, gate.Manifest = files, context, baseline, strings.TrimSpace(head), files0
+	gate.WriteFiles, gate.Phase, gate.CreatedAt = files, phase, time.Now().Unix()
+	gate.Dispositions, gate.Resolutions, gate.Baselines = map[string]Disposition{}, map[string]string{}, map[string]int{}
 	ops.BindGate(gate.ID)
 	prune(resolved.Config.RetentionDays)
 	return gate, gate.save()
@@ -566,7 +587,7 @@ func (g *Gate) extend(resolved *Resolved) error {
 	}
 	defer unlock()
 	added := subtract(files, g.Files)
-	if clash := owners(added); len(clash) > 0 {
+	if clash := owners(added); g.Worktree == "" && len(clash) > 0 {
 		return fmt.Errorf("files are owned by another session's gate: %s", strings.Join(clash, "; "))
 	}
 	context := subtract(append(append(slices.Clone(g.Context), plan.Context...), guidance(files)...), files)
@@ -599,7 +620,8 @@ func prune(days int) int {
 		info, err := os.Stat(path)
 		raw, _ := os.ReadFile(path)
 		gate := &Gate{}
-		if err != nil || info.ModTime().After(limit) || json.Unmarshal(raw, gate) != nil || gate.active() {
+		if err != nil || info.ModTime().After(limit) || json.Unmarshal(raw, gate) != nil || gate.active() ||
+			(gate.Worktree != "" && gate.Landed == "") { // finished work nobody landed yet is not garbage
 			continue
 		}
 		if os.RemoveAll(filepath.Dir(path)) == nil {

@@ -405,8 +405,12 @@ func Overview() map[string]any {
 			if record := ops.Status(filepath.Dir(path)); record != nil {
 				live = record.Live
 			}
-			gates = append(gates, map[string]any{"session": gate.Session, "id": gate.ID, "mode": gate.Mode, "phase": gate.Phase,
-				"task": gate.Request.Task, "operation_live": live})
+			item := map[string]any{"session": gate.Session, "id": gate.ID, "mode": gate.Mode, "phase": gate.Phase,
+				"task": gate.Request.Task, "operation_live": live}
+			if gate.Worktree != "" {
+				item["isolated"] = gate.landing()
+			}
+			gates = append(gates, item)
 		}
 	}
 	return map[string]any{"gates": gates, "read_only": true,

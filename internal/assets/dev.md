@@ -1,6 +1,6 @@
 ---
 description: Claude leads sandboxed Codex and Claude workers through a quality gate; the mode is chosen automatically.
-argument-hint: "[-N] [-l|-m|-h|-x] [plan|research|fix|review|clean|verify|status|stop|help] [--fix] [--grill|--no-grill] [--preview] <task>"
+argument-hint: "[-N] [-l|-m|-h|-x] [-w] [plan|research|fix|review|clean|verify|status|stop|help] [--fix] [--grill|--no-grill] [--preview] <task>"
 disable-model-invocation: true
 allowed-tools: Bash(claude-dev:*), Read
 ---

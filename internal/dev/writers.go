@@ -264,6 +264,17 @@ func (g *Gate) assignment(stream Stream) map[string]any {
 		}
 		packet["correction"] = map[string]any{"findings": mine, "failing_checks": g.Round.Failures, "remedy": g.Round.Remedy,
 			"rule": "Fix exactly these accepted findings and make the failing checks pass; preserve everything else."}
+		var conflicts []string
+		for _, file := range g.Round.Conflicts {
+			if slices.Contains(stream.Files, file) {
+				conflicts = append(conflicts, file)
+			}
+		}
+		if len(conflicts) > 0 {
+			packet["merge_conflicts"] = map[string]any{"files": conflicts,
+				"rule": "These files carry git conflict markers: your change against newer commits of the repository. " +
+					"Combine both sides as the remedy says, keep what the other side added, and leave no marker."}
+		}
 	}
 	return packet
 }

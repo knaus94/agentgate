@@ -129,6 +129,17 @@ The plan of a task is kept in the repository, in `.claude-dev/plans/<name>/`: `p
 `brief.md` is the same plan for a person to read. `claude-dev plan list` shows them; a saved plan can be
 launched from a later session.
 
+## Isolated tasks
+
+```
+/dev -w add rate limiting to the export endpoint
+```
+
+With `-w` a task works in its own git worktree and branch. Your checkout stays clean while it runs, several
+sessions can work in one repository on the same files, and the finished change comes in only on your word —
+uncommitted by default. If your checkout moved on, the merge and any conflict are handled inside the worktree.
+See [docs/isolation.md](docs/isolation.md).
+
 ## Several subscriptions
 
 ```sh
@@ -158,6 +169,7 @@ A repository can carry its own `.claude-dev.json`. See [docs/configuration.md](d
 - [Why these models](docs/model-selection.md) — the public data behind the defaults
 - [Configuration](docs/configuration.md) — models, pools, fallbacks, per-repository overrides
 - [Several subscriptions](docs/accounts.md) — accounts, limits, load spreading, failover
+- [Isolated tasks](docs/isolation.md) — `-w`: worktrees, landing, catching up, preparing dependencies
 - [Releasing](docs/releasing.md) — how versions are published and installed
 - `claude-dev guide` and `claude-dev reference` print what the lead reads
 

@@ -78,7 +78,8 @@ func Fix(cfg *config.Config, gate *Gate, input FixInput) (any, error) {
 	}
 	// A correction is driven by accepted review findings, by failing declared checks, or by both.
 	failing := gate.failing()
-	if len(failing) == 0 {
+	conflicts := gate.unresolved()
+	if len(failing) == 0 && len(conflicts) == 0 {
 		if gate.Phase != "reviewed" || content != gate.ReviewDigest {
 			return nil, errors.New("a correction needs a review and triage of the current code, or a failing declared check")
 		}
@@ -92,7 +93,7 @@ func Fix(cfg *config.Config, gate *Gate, input FixInput) (any, error) {
 		return nil, fmt.Errorf("cannot correct a task that is %s", gate.Phase)
 	}
 	accepted := gate.accepted()
-	if len(accepted) == 0 && len(failing) == 0 {
+	if len(accepted) == 0 && len(failing) == 0 && len(conflicts) == 0 {
 		return nil, errors.New("there are no accepted findings and no failing checks to correct")
 	}
 	if strings.TrimSpace(input.Brief) == "" {
@@ -161,6 +162,11 @@ func Fix(cfg *config.Config, gate *Gate, input FixInput) (any, error) {
 			}
 		}
 	}
+	for _, file := range conflicts {
+		if stream := gate.streamOf(file); stream != nil {
+			touched[stream.Name] = true
+		}
+	}
 	if len(touched) == 0 {
 		return nil, errors.New("streams names no stream of the plan")
 	}
@@ -184,7 +190,7 @@ func Fix(cfg *config.Config, gate *Gate, input FixInput) (any, error) {
 	gate.Corrections = append(gate.Corrections, Correction{Iteration: gate.Iteration, FindingIDs: ids, StartDigest: content,
 		CheckIDs: checkIDs, Brief: input.Brief, Reassessment: input.Reassessment})
 	gate.Round = &Round{Batch: fmt.Sprintf("v%d.c%d", gate.PlanVersion, gate.Iteration), Streams: streams, Correction: true,
-		Findings: accepted, Remedy: input.Brief, Boost: gate.Boost, Failures: failing}
+		Findings: accepted, Remedy: input.Brief, Boost: gate.Boost, Failures: failing, Conflicts: conflicts}
 	gate.Phase, gate.WriteFiles = "correcting", gate.Files
 	if gate.Manifest, err = manifest(); err != nil {
 		return nil, err
@@ -254,6 +260,11 @@ func Finish(cfg *config.Config, gate *Gate, input FinishInput) (any, error) {
 		return nil, err
 	}
 	gate.Final, gate.Phase = &Final{FinishInput: input, At: time.Now().Unix()}, "complete"
+	if gate.Worktree != "" {
+		if err := gate.commitTask("dev: " + firstLine(input.Summary)); err != nil {
+			return nil, err
+		}
+	}
 	return gate.Summary(cfg), gate.save()
 }
 
@@ -362,6 +373,9 @@ func (g *Gate) Summary(cfg *config.Config) map[string]any {
 	if g.Plan.Visual != nil {
 		out["visual"] = g.visualSummary()
 	}
+	if g.Worktree != "" {
+		out["isolated"] = g.landing()
+	}
 	return out
 }
 
@@ -371,6 +385,10 @@ func (g *Gate) next(cfg *config.Config, blocked bool) string {
 	case "implementing", "correcting":
 		return "Writers have not finished this round: launch (or answer the blocked stream)."
 	case "awaiting-review":
+		if left := g.unresolved(); len(left) > 0 {
+			return "Catching up with the checkout left conflict markers in " + strings.Join(left, ", ") +
+				". `fix` {brief}: say how the two changes combine; the owning writers resolve them in their sessions."
+		}
 		if g.Request.Writes() && len(g.failing()) > 0 {
 			return "A declared check fails, so no reviewer was started. Read its output, then `fix` {brief}: the failure goes back to the writers in their own sessions."
 		}
@@ -398,6 +416,11 @@ func (g *Gate) next(cfg *config.Config, blocked bool) string {
 		}
 		return "Everything required is current: `finish` with a summary."
 	case "complete":
+		if g.Worktree != "" && g.Landed == "" {
+			return "Done in an isolated worktree; the checkout is untouched. Report the work and the diff (`git diff HEAD..." + g.Branch +
+				"` in the checkout), then ask the user how to bring it in and run `land` {how}: apply (uncommitted, default), " +
+				"commit, branch (keep for a pull request) or drop. Never land without the user's word."
+		}
 		return "Done. Report the work, the checks that ran and any limits to the user."
 	}
 	return ""
@@ -407,7 +430,7 @@ func (g *Gate) next(cfg *config.Config, blocked bool) string {
 // unless an operation is still running or the task is honestly on hold.
 func StopHook(cwd, sessionID string) map[string]any {
 	gate := readGate(cwd, sessionID)
-	if gate == nil || gate.Session != sessionID || gate.Phase == "held" || gate.Phase == "cancelled" {
+	if gate == nil || gate.Session != sessionID || gate.Phase == "held" || gate.Phase == "cancelled" || gate.Landed != "" {
 		return map[string]any{}
 	}
 	if gate.Phase == "complete" {
@@ -415,7 +438,11 @@ func StopHook(cwd, sessionID string) map[string]any {
 			return map[string]any{}
 		}
 		previous, _ := os.Getwd()
-		if os.Chdir(gate.Cwd) == nil {
+		where := gate.Cwd
+		if gate.Worktree != "" {
+			where = gate.Worktree
+		}
+		if os.Chdir(where) == nil {
 			content, _, err := gate.contentDigest()
 			_ = os.Chdir(previous)
 			// A finished task is bound to the reviewed content, not to HEAD: committing it must not reopen it.

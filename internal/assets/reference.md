@@ -24,6 +24,7 @@ saved with `plan save`). Unknown fields are rejected.
 | `triage` | `{dispositions}` | judge findings |
 | `fix` | `{brief, reassessment?, escalate?, streams?}` | send accepted findings and failing checks back to the writers |
 | `finish` | `{summary, ...}` | close the task |
+| `land` | `{how?}` | isolated task only: bring it into the checkout — `apply` (default), `commit`, `branch` or `drop` |
 | `hold` | `{reason, cancelled?}` | park the task |
 | `resume`, `stop`, `status`, `watch` | — | lifecycle and observation |
 
@@ -34,7 +35,9 @@ Setup: `doctor`, `install [--zed] [--uninstall]`, `update [--check]`, `modes`,
 
 ## Request
 
-`[-N] [-l|-m|-h|-x] [plan|research|fix|review|clean|verify|status|stop|help] [--fix] [--grill|--no-grill] [--preview] <task>`
+`[-N] [-l|-m|-h|-x] [-w] [plan|research|fix|review|clean|verify|status|stop|help] [--fix] [--grill|--no-grill] [--preview] <task>`
+
+`-w` (`--worktree`) isolates a writing task in its own git worktree; the checkout changes only at `land`.
 
 `-N` caps how many model processes run at once (1–20). `--light --medium --heavy --ultra` are the long forms;
 `--deep` and `--critical` are accepted as heavy and ultra. `--` ends the flags.

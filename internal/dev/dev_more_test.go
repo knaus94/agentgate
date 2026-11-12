@@ -1037,3 +1037,200 @@ func TestCorrectionContinuesOnTheAccountThatHoldsTheSession(t *testing.T) {
 		t.Fatalf("the panel names the account a lane ran on:\n%s", text)
 	}
 }
+
+// identity lets git commit inside the fixture without touching any configuration.
+func identity(t *testing.T) {
+	for _, name := range []string{"GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"} {
+		t.Setenv(name, "Fixture")
+	}
+	for _, name := range []string{"GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"} {
+		t.Setenv(name, "fixture@example.invalid")
+	}
+}
+
+func gitOut(t *testing.T, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("git", args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v %s", args, err, out)
+	}
+	return string(out)
+}
+
+func fileText(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	must(t, err)
+	return string(raw)
+}
+
+func (f *fixture) land(how string) map[string]any {
+	return f.do("land", func() (any, error) { return Land(f.cfg, Current(), LandInput{How: how}) })
+}
+
+func TestIsolatedTaskLeavesTheCheckoutUntouchedUntilLanded(t *testing.T) {
+	f := newFixture(t)
+	identity(t)
+	must(t, os.WriteFile(".gitignore", []byte("local.env\n.ready\n"), 0o644))
+	gitOut(t, "add", ".gitignore")
+	gitOut(t, "commit", "-qm", "ignore local files")
+	must(t, os.WriteFile("local.env", []byte("SECRET=1\n"), 0o600))
+	f.cfg.Worktree.Copy = []string{"local.env", "missing.env"}
+	f.cfg.Worktree.Setup = [][]string{{"sh", "-c", "cat local.env > .ready"}}
+
+	for _, bad := range []string{"-w review the branch", "-w status", "-w -w task"} {
+		if _, err := ParseRequest(bad); err == nil {
+			t.Errorf("%q must be rejected", bad)
+		}
+	}
+	f.launch(f.plan("-w change the line"))
+	gate := Current()
+	if gate.Worktree == "" || !strings.HasPrefix(gate.Branch, "dev/change-the-line-") {
+		t.Fatalf("an isolated task has a worktree and a branch: %q %q", gate.Worktree, gate.Branch)
+	}
+	if fileText(t, "a.txt") != "before\n" || strings.TrimSpace(gitOut(t, "status", "--porcelain")) != "" {
+		t.Fatal("the checkout must not change while an isolated task works")
+	}
+	if fileText(t, filepath.Join(gate.Worktree, "a.txt")) != "after\n" || fileText(t, filepath.Join(gate.Worktree, ".ready")) != "SECRET=1\n" {
+		t.Fatal("the writer works in the worktree, prepared by copy and setup")
+	}
+	f.fails("land", "only a finished task lands", func() (any, error) { return Land(f.cfg, Current(), LandInput{}) })
+	f.review()
+	summary := f.finish()
+	if !strings.Contains(summary["next"].(string), "land") || summary["isolated"].(map[string]any)["branch"] != gate.Branch {
+		t.Fatalf("a finished isolated task waits for the user's word: %v", summary["next"])
+	}
+	if fileText(t, "a.txt") != "before\n" {
+		t.Fatal("finishing does not touch the checkout either")
+	}
+	if hook := StopHook(Current().Cwd, "fixture-session"); len(hook) != 0 {
+		t.Fatalf("a finished task waiting to land does not hold the turn: %v", hook)
+	}
+	f.fails("launch", "not landed yet", func() (any, error) { return Launch(f.cfg, f.plan("-w another change")) })
+
+	landed := f.land("")
+	if landed["landed"] != "apply" || fileText(t, "a.txt") != "after\n" || !strings.Contains(gitOut(t, "status", "--porcelain"), " M a.txt") {
+		t.Fatalf("apply leaves the change in the checkout, uncommitted: %v", landed)
+	}
+	if _, err := os.Stat(gate.Worktree); err == nil || strings.Contains(gitOut(t, "branch", "--list", gate.Branch), gate.Branch) {
+		t.Fatal("the worktree and its branch are removed after landing")
+	}
+	if _, err := os.Stat(".ready"); err == nil {
+		t.Fatal("what setup produced stays out of the checkout")
+	}
+	f.fails("land", "already closed", func() (any, error) { return Land(f.cfg, Current(), LandInput{}) })
+
+	// An ordinary task has nothing to land; a dropped one leaves no trace.
+	gitOut(t, "checkout", "-q", "--", "a.txt")
+	f.launch(f.plan("-w change it again"))
+	second := Current()
+	if dropped := f.land("drop"); dropped["phase"] != "cancelled" || fileText(t, "a.txt") != "before\n" {
+		t.Fatalf("drop discards the work: %v", dropped)
+	}
+	if _, err := os.Stat(second.Worktree); err == nil {
+		t.Fatal("a dropped task's worktree is removed")
+	}
+	f.launch(f.plan("change the line"))
+	f.fails("land", "not isolated", func() (any, error) { return Land(f.cfg, Current(), LandInput{}) })
+}
+
+func TestIsolatedSessionsCatchUpAndNeverConflictInTheCheckout(t *testing.T) {
+	f := newFixture(t)
+	identity(t)
+	f.model = func(kind string, packet map[string]any, call provider.Call) (string, error) {
+		if kind != "writer" {
+			return "", nil
+		}
+		text := os.Getenv("CLAUDE_DEV_SESSION") + "\n"
+		if _, repairing := packet["merge_conflicts"]; repairing {
+			text = "both changes\n"
+		}
+		for _, file := range packet["stream"].(map[string]any)["files"].([]any) {
+			_ = os.WriteFile(file.(string), []byte(text), 0o644)
+		}
+		return `{"status":"COMPLETED","summary":"implemented","blockers":[],"handoff":"","deviations":[]}`, nil
+	}
+	as := func(session string) { t.Setenv("CLAUDE_DEV_SESSION", session) }
+	other := Stream{Name: "core", Domain: "backend", Files: []string{"b.txt"}}
+
+	// Three sessions start from the same commit; two of them change the same file.
+	as("first")
+	f.launch(f.plan("-w first change"))
+	as("second")
+	f.launch(f.plan("-w second change"))
+	as("third")
+	f.launch(f.plan("-w third change", other))
+	for _, session := range []string{"first", "second", "third"} {
+		as(session)
+		f.review()
+		f.finish()
+	}
+	if strings.TrimSpace(gitOut(t, "status", "--porcelain")) != "" {
+		t.Fatal("three finished tasks, and the checkout is still clean")
+	}
+	if others := siblings(Current(), paint{}); strings.Count(others, "ready to land") != 2 {
+		t.Fatalf("the panel lists the other sessions' tasks waiting to land:\n%s", others)
+	}
+
+	as("first")
+	if landed := f.land("commit"); landed["commit"] == nil || fileText(t, "a.txt") != "first\n" || strings.TrimSpace(gitOut(t, "status", "--porcelain")) != "" {
+		t.Fatalf("commit lands the task as a commit on the current branch: %v", landed)
+	}
+
+	// The third task touches other files: the checkout's new commit merges in cleanly, its checks run again, it lands.
+	as("third")
+	checks := len(Current().Checks)
+	if landed := f.land("apply"); landed["landed"] != "apply" || fileText(t, "b.txt") != "third\n" || fileText(t, "a.txt") != "first\n" {
+		t.Fatalf("a task on other files lands on top of the new commit: %v", landed)
+	}
+	if len(Current().Checks) != checks+1 {
+		t.Fatal("after catching up every declared check runs again")
+	}
+
+	// The second task changed the same line: the conflict stays in its worktree and goes back to its writer.
+	as("second")
+	reopened := f.land("apply")
+	gate := Current()
+	if reopened["landed"] != false || gate.Phase != "awaiting-review" || len(gate.Conflicts) != 1 || gate.Conflicts[0] != "a.txt" {
+		t.Fatalf("a conflict reopens the task instead of landing: %v", reopened)
+	}
+	if fileText(t, "a.txt") != "first\n" || !strings.Contains(fileText(t, filepath.Join(gate.Worktree, "a.txt")), "<<<<<<<") {
+		t.Fatal("conflict markers live in the worktree, never in the checkout")
+	}
+	f.fails("review", "conflict markers remain", func() (any, error) { return ReviewTask(f.cfg, Current(), ReviewInput{}) })
+	f.do("fix", func() (any, error) { return Fix(f.cfg, Current(), FixInput{Brief: "keep both changes"}) })
+	f.review()
+	// A second review call of unchanged code still honours `finish`.
+	if closed := f.do("review", func() (any, error) {
+		return ReviewTask(f.cfg, Current(), ReviewInput{Finish: &FinishInput{Summary: "done"}})
+	}); closed["phase"] != "complete" {
+		t.Fatalf("review closes the task when asked, also when the review itself is already current: %v", closed)
+	}
+	gitOut(t, "stash", "-q", "--include-untracked") // the third task's uncommitted change is the user's to keep or drop
+	if landed := f.land("branch"); landed["branch"] != gate.Branch || fileText(t, "a.txt") != "first\n" {
+		t.Fatalf("branch keeps the work for a pull request and leaves the checkout alone: %v", landed)
+	}
+	if got := gitOut(t, "show", gate.Branch+":a.txt"); got != "both changes\n" {
+		t.Fatalf("the kept branch holds the resolved work: %q", got)
+	}
+	if _, err := os.Stat(gate.Worktree); err == nil {
+		t.Fatal("the worktree is removed even when the branch is kept")
+	}
+}
+
+func TestLandingRefusesToOverwriteTheUsersOwnEdits(t *testing.T) {
+	f := newFixture(t)
+	identity(t)
+	f.launch(f.plan("-w change the line"))
+	f.review()
+	f.finish()
+	must(t, os.WriteFile("a.txt", []byte("the user's own edit\n"), 0o644))
+	f.fails("land", "own uncommitted changes", func() (any, error) { return Land(f.cfg, Current(), LandInput{}) })
+	if fileText(t, "a.txt") != "the user's own edit\n" || Current().Landed != "" {
+		t.Fatal("a refused landing changes nothing and can be repeated")
+	}
+	gitOut(t, "checkout", "-q", "--", "a.txt")
+	if landed := f.land("apply"); landed["landed"] != "apply" || fileText(t, "a.txt") != "after\n" {
+		t.Fatalf("once the edit is out of the way the task lands: %v", landed)
+	}
+}

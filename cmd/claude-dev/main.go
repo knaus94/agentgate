@@ -21,7 +21,8 @@ import (
 
 const usage = `claude-dev — the /dev workflow for Claude Code
 
-In Claude Code:   /dev [-l|-m|-h|-x] <task>      (the mode is chosen automatically without a flag)
+In Claude Code:   /dev [-l|-m|-h|-x] [-w] <task>   (the mode is chosen automatically without a flag;
+                                                    -w works in an isolated worktree until you land it)
 
 Setup
   install [--zed] [--uninstall]   put the /dev command and the Stop hook into Claude Code
@@ -38,7 +39,7 @@ Setup
 
 For the lead (used by /dev)
   guide | reference | parse | preview | route | architecture | design | consult | launch | answer | tell
-  check | review | visual | triage | fix | finish | hold | resume | hook
+    check | review | visual | triage | fix | finish | land | hold | resume | hook
 
 Inputs are JSON from --file <path>, --file - (stdin) or --plan <name> (a saved plan).
 `
@@ -220,7 +221,9 @@ func run(args arguments) (any, int, error) {
 		return map[string]any{"removed": dev.Prune(cfg.RetentionDays)}, 0, nil
 	case "status":
 		if gate := dev.Current(); gate != nil {
-			return gate.Summary(cfg), 0, nil
+			var summary map[string]any
+			gate.Inside(func() { summary = gate.Summary(cfg) })
+			return summary, 0, nil
 		}
 		return dev.Overview(), 0, nil
 	case "stop":
@@ -317,6 +320,13 @@ func run(args arguments) (any, int, error) {
 			return nil, 0, err
 		}
 		value, err := gated(cfg, "fix", func(gate *dev.Gate) (any, error) { return dev.Fix(cfg, gate, input) })
+		return value, 0, err
+	case "land":
+		input := dev.LandInput{}
+		if err := args.input(&input, false); err != nil {
+			return nil, 0, err
+		}
+		value, err := gated(cfg, "land", func(gate *dev.Gate) (any, error) { return dev.Land(cfg, gate, input) })
 		return value, 0, err
 	case "finish":
 		input := dev.FinishInput{}

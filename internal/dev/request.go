@@ -17,7 +17,8 @@ type Request struct {
 	Parallel int    `json:"parallel"` // 0: automatic
 	Preview  bool   `json:"preview"`
 	Fix      bool   `json:"fix"`
-	Grill    string `json:"grill"` // auto, force, skip
+	Grill    string `json:"grill"`    // auto, force, skip
+	Worktree bool   `json:"worktree"` // work in an isolated worktree; the checkout changes only when the user lands it
 }
 
 var actions = []string{"plan", "research", "fix", "review", "clean", "verify", "status", "stop", "help"}
@@ -49,6 +50,8 @@ func ParseRequest(raw string) (Request, error) {
 			request.Preview = true
 		case token == "--fix" && !request.Fix:
 			request.Fix = true
+		case (token == "-w" || token == "--worktree") && !request.Worktree:
+			request.Worktree = true
 		case (token == "--grill" || token == "--no-grill") && request.Grill == "auto":
 			request.Grill = map[string]string{"--grill": "force", "--no-grill": "skip"}[token]
 		case isMode && request.Mode == "":
@@ -77,13 +80,16 @@ done:
 	}
 	switch request.Action {
 	case "status", "stop", "help":
-		if request.Task != "" || request.Mode != "" || request.Parallel != 0 || request.Preview || request.Grill != "auto" {
+		if request.Task != "" || request.Mode != "" || request.Parallel != 0 || request.Preview || request.Grill != "auto" || request.Worktree {
 			return request, fmt.Errorf("%s takes no task or flags", request.Action)
 		}
 	case "research", "verify":
 		if request.Mode != "" {
 			return request, fmt.Errorf("%s is read-only and has no mode; use plan, implement, fix, review or clean", request.Action)
 		}
+	}
+	if request.Worktree && request.Action != "implement" && request.Action != "fix" {
+		return request, fmt.Errorf("-w isolates a task that writes code; %s works on what is already in the checkout", request.Action)
 	}
 	if request.Task == "" {
 		switch request.Action {

@@ -117,7 +117,30 @@ Browser verification is opt-in and off unless the user asks for it. When on, rec
 scenarios}` (usually 1–5 rows) and pass `visual {url, origins}` to `review`; only loopback stands are reachable.
 Starting a stand needs the user's approval of the exact commands.
 
-## 8. Other actions
+## 8. Isolated tasks (`-w`)
+
+With `-w` in the request (or `worktree.default` in the configuration) the task works in its own git worktree on
+its own branch, created from the checkout's `HEAD` at launch. Everything else is the same flow, with these
+differences:
+
+- The user's checkout does not change, and you do not change it: never edit, stage or check out anything there
+  for this task. Every summary carries `isolated {worktree, branch}`; read files and diffs at that path
+  (`git -C <worktree> diff`). The user's uncommitted edits are not in the worktree.
+- Tasks of other sessions may touch the same files; nothing is claimed.
+- `finish` commits the work on the task's branch and leaves the checkout untouched. Report what was done, show
+  the user what changed, and ask how to bring it in. Then, on their word only, `claude-dev land` `{how}`:
+  `apply` (default: the change appears in the checkout uncommitted), `commit` (committed on the current branch),
+  `branch` (kept for a pull request) or `drop`.
+- If the checkout moved on, `land` merges it into the worktree first and may answer `landed: false` with the
+  task reopened: follow `next`. For conflict markers, read both sides, then `fix` `{brief}` saying how the two
+  changes combine; then `review` and `finish` again, and `land` again.
+- `land` refuses when the user has uncommitted edits in the files it would write. Tell them; do not stash or
+  discard anything of theirs yourself.
+- Preparing a worktree (`worktree.copy`, `worktree.setup` in the configuration) is the repository's business.
+  If a check fails because the worktree lacks dependencies or generated code, say so and hold: do not improvise
+  installs.
+
+## 9. Other actions
 
 - `plan`: you plan directly; with `-h`/`-x` run the architecture pass and present the synthesis. No code.
 - `research`, `verify`: `claude-dev consult` with bounded read-only questions; verify runs only existing

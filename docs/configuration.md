@@ -97,6 +97,7 @@ real-repository tasks).
 | `worker_memory_mib` | 512 | free memory required per worker; cgroup limits are honoured |
 | `retention_days` | 14 | finished tasks older than this are removed |
 | `playwright_mcp` | `~/.local/share/claude-dev/playwright-mcp/…/cli.js` | browser tooling for optional visual verification |
+| `worktree` | `{default: false, copy: [], setup: [], setup_timeout_s: 1800}` | isolated tasks (`-w`): what a fresh worktree needs — see [isolation](isolation.md) |
 | `accounts` | none | several subscriptions per provider; managed with `claude-dev accounts`, user file only — see [accounts](accounts.md) |
 
 ## Reset
