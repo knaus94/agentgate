@@ -1,0 +1,16 @@
+{
+  "about": "graphify code graph for workers. Needs `graphify` and `graphify-mcp` on PATH and a graph built once with `graphify extract . --code-only`.",
+  "worker_mcp": {
+    "graphify": {
+      "command": "graphify-mcp",
+      "args": ["graphify-out/graph.json"],
+      "tools": ["query_graph", "get_node", "get_neighbors", "get_community", "shortest_path", "god_nodes", "graph_stats"],
+      "roles": ["scout", "architect", "reviewer", "consultant"],
+      "hint": "a graph of this repository's code: symbols, files, calls and imports. Ask it who calls or depends on a symbol and what a change can reach before you grep. Generated code, manifests and translations are not indexed.",
+      "refresh": ["graphify", "update", "."]
+    }
+  },
+  "worktree": {
+    "copy": ["graphify-out", ".graphifyignore"]
+  }
+}

@@ -29,7 +29,7 @@ Setup
   doctor                          check the environment
   update [--check]                install the latest release
   modes                           show which model does what in each mode
-    config show|path|init|set <key> <value>|unset <key>
+      config show|path|init|set <key> <value>|unset <key>|extensions
   accounts [discover [--save] | add <name> <claude|codex> <home> | remove <name> | reset <name>]
                                   several subscriptions: limits, load spreading, failover
       plan save [name] | list | show <name> | link [synced directory]
@@ -404,9 +404,12 @@ func configCommand(rest []string) (any, int, error) {
 		if err := config.Unset(rest[1]); err != nil {
 			return nil, 0, err
 		}
+	case "extensions":
+		return map[string]any{"directories": config.ExtensionDirs(), "loaded": config.Extensions(),
+			"note": "One *.json file per integration. Objects merge into the configuration; lists add their items. Remove or rename a file to switch it off."}, 0, nil
 	case "show":
 	default:
-		return nil, 0, errors.New("usage: claude-dev config show|path|init|set <key> <value>|unset <key>")
+		return nil, 0, errors.New("usage: claude-dev config show|path|init|set <key> <value>|unset <key>|extensions")
 	}
 	cfg, err := config.Load()
 	return cfg, 0, err

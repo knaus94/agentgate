@@ -1,0 +1,33 @@
+{
+  "about": "Nx project graph for workers, through the workspace's own nx-mcp. Nx writes its graph cache, so .nx/workspace-data is opened for writing.",
+  "worker_mcp": {
+    "nx": {
+      "command": "npx",
+      "args": [
+        "nx",
+        "mcp",
+        "--no-minimal",
+        "--tools",
+        "nx_workspace",
+        "nx_project_details"
+      ],
+      "env": {
+        "NX_DAEMON": "false",
+        "NX_NO_CLOUD": "true"
+      },
+      "tools": [
+        "nx_workspace",
+        "nx_project_details"
+      ],
+      "roles": [
+        "scout",
+        "architect",
+        "consultant"
+      ],
+      "hint": "the Nx project graph: the projects of the workspace, their targets, and which project depends on which. Always pass a filter to nx_workspace (the whole workspace does not fit); use nx_project_details for one project.",
+      "writable": [
+        ".nx/workspace-data"
+      ]
+    }
+  }
+}

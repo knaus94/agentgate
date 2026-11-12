@@ -2,6 +2,16 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.6.0
+
+- **Extensions.** One JSON file per integration in `~/.config/claude-dev/extensions/` or
+  `<repository>/.claude-dev/extensions/` plugs it in without editing the configuration or the source; lists in
+  an extension add to the existing ones. `claude-dev config extensions` shows what is loaded.
+- **Tools for workers.** `worker_mcp` hands MCP servers to workers by role (scout by default), limited to the
+  listed tools on both CLIs, with an optional `refresh` command for the server's index and `writable` cache
+  directories. Ready examples for the graphify code graph and the Nx project graph are in `examples/extensions/`.
+- Claude workers can now use MCP servers, not only Codex ones.
+
 ## 0.5.0
 
 - **Filtering model-written extras.** Writers get explicit rules, with the reason, for what a change must not

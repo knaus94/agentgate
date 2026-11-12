@@ -98,6 +98,7 @@ claude-dev config set ui_designer opus:high
 | `retention_days` | 14 | завершённые задачи старше этого срока удаляются |
 | `playwright_mcp` | `~/.local/share/claude-dev/playwright-mcp/…/cli.js` | браузерный инструмент для необязательной визуальной проверки |
 | `worktree` | `{default: false, copy: [], setup: [], setup_timeout_s: 1800}` | изолированные задачи (`-w`): что нужно свежему worktree — см. [изоляцию](isolation.md) |
+| `worker_mcp` | нет | MCP-серверы, выдаваемые воркерам по ролям; обычно добавляются файлом-расширением — см. [расширения](extensions.md) |
 | `plans_home` | нет | синхронизируемая папка с каталогами `.claude-dev` репозиториев; задаётся командой `claude-dev plan link <папка>` |
 | `accounts` | нет | несколько подписок на провайдера; управляются через `claude-dev accounts`, только в пользовательском файле — см. [аккаунты](accounts.md) |
 

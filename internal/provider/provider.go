@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -310,9 +311,7 @@ func quoteList(values []string) string {
 }
 
 func runClaude(call Call) (Result, error) {
-	if call.MCP != nil {
-		return Result{}, errors.New("MCP tools are only wired for Codex routes")
-	}
+
 	// The sandbox hides the real config directory from writes; the process keeps its session in the lane.
 	home := filepath.Join(call.Dir, "home")
 	credential(&call, filepath.Join(profile(call, "CLAUDE_CONFIG_DIR", ".claude"), ".credentials.json"), filepath.Join(home, ".credentials.json"))
@@ -322,7 +321,36 @@ func runClaude(call Call) (Result, error) {
 	}
 	// The stream of events is what a viewer follows while the worker runs; the answer is its last "result" event.
 	argv := []string{"claude", "-p", "--model", call.Route.Model, "--effort", call.Route.Effort, "--output-format", "stream-json", "--verbose",
-		"--tools", tools, "--strict-mcp-config", "--setting-sources", "", "--dangerously-skip-permissions"}
+		"--tools", tools, "--strict-mcp-config", "--setting-sources", ""}
+	if call.MCP == nil {
+		argv = append(argv, "--dangerously-skip-permissions")
+	} else {
+		// With servers attached the worker may call exactly what is listed: its built-in tools and the named
+		// tools of each server. Everything else is refused without a prompt.
+		servers, allowed := map[string]any{}, strings.Split(tools, ",")
+		for name, server := range call.MCP {
+			env := server.Env
+			if env == nil {
+				env = map[string]string{}
+			}
+			servers[name] = map[string]any{"type": "stdio", "command": server.Command, "args": append([]string{}, server.Args...), "env": env}
+			if len(server.Tools) == 0 {
+				allowed = append(allowed, "mcp__"+name)
+			}
+			for _, tool := range server.Tools {
+				allowed = append(allowed, "mcp__"+name+"__"+tool)
+			}
+		}
+		sort.Strings(allowed[len(strings.Split(tools, ",")):])
+		config := filepath.Join(call.Dir, "mcp.json")
+		if err := ops.WriteJSON(config, map[string]any{"mcpServers": servers}); err != nil {
+			return Result{}, err
+		}
+		argv = append(argv, "--mcp-config", config, "--permission-mode", "dontAsk", "--allowedTools", strings.Join(allowed, ","))
+		for _, dir := range call.Writable {
+			argv = append(argv, "--add-dir", dir)
+		}
+	}
 	if call.Resume != "" {
 		argv = append(argv, "--resume", call.Resume)
 	} else if !call.Persist {

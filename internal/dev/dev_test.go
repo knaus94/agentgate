@@ -125,7 +125,7 @@ func kindOf(call provider.Call) string {
 	switch {
 	case call.Writer:
 		return "writer"
-	case call.MCP != nil:
+	case call.MCP["playwright"].Command != "":
 		return "visual"
 	case strings.Contains(call.Dir, "/scout/"):
 		return "scout"

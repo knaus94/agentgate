@@ -136,9 +136,10 @@ func Architecture(cfg *config.Config, plan *Plan) (any, error) {
 		if err := writePacket(filepath.Join(dir, "packet.json"), body); err != nil {
 			return lane, err
 		}
-		prompt := assets.Prompt("architecture") + "\nYour round: " + round + ". Read the packet at " + filepath.Join(dir, "packet.json") + ".\n"
+		tools, toolDirs, toolNote := workerTools(cfg, "architect")
+		prompt := assets.Prompt("architecture") + "\nYour round: " + round + ". Read the packet at " + filepath.Join(dir, "packet.json") + ".\n" + toolNote
 		result, used, err := subs.invoke(cfg, provider.Call{Route: route, Prompt: prompt, Dir: dir, Schema: schema, Timeout: timeout,
-			ReadDirs: packDirs(pack)}, nil)
+			ReadDirs: packDirs(pack), MCP: tools, Writable: toolDirs}, nil)
 		if err != nil {
 			return lane, err
 		}

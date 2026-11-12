@@ -192,9 +192,10 @@ func Consult(cfg *config.Config, input ConsultInput) (any, error) {
 		if err := writePacket(path, lane); err != nil {
 			return err
 		}
-		prompt := assets.Prompt("consult") + "\nRead your question at " + path + ".\n"
+		tools, toolDirs, toolNote := workerTools(cfg, "consultant")
+		prompt := assets.Prompt("consult") + "\nRead your question at " + path + ".\n" + toolNote
 		result, used, err := subs.invoke(cfg, provider.Call{Route: routes[index], Prompt: prompt, Dir: filepath.Join(dir, lane.Name, "run"),
-			Timeout: seconds(timeout), ReadDirs: []string{filepath.Join(dir, lane.Name)}}, nil)
+			Timeout: seconds(timeout), ReadDirs: []string{filepath.Join(dir, lane.Name)}, MCP: tools, Writable: toolDirs}, nil)
 		if err != nil {
 			return err
 		}

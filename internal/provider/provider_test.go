@@ -308,3 +308,37 @@ func TestOrdinaryLimitReportsAreNotARefusal(t *testing.T) {
 		t.Fatal("stderr still counts")
 	}
 }
+
+func TestClaudeWorkerGetsOnlyTheListedTools(t *testing.T) {
+	cfg, root := setup(t)
+	lane := filepath.Join(root, "state", "mcp")
+	_, err := Run(Call{Route: cfg.MustRoute("fable:high"), Prompt: "p", Dir: lane, Timeout: 20 * time.Second,
+		MCP: map[string]MCPServer{"graph": {Command: "graph-mcp", Args: []string{"graph.json"}, Tools: []string{"query", "node"}},
+			"docs": {Command: "docs-mcp", Env: map[string]string{"MODE": "ro"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	argv := read(t, filepath.Join(lane, "argv.txt"))
+	for _, want := range []string{"--mcp-config\n" + filepath.Join(lane, "mcp.json"), "--strict-mcp-config", "--permission-mode\ndontAsk",
+		"--allowedTools\nRead,Grep,Glob,mcp__docs,mcp__graph__node,mcp__graph__query\n"} {
+		if !strings.Contains(argv, want) {
+			t.Errorf("claude argv lacks %q:\n%s", want, argv)
+		}
+	}
+	if strings.Contains(argv, "--dangerously-skip-permissions") {
+		t.Fatal("with servers attached nothing outside the list may run")
+	}
+	servers := read(t, filepath.Join(lane, "mcp.json"))
+	for _, want := range []string{`"graph"`, `"command": "graph-mcp"`, `"graph.json"`, `"MODE": "ro"`, `"type": "stdio"`} {
+		if !strings.Contains(servers, want) {
+			t.Errorf("the server file lacks %s:\n%s", want, servers)
+		}
+	}
+	plain := filepath.Join(root, "state", "plain")
+	if _, err := Run(Call{Route: cfg.MustRoute("fable:high"), Prompt: "p", Dir: plain, Timeout: 20 * time.Second}); err != nil {
+		t.Fatal(err)
+	}
+	if argv := read(t, filepath.Join(plain, "argv.txt")); strings.Contains(argv, "--mcp-config") || !strings.Contains(argv, "--dangerously-skip-permissions") {
+		t.Fatalf("a worker without servers runs as before:\n%s", argv)
+	}
+}

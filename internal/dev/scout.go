@@ -63,9 +63,10 @@ func scout(resolved *Resolved, subs *substitutions) (string, string) {
 	if err := writePacket(packet, map[string]any{"brief": plan.Brief, "files": plan.Files(), "streams": plan.Streams, "context": plan.Context}); err != nil {
 		return "", err.Error()
 	}
-	prompt := assets.Prompt("scout") + "\nRead the packet at " + packet + ".\n"
+	tools, toolDirs, toolNote := workerTools(resolved.Config, "scout")
+	prompt := assets.Prompt("scout") + "\nRead the packet at " + packet + ".\n" + toolNote
 	result, used, err := subs.invoke(resolved.Config, provider.Call{Route: resolved.Config.MustRoute(spec), Prompt: prompt,
-		Dir: filepath.Join(dir, "run"), Schema: scoutSchema, Timeout: seconds(scoutTimeout), ReadDirs: []string{dir}}, nil)
+		Dir: filepath.Join(dir, "run"), Schema: scoutSchema, Timeout: seconds(scoutTimeout), ReadDirs: []string{dir}, MCP: tools, Writable: toolDirs}, nil)
 	if err != nil {
 		if ops.IsCancelled(err) {
 			return "", "cancelled"

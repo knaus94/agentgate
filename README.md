@@ -159,6 +159,7 @@ A repository can carry its own `.claude-dev.json`. See [docs/configuration.md](d
 - [Why these models](docs/model-selection.md) — the public data behind the defaults
 - [Configuration](docs/configuration.md) — models, pools, fallbacks, per-repository overrides
 - [Several subscriptions](docs/accounts.md) — accounts, limits, load spreading, failover
+- [Extensions](docs/extensions.md) — plug tools into the workers with one file: a code graph, the Nx project graph
 - [The panel](docs/watch.md) — `claude-dev watch`: tasks, timings, live worker activity
 - [Isolated tasks](docs/isolation.md) — `-w`: worktrees, landing, catching up, preparing dependencies
 - [Releasing](docs/releasing.md) — how versions are published and installed

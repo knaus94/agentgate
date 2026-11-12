@@ -519,7 +519,8 @@ func (g *Gate) runLane(cfg *config.Config, spec laneSpec, index int, dir string,
 		prompt = "The task you reviewed was corrected. A fresh packet is at " + path + ": start from since_last_review and recheck, " +
 			"resolve or keep every finding listed there, report new defects of the correction, and return the same JSON schema.\n"
 	}
-	result, used, err := subs.invoke(cfg, provider.Call{Route: route, Prompt: prompt, Dir: lane.Dir, Schema: reviewSchema,
+	tools, toolDirs, toolNote := workerTools(cfg, "reviewer")
+	result, used, err := subs.invoke(cfg, provider.Call{Route: route, Prompt: prompt + toolNote, Dir: lane.Dir, Schema: reviewSchema, MCP: tools, Writable: toolDirs,
 		Timeout: timeout, Persist: true, Resume: lane.Session, ReadDirs: append([]string{dir, filepath.Join(g.dir(), "checks")}, packDirs(g.ContextPack)...)}, skip)
 	if err != nil {
 		return lane, err

@@ -160,6 +160,10 @@ differences:
 
 ## Boundaries
 
+A repository may hand its workers extra tools through configuration (`claude-dev config extensions` lists
+them): a code graph, a workspace index. That is set up by the user, not by you, and it changes nothing in how
+you plan; scouts and reviewers that have such a tool are told about it themselves.
+
 Models, modes and extra reasoning never authorize new tests, heavy checks, servers, browsers, infrastructure or
 production operations. Checks are the exact commands in the plan; new tests need the user's agreed plan. A
 model that hit its usage limit is replaced by the configured alternate and reported in `substitutions`; the

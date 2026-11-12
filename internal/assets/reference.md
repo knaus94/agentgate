@@ -31,7 +31,7 @@ saved with `plan save`). Unknown fields are rejected.
 | `watch [--all] [--once]` | — | the user's interactive panel; `--once` prints it as text |
 
 Setup: `doctor`, `install [--zed] [--uninstall]`, `update [--check]`, `modes`,
-`config show|path|init|set <key> <value>|unset <key>`, `prune`, `version`,
+`config show|path|init|set <key> <value>|unset <key>|extensions`, `prune`, `version`,
 `accounts [--json] | discover [--save] | add <name> <claude|codex> <home> [--paid] | remove <name> | reset <name>`
 (several subscriptions: limits, load spreading and failover are automatic).
 

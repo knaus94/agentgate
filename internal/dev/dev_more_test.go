@@ -7,7 +7,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1285,5 +1287,44 @@ func TestPlansMoveToASyncedFolderAndStayUsable(t *testing.T) {
 	must(t, os.MkdirAll(".claude-dev/plans", 0o755))
 	if _, err := PlanLink(cfg, ""); err == nil || !strings.Contains(err.Error(), "merge them by hand") {
 		t.Fatalf("two copies are never merged silently: %v", err)
+	}
+}
+
+func TestWorkerToolsGoToTheirRolesAndIndexesAreRefreshedOnce(t *testing.T) {
+	f := newFixture(t)
+	refreshed = sync.Map{}
+	marker := filepath.Join(t.TempDir(), "refreshed")
+	f.cfg.WorkerMCP = map[string]config.WorkerMCP{
+		"graph": {Command: "graph-mcp", Tools: []string{"query"}, Roles: []string{"scout", "reviewer"}, Hint: "who calls what",
+			Refresh: []string{"sh", "-c", "echo x >> " + marker}, RefreshTimeoutS: 30},
+		"docs": {Command: "docs-mcp", Writable: []string{"cache-dir", "missing-dir"}},
+	}
+	must(t, os.MkdirAll("cache-dir", 0o755))
+	f.launch(f.plan("-m change the line"))
+	f.review()
+	seen := map[string]string{}
+	for _, call := range f.calls {
+		var names []string
+		for name := range call.MCP {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		kind := kindOf(call)
+		seen[kind] = strings.Join(names, "+")
+		told := strings.Contains(call.Prompt, "MCP server `graph` (tools: query): who calls what")
+		if told != (call.MCP["graph"].Command != "") {
+			t.Errorf("%s: a worker is told about exactly the tools it has", kind)
+		}
+	}
+	for _, call := range f.calls {
+		if kindOf(call) == "scout" && (len(call.Writable) != 1 || filepath.Base(call.Writable[0]) != "cache-dir") {
+			t.Fatalf("a server's cache directory is opened for writing when it exists: %v", call.Writable)
+		}
+	}
+	if seen["scout"] != "docs+graph" || seen["writer"] != "" || seen["review"] != "graph" {
+		t.Fatalf("each role gets its servers; one without roles is the scout's: %v", seen)
+	}
+	if raw, _ := os.ReadFile(marker); strings.Count(string(raw), "x") != 1 {
+		t.Fatalf("an index is refreshed once per run, before its first reader: %q", raw)
 	}
 }

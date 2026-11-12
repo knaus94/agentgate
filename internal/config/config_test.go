@@ -137,3 +137,51 @@ func TestAccountsBelongToTheUserNotToARepository(t *testing.T) {
 		t.Fatal("a rejected change leaves the file as it was")
 	}
 }
+
+func TestExtensionsPlugInWithoutEditingTheConfiguration(t *testing.T) {
+	root := isolate(t)
+	_ = root
+	user := filepath.Join(filepath.Dir(UserPath()), "extensions")
+	repo := filepath.Join(filepath.Dir(PersonalFile), "extensions")
+	for _, dir := range []string{user, repo} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write := func(path, text string) {
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(PersonalFile, `{"worktree": {"copy": ["env/.env.local"]}}`)
+	write(filepath.Join(repo, "graph.json"), `{"about": "code graph", "accounts": [{"name": "x", "provider": "claude", "home": "/x"}],
+		"worker_mcp": {"graph": {"command": "graph-mcp", "tools": ["query"], "roles": ["scout", "reviewer"], "refresh": ["graph", "update"]}},
+		"worktree": {"copy": ["graph-out", "env/.env.local"]}}`)
+	write(filepath.Join(user, "docs.json"), `{"worker_mcp": {"docs": {"command": "docs-mcp"}}, "worktree": {"copy": ["docs-cache"]}}`)
+	write(filepath.Join(repo, "off.json.off"), `{"max_parallel": 99}`)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.WorkerMCP) != 2 || cfg.WorkerMCP["graph"].RefreshTimeoutS != 300 || strings.Join(cfg.WorkerMCP["docs"].RolesOrDefault(), ",") != "scout" {
+		t.Fatalf("each file adds its server; a server without roles is the scout's: %+v", cfg.WorkerMCP)
+	}
+	if got := strings.Join(cfg.Worktree.Copy, ","); got != "env/.env.local,docs-cache,graph-out" {
+		t.Fatalf("lists of extensions add to the list that is there, without repeats: %s", got)
+	}
+	if len(cfg.Accounts) != 0 || cfg.MaxParallel == 99 {
+		t.Fatal("an extension never brings an account, and a file that is not *.json is off")
+	}
+	loaded := Extensions()
+	if len(loaded) != 2 || loaded[1].About != "code graph" || strings.Join(loaded[1].Adds, ",") != "worker_mcp.graph,worktree.copy" {
+		t.Fatalf("the loaded extensions are listed with what they add: %+v", loaded)
+	}
+	write(filepath.Join(repo, "bad.json"), `{"worker_mcp": {"Bad Name": {"command": "x"}}}`)
+	if _, err := Load(); err == nil {
+		t.Fatal("an invalid extension is rejected like any configuration")
+	}
+	write(filepath.Join(repo, "bad.json"), `{broken`)
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "bad.json") {
+		t.Fatalf("a broken extension is named in the error: %v", err)
+	}
+}

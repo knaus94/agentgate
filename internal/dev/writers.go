@@ -305,9 +305,10 @@ func (g *Gate) runWriter(resolved *Resolved, stream Stream, record *Writer, answ
 			". Read it, do exactly what it adds, and return the same JSON schema.\n"
 	}
 	timeout, _ := timeoutSeconds(g.Plan.WriterTimeoutS, resolved.ModeConfig().WriterTimeoutS)
-	result, used, err := subs.invoke(resolved.Config, provider.Call{Route: record.Route, Prompt: prompt, Dir: record.Dir,
-		Schema: writerSchema, Timeout: seconds(timeout), Writer: true, Persist: true, Resume: record.Session,
-		Writable: []string{g.board()}, ReadDirs: append(packDirs(g.ContextPack), filepath.Join(g.dir(), "checks"))}, nil)
+	tools, toolDirs, toolNote := workerTools(resolved.Config, "writer")
+	result, used, err := subs.invoke(resolved.Config, provider.Call{Route: record.Route, Prompt: prompt + toolNote, Dir: record.Dir,
+		Schema: writerSchema, Timeout: seconds(timeout), Writer: true, Persist: true, Resume: record.Session, MCP: tools,
+		Writable: append([]string{g.board()}, toolDirs...), ReadDirs: append(packDirs(g.ContextPack), filepath.Join(g.dir(), "checks"))}, nil)
 	if err != nil {
 		return fail(err)
 	}

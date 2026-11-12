@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/knaus94/claude-dev/internal/assets"
@@ -59,6 +61,31 @@ type Account struct {
 	Paid     bool   `json:"paid,omitempty"` // an API-key profile bills per token; it is used only when this is set
 }
 
+// WorkerMCP is an MCP server handed to workers of chosen roles. Workers otherwise run without any.
+type WorkerMCP struct {
+	Command         string            `json:"command"`
+	Args            []string          `json:"args"`
+	Env             map[string]string `json:"env"`
+	Tools           []string          `json:"tools"`             // the only tools a worker may call; empty: all of the server's
+	Roles           []string          `json:"roles"`             // scout (default), architect, writer, reviewer, consultant, designer
+	Writable        []string          `json:"writable"`          // directories of the checkout the server must write, e.g. its cache; read-only workers get them writable
+	Hint            string            `json:"hint"`              // when to use it, told to the worker
+	Refresh         []string          `json:"refresh"`           // command that brings the server's index up to date, run before its first use
+	RefreshTimeoutS int               `json:"refresh_timeout_s"` // default 300
+}
+
+// Roles a worker tool may be given to.
+var Roles = []string{"scout", "architect", "writer", "reviewer", "consultant", "designer"}
+
+// RolesOrDefault is who gets the server: the scout alone unless the configuration says otherwise, because
+// what the scout learns reaches every other worker through the context pack.
+func (w WorkerMCP) RolesOrDefault() []string {
+	if len(w.Roles) == 0 {
+		return []string{"scout"}
+	}
+	return w.Roles
+}
+
 // Worktree configures isolated tasks (`/dev -w`): what a fresh worktree needs before code in it can be checked.
 type Worktree struct {
 	Default       bool       `json:"default"`         // isolate every writing task, without the flag
@@ -68,21 +95,22 @@ type Worktree struct {
 }
 
 type Config struct {
-	Version           int                 `json:"version"`
-	MaxParallel       int                 `json:"max_parallel"`
-	WorkerMemoryMiB   int                 `json:"worker_memory_mib"`
-	RetentionDays     int                 `json:"retention_days"`
-	Models            map[string]Model    `json:"models"`
-	Fallbacks         map[string][]string `json:"fallbacks"`
-	ReviewersExcluded []string            `json:"reviewers_excluded"`
-	UIDesigner        string              `json:"ui_designer"`
-	VisualReviewer    string              `json:"visual_reviewer"`
-	Consultant        string              `json:"consultant"`
-	PlaywrightMCP     string              `json:"playwright_mcp"`
-	Accounts          []Account           `json:"accounts"`
-	PlansHome         string              `json:"plans_home"` // synced directory that holds the .claude-dev of each repository
-	Worktree          Worktree            `json:"worktree"`
-	Modes             map[string]Mode     `json:"modes"`
+	Version           int                  `json:"version"`
+	MaxParallel       int                  `json:"max_parallel"`
+	WorkerMemoryMiB   int                  `json:"worker_memory_mib"`
+	RetentionDays     int                  `json:"retention_days"`
+	Models            map[string]Model     `json:"models"`
+	Fallbacks         map[string][]string  `json:"fallbacks"`
+	ReviewersExcluded []string             `json:"reviewers_excluded"`
+	UIDesigner        string               `json:"ui_designer"`
+	VisualReviewer    string               `json:"visual_reviewer"`
+	Consultant        string               `json:"consultant"`
+	PlaywrightMCP     string               `json:"playwright_mcp"`
+	Accounts          []Account            `json:"accounts"`
+	PlansHome         string               `json:"plans_home"`
+	WorkerMCP         map[string]WorkerMCP `json:"worker_mcp"` // synced directory that holds the .claude-dev of each repository
+	Worktree          Worktree             `json:"worktree"`
+	Modes             map[string]Mode      `json:"modes"`
 }
 
 // Route is one resolved model invocation.
@@ -136,6 +164,12 @@ func Load() (*Config, error) {
 			delete(layer, "accounts") // a repository does not choose whose subscription pays for its work
 		}
 		merge(merged, layer)
+	}
+	for _, extension := range Extensions() {
+		if extension.Error != "" {
+			return nil, fmt.Errorf("%s: %s", extension.File, extension.Error)
+		}
+		extend(merged, extension.layer)
 	}
 	raw, _ := json.Marshal(merged)
 	cfg := &Config{}
@@ -251,6 +285,84 @@ func Init() (string, error) {
 	return UserPath(), writeUser(map[string]any{"models": builtin["models"], "fallbacks": builtin["fallbacks"]})
 }
 
+// Extension is one drop-in file: a self-contained piece of configuration that plugs something in — an MCP
+// server for workers, what a worktree needs for it — without editing the main configuration. Removing the
+// file removes the integration.
+type Extension struct {
+	File  string   `json:"file"`
+	About string   `json:"about,omitempty"`
+	Adds  []string `json:"adds,omitempty"`
+	Error string   `json:"error,omitempty"`
+	layer map[string]any
+}
+
+// ExtensionDirs are where extensions are picked up: the user's, for every repository, and the repository's own.
+func ExtensionDirs() []string {
+	return []string{filepath.Join(filepath.Dir(UserPath()), "extensions"), filepath.Join(filepath.Dir(PersonalFile), "extensions")}
+}
+
+// Extensions reads every *.json of the extension directories, in name order within each directory.
+func Extensions() []Extension {
+	var out []Extension
+	for _, dir := range ExtensionDirs() {
+		paths, _ := filepath.Glob(filepath.Join(dir, "*.json"))
+		sort.Strings(paths)
+		for _, path := range paths {
+			extension := Extension{File: path}
+			raw, err := os.ReadFile(path)
+			if err == nil {
+				err = json.Unmarshal(raw, &extension.layer)
+			}
+			if err != nil {
+				extension.Error = err.Error()
+				out = append(out, extension)
+				continue
+			}
+			extension.About, _ = extension.layer["about"].(string)
+			delete(extension.layer, "about")
+			delete(extension.layer, "accounts") // an extension plugs in a tool, never a subscription
+			for key, value := range extension.layer {
+				if child, ok := value.(map[string]any); ok {
+					for name := range child {
+						extension.Adds = append(extension.Adds, key+"."+name)
+					}
+				} else {
+					extension.Adds = append(extension.Adds, key)
+				}
+			}
+			sort.Strings(extension.Adds)
+			out = append(out, extension)
+		}
+	}
+	return out
+}
+
+// extend merges an extension: objects merge key by key like any layer, but a list adds its items to the
+// list already there, so two extensions can each bring a file for the worktree without knowing of each other.
+func extend(dst, src map[string]any) {
+	for key, value := range src {
+		switch typed := value.(type) {
+		case map[string]any:
+			if existing, ok := dst[key].(map[string]any); ok {
+				extend(existing, typed)
+				continue
+			}
+		case []any:
+			if existing, ok := dst[key].([]any); ok {
+				for _, item := range typed {
+					encoded, _ := json.Marshal(item)
+					if !slices.ContainsFunc(existing, func(other any) bool { raw, _ := json.Marshal(other); return string(raw) == string(encoded) }) {
+						existing = append(existing, item)
+					}
+				}
+				dst[key] = existing
+				continue
+			}
+		}
+		dst[key] = value
+	}
+}
+
 // merge overlays src on dst: objects merge key by key, everything else is replaced.
 func merge(dst, src map[string]any) {
 	for key, value := range src {
@@ -278,6 +390,25 @@ func (c *Config) validate() error {
 			if _, ok := c.Models[other]; !ok {
 				return fmt.Errorf("config: fallbacks reference unknown model %q", other)
 			}
+		}
+	}
+	for name, server := range c.WorkerMCP {
+		if !regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`).MatchString(name) || server.Command == "" {
+			return fmt.Errorf("config: worker_mcp %q needs a lowercase name and a command", name)
+		}
+		for _, path := range server.Writable {
+			if path == "" || filepath.IsAbs(path) || strings.HasPrefix(filepath.Clean(path), "..") {
+				return fmt.Errorf("config: worker_mcp %q: writable takes directories inside the repository: %q", name, path)
+			}
+		}
+		for _, role := range server.Roles {
+			if !slices.Contains(Roles, role) {
+				return fmt.Errorf("config: worker_mcp %q: unknown role %q (roles: %s)", name, role, strings.Join(Roles, ", "))
+			}
+		}
+		if server.RefreshTimeoutS == 0 {
+			server.RefreshTimeoutS = 300
+			c.WorkerMCP[name] = server
 		}
 	}
 	for _, path := range c.Worktree.Copy {
