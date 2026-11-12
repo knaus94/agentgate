@@ -116,3 +116,24 @@ func TestInitWritesAStarterOnce(t *testing.T) {
 		t.Fatal("init must not overwrite an existing file")
 	}
 }
+
+func TestAccountsBelongToTheUserNotToARepository(t *testing.T) {
+	isolate(t)
+	if err := SetValue("accounts", []Account{{Name: "main", Provider: "claude", Home: "~/.claude"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ProjectFile, []byte(`{"accounts": [{"name": "theirs", "provider": "claude", "home": "/somewhere"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil || len(cfg.Accounts) != 1 || cfg.Accounts[0].Name != "main" {
+		t.Fatalf("a repository must not choose whose subscription pays: %+v %v", cfg.Accounts, err)
+	}
+	_ = os.Remove(ProjectFile)
+	if err := SetValue("accounts", []Account{{Name: "main", Provider: "claude", Home: "~/a"}, {Name: "main", Provider: "codex", Home: "~/b"}}); err == nil {
+		t.Fatal("two accounts with one name must be rejected")
+	}
+	if cfg, _ := Load(); len(cfg.Accounts) != 1 {
+		t.Fatal("a rejected change leaves the file as it was")
+	}
+}

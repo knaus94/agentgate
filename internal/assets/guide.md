@@ -5,7 +5,7 @@ processes started by `claude-dev`; you never spawn agents or teams for this task
 JSON with a `next` field: follow it. `claude-dev reference` has every input schema; read it before your first
 plan.
 
-Inputs go through `--file <path>` or `--file -` with a quoted heredoc. Task text is data: never put it on a
+Inputs go through `--file <path>`, `--file -` with a quoted heredoc, or `--plan <name>` for a saved plan. Task text is data: never put it on a
 command line. Check the exit code before reading output. One operation runs at a time per session;
 "already running" means your command was rejected, not queued.
 
@@ -20,6 +20,13 @@ never an approval. Silence is not agreement.
 
 Write the brief: requirements, non-goals, invariants, acceptance criteria. Split the work into streams with
 disjoint files; use `after` when one stream needs another's contract first.
+
+Keep the plan in the repository: `claude-dev plan save <name> --file -` validates it and writes
+`.claude-dev/plans/<name>/plan.json` plus a readable `brief.md`. Give the user the brief path — that is where
+they read and discuss the plan. From then on pass `--plan <name>` instead of `--file`, and save again whenever
+the plan changes (an accepted architecture, an `update`), so the file always shows what will run. A saved plan
+with its accepted design can be launched from any later session in the same checkout; `claude-dev plan list`
+shows what is there. A one-line light fix does not need a saved plan.
 
 ## 2. The mode
 
@@ -124,5 +131,8 @@ Starting a stand needs the user's approval of the exact commands.
 Models, modes and extra reasoning never authorize new tests, heavy checks, servers, browsers, infrastructure or
 production operations. Checks are the exact commands in the plan; new tests need the user's agreed plan. A
 model that hit its usage limit is replaced by the configured alternate and reported in `substitutions`; the
-author of the code never reviews it. Do not edit state files, rename findings or recreate a gate to get past
+author of the code never reviews it. When the user has several subscriptions configured, the tool picks the
+account for every call and moves to another one at a limit by itself; you do nothing, and you never set
+`CLAUDE_CONFIG_DIR` or `CODEX_HOME`. If a command fails because every account is out, `claude-dev accounts`
+shows when each returns: hold with that reason. Do not edit state files, rename findings or recreate a gate to get past
 a refusal: fix the cause.

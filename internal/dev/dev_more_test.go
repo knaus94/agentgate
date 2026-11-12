@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/knaus94/claude-dev/internal/accounts"
+	"github.com/knaus94/claude-dev/internal/config"
 	"github.com/knaus94/claude-dev/internal/ops"
 	"github.com/knaus94/claude-dev/internal/provider"
 )
@@ -940,5 +942,98 @@ func TestUltraRechecksOnlyWhatTheCorrectionTouched(t *testing.T) {
 	}
 	if len(reviews[0].Lanes) != 4 || !slices.Equal(axes, []string{"correctness", "security"}) || len(done["blocking"].([]any)) != 0 {
 		t.Fatalf("four lanes review; the recheck is the lane with the finding plus one correctness lane: %v", axes)
+	}
+}
+
+func TestSavedPlanIsReadableAndRunsFromAnotherSession(t *testing.T) {
+	f := newFixture(t)
+	plan := f.plan("-h change the contract")
+	receipt := f.do("architecture", func() (any, error) { return Architecture(f.cfg, plan) })
+	plan.Architecture = &Accepted{ID: receipt["id"].(string), Acceptance: "the first design as written"}
+	saved, err := PlanSave(f.cfg, plan, "contract-change")
+	must(t, err)
+	if saved.(map[string]any)["plan"] != ".claude-dev/plans/contract-change/plan.json" {
+		t.Fatalf("a plan is kept inside the repository: %v", saved)
+	}
+	brief, err := PlanShow("contract-change")
+	must(t, err)
+	for _, want := range []string{"# contract-change", "**Mode:** heavy", "### core — backend, fable:high", "- `a.txt`", "the first design as written", "- `true`"} {
+		if !strings.Contains(brief.(string), want) {
+			t.Errorf("the brief lacks %q:\n%s", want, brief)
+		}
+	}
+	if _, err := PlanSave(f.cfg, plan, "Not A Name"); err == nil {
+		t.Fatal("a plan name is a safe directory name")
+	}
+	listed, _ := PlanList()
+	if raw, _ := json.Marshal(listed); !strings.Contains(string(raw), `"name":"contract-change"`) {
+		t.Fatalf("the saved plan is listed: %s", raw)
+	}
+
+	// Another conversation in the same checkout picks the plan up: the design receipt belongs to the checkout.
+	t.Setenv("CLAUDE_DEV_SESSION", "another-session")
+	path, err := PlanFile("contract-change")
+	must(t, err)
+	raw, err := os.ReadFile(path)
+	must(t, err)
+	loaded := &Plan{}
+	must(t, json.Unmarshal(raw, loaded))
+	if summary := f.launch(loaded); summary["mode"] != "heavy" || f.count("architecture") != 2 {
+		t.Fatalf("the plan launches without a second design pass: %v", summary)
+	}
+	if foreign := Current().Foreign; len(foreign) != 0 {
+		t.Fatalf("saved plans are not part of the change: %v", foreign)
+	}
+	f.review()
+	if foreign := Current().Foreign; len(foreign) != 0 {
+		t.Fatalf("saved plans are not part of the change: %v", foreign)
+	}
+}
+
+func TestCorrectionContinuesOnTheAccountThatHoldsTheSession(t *testing.T) {
+	f := newFixture(t)
+	probe := func(account config.Account) accounts.Status {
+		return accounts.Status{Account: account, LoggedIn: true, Identity: account.Name, ProbedAt: time.Now().Unix(),
+			Windows: []accounts.Window{{Label: "week", Used: map[string]float64{"main": 70, "second": 20}[account.Name]}}}
+	}
+	previous := accounts.ProbeClaude
+	accounts.ProbeClaude = probe
+	provider.Accounts = accounts.New([]config.Account{{Name: "main", Provider: "claude", Home: "~/main"}, {Name: "second", Provider: "claude", Home: "~/second"}},
+		filepath.Join(Root(), "accounts.json"))
+	t.Cleanup(func() { accounts.ProbeClaude, provider.Accounts = previous, nil })
+	reviews := 0
+	f.model = func(kind string, packet map[string]any, call provider.Call) (string, error) {
+		if kind == "review" && packet["axes"].([]any)[0] == "correctness" {
+			if reviews++; reviews == 1 {
+				return `{"reports":[{"axis":"correctness","status":"NEEDS_FIX","findings":[` + finding("P1") + `],"checked":["read"],"resolutions":[]}]}`, nil
+			}
+		}
+		return "", nil
+	}
+	f.launch(f.plan("change the line"))
+	writer := Current().latest()["core"]
+	if writer.Route.Account != "second" {
+		t.Fatalf("the writer runs on the account with the most room: %+v", writer.Route)
+	}
+	summary := f.review()
+	id := summary["untriaged"].([]any)[0].(string)
+	f.do("triage", func() (any, error) {
+		return Triage(f.cfg, Current(), TriageInput{[]Disposition{{ID: id, Decision: "accepted", Evidence: "verified in a.txt"}}})
+	})
+	// The other account now has far more room, but the session lives on "second".
+	accounts.ProbeClaude = func(account config.Account) accounts.Status {
+		status := probe(account)
+		status.Windows[0].Used = map[string]float64{"main": 1, "second": 90}[account.Name]
+		return status
+	}
+	provider.Accounts = accounts.New([]config.Account{{Name: "main", Provider: "claude", Home: "~/main"}, {Name: "second", Provider: "claude", Home: "~/second"}},
+		filepath.Join(Root(), "accounts-2.json"))
+	f.do("fix", func() (any, error) { return Fix(f.cfg, Current(), FixInput{Brief: "use the agreed value"}) })
+	last := f.calls[len(f.calls)-1]
+	if !last.Writer || last.Resume != writer.Session || last.Account.Name != "second" {
+		t.Fatalf("a correction resumes the writer's session under the same account: %+v", last.Account)
+	}
+	if text := Render(f.cfg, Current(), false); !strings.Contains(text, "@second") {
+		t.Fatalf("the panel names the account a lane ran on:\n%s", text)
 	}
 }

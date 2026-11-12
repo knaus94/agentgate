@@ -222,6 +222,7 @@ func (g *Gate) prepare(resolved *Resolved, stream Stream) *Writer {
 	record := &Writer{Stream: stream.Name, Route: route, Status: "RUNNING", Summary: "writer running", Blockers: []string{}, Batch: g.Round.Batch}
 	if previous := g.latest()[stream.Name]; previous != nil && previous.Session != "" && previous.Route.Model == route.Model {
 		record.Dir, record.Session = previous.Dir, previous.Session // same context, at this round's effort
+		record.Route.Account = previous.Route.Account
 	} else {
 		record.Dir = filepath.Join(g.dir(), "writers", fmt.Sprintf("%s-%s", stream.Name, newID()[:8]))
 	}

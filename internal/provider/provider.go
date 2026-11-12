@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/knaus94/claude-dev/internal/accounts"
 	"github.com/knaus94/claude-dev/internal/config"
 	"github.com/knaus94/claude-dev/internal/ops"
 )
@@ -43,12 +44,17 @@ type Call struct {
 	Writable []string             // extra writable directories
 	ReadDirs []string             // directories outside the checkout the process must be able to read
 	MCP      map[string]MCPServer // Codex only
+	Account  config.Account       // profile to run under; empty means the CLI's default profile
 }
 
 type Result struct {
 	Answer  string
 	Session string
+	Account string // name of the configured account the call ran under, if any
 }
+
+// Accounts chooses the profile each call runs under. Nil, or no account for a provider, means its default profile.
+var Accounts *accounts.Manager
 
 // ErrLimit means the provider refused the call because its usage limit is exhausted.
 var ErrLimit = errors.New("provider usage limit reached")
@@ -131,7 +137,7 @@ func environment(extra ...string) []string {
 }
 
 func record(call Call, argv []string, cmd *exec.Cmd, state string) {
-	receipt := map[string]any{"state": state, "route": call.Route, "argv": argv, "writer": call.Writer,
+	receipt := map[string]any{"state": state, "route": call.Route, "account": call.Account.Name, "argv": argv, "writer": call.Writer,
 		"resumed": call.Resume != "", "observed_at": time.Now().Unix()}
 	if cmd.Process != nil {
 		receipt["pid"] = cmd.Process.Pid
@@ -169,11 +175,35 @@ func execute(call Call, argv []string, env []string, stdoutName string) error {
 	return nil
 }
 
+// link points target at source, replacing a link left by a run under another account.
 func link(source, target string) {
-	if _, err := os.Stat(source); err == nil {
-		if _, err := os.Lstat(target); err != nil {
-			_ = os.Symlink(source, target)
-		}
+	if _, err := os.Stat(source); err != nil {
+		return
+	}
+	if current, err := os.Readlink(target); err == nil && current == source {
+		return
+	}
+	_ = os.Remove(target)
+	_ = os.Symlink(source, target)
+}
+
+// profile is the real CLI home the call authenticates from: the chosen account, else the user's own.
+func profile(call Call, variable, fallback string) string {
+	if call.Account.Home != "" {
+		return accounts.Home(call.Account)
+	}
+	if actual := os.Getenv(variable); actual != "" {
+		return actual
+	}
+	return filepath.Join(userHome(), fallback)
+}
+
+// credential links the login file into the lane home and keeps the real file writable inside the sandbox:
+// when the CLI refreshes a token mid-run, the new one must reach the profile, or the profile is logged out.
+func credential(call *Call, source, target string) {
+	link(source, target)
+	if real, err := filepath.EvalSymlinks(source); err == nil {
+		call.Writable = append(append([]string{}, call.Writable...), real)
 	}
 }
 
@@ -181,13 +211,9 @@ func userHome() string { home, _ := os.UserHomeDir(); return home }
 
 func runCodex(call Call) (Result, error) {
 	home := filepath.Join(call.Dir, "home")
-	actual := os.Getenv("CODEX_HOME")
-	if actual == "" {
-		actual = filepath.Join(userHome(), ".codex")
-	}
-	for _, name := range []string{"auth.json", "AGENTS.md"} {
-		link(filepath.Join(actual, name), filepath.Join(home, name))
-	}
+	actual := profile(call, "CODEX_HOME", ".codex")
+	credential(&call, filepath.Join(actual, "auth.json"), filepath.Join(home, "auth.json"))
+	link(filepath.Join(actual, "AGENTS.md"), filepath.Join(home, "AGENTS.md"))
 	result := filepath.Join(call.Dir, "result.json")
 	_ = os.Remove(result)
 	// The process already runs inside bwrap. Codex's own sandbox would nest a second bwrap,
@@ -265,11 +291,7 @@ func runClaude(call Call) (Result, error) {
 	}
 	// The sandbox hides the real config directory from writes; the process keeps its session in the lane.
 	home := filepath.Join(call.Dir, "home")
-	actual := os.Getenv("CLAUDE_CONFIG_DIR")
-	if actual == "" {
-		actual = filepath.Join(userHome(), ".claude")
-	}
-	link(filepath.Join(actual, ".credentials.json"), filepath.Join(home, ".credentials.json"))
+	credential(&call, filepath.Join(profile(call, "CLAUDE_CONFIG_DIR", ".claude"), ".credentials.json"), filepath.Join(home, ".credentials.json"))
 	tools := "Read,Grep,Glob"
 	if call.Writer {
 		tools += ",Edit,Write,Bash"
@@ -324,8 +346,46 @@ type Substitution struct {
 	Reason string `json:"reason"`
 }
 
-// RunRouted tries the route and, when its usage limit is exhausted, the declared alternates in order.
-// skip rejects alternates the caller may not use, such as the model that wrote the code under review.
+// onAccounts runs the call under the best configured account of its provider and moves to the next one when
+// that account's limit is exhausted. The model changes only after every account refused it.
+func onAccounts(call Call) (Result, error) {
+	if !Accounts.Has(call.Route.Provider) {
+		return Run(call)
+	}
+	tried, first := map[string]bool{}, error(nil)
+	for {
+		account, ok := Accounts.Pick(call.Route, call.Route.Account, tried)
+		if !ok {
+			if first == nil {
+				first = fmt.Errorf("%w: no %s account has room for %s", ErrLimit, call.Route.Provider, call.Route)
+			}
+			return Result{}, first
+		}
+		tried[account.Name] = true
+		attempt := call
+		attempt.Account = account
+		result, err := Run(attempt)
+		Accounts.Release(account.Name, err == nil)
+		if err == nil {
+			result.Account = account.Name
+			return result, nil
+		}
+		if !errors.Is(err, ErrLimit) {
+			if call.Resume != "" && call.Route.Account != "" && account.Name != call.Route.Account {
+				err = fmt.Errorf("account %s has no room and the session did not continue on %s: %w", call.Route.Account, account.Name, err)
+			}
+			return Result{}, err
+		}
+		Accounts.Limited(account.Name, call.Route)
+		if first == nil {
+			first = err
+		}
+	}
+}
+
+// RunRouted tries the route on every account that has room and, when all are exhausted, the declared
+// alternates in order. skip rejects alternates the caller may not use, such as the model that wrote the
+// code under review.
 func RunRouted(cfg *config.Config, call Call, skip func(config.Route) bool) (Result, config.Route, error) {
 	candidates := append([]config.Route{call.Route}, cfg.Alternates(call.Route)...)
 	base, first := call.Dir, error(nil)
@@ -338,8 +398,9 @@ func RunRouted(cfg *config.Config, call Call, skip func(config.Route) bool) (Res
 		if index > 0 {
 			attempt.Dir = fmt.Sprintf("%s-alt%d", base, index)
 		}
-		result, err := Run(attempt)
+		result, err := onAccounts(attempt)
 		if err == nil {
+			route.Account = result.Account
 			return result, route, nil
 		}
 		if first == nil {

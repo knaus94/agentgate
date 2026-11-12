@@ -8,11 +8,14 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
+	"github.com/knaus94/claude-dev/internal/accounts"
 	"github.com/knaus94/claude-dev/internal/assets"
 	"github.com/knaus94/claude-dev/internal/config"
 	"github.com/knaus94/claude-dev/internal/dev"
+	"github.com/knaus94/claude-dev/internal/provider"
 	"github.com/knaus94/claude-dev/internal/update"
 )
 
@@ -25,7 +28,11 @@ Setup
   doctor                          check the environment
   update [--check]                install the latest release
   modes                           show which model does what in each mode
-  config show|path|init|set <key> <value>|unset <key>
+    config show|path|init|set <key> <value>|unset <key>
+  accounts [discover [--save] | add <name> <claude|codex> <home> | remove <name> | reset <name>]
+                                  several subscriptions: limits, load spreading, failover
+    plan save [name] | list | show <name>
+                                  keep a plan and its readable brief in .claude-dev/plans/
   watch [--once]                  live panel of the task in this checkout
   status | stop | prune | version
 
@@ -33,7 +40,7 @@ For the lead (used by /dev)
   guide | reference | parse | preview | route | architecture | design | consult | launch | answer | tell
   check | review | visual | triage | fix | finish | hold | resume | hook
 
-Inputs are JSON from --file <path> or --file - (stdin).
+Inputs are JSON from --file <path>, --file - (stdin) or --plan <name> (a saved plan).
 `
 
 type arguments struct {
@@ -53,6 +60,16 @@ func parseArgs(args []string) (arguments, error) {
 			}
 			index++
 			out.file = args[index]
+		case value == "--plan":
+			if index+1 >= len(args) {
+				return out, errors.New("--plan needs the name of a saved plan")
+			}
+			index++
+			path, err := dev.PlanFile(args[index])
+			if err != nil {
+				return out, err
+			}
+			out.file = path
 		case strings.HasPrefix(value, "--") && len(value) > 2:
 			out.flags[value[2:]] = true
 		case out.action == "":
@@ -168,11 +185,18 @@ func run(args arguments) (any, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
+	provider.Accounts = accounts.New(cfg.Accounts, filepath.Join(dev.Root(), "accounts.json"))
+	if args.action == "accounts" || args.action == "limits" {
+		value, err := accounts.Command(cfg, provider.Accounts, args.rest, args.flags)
+		return value, 0, err
+	}
 	loadPlan := func() (*dev.Plan, error) {
 		plan := &dev.Plan{}
 		return plan, args.input(plan, true)
 	}
 	switch args.action {
+	case "plan":
+		return planCommand(cfg, args)
 	case "modes":
 		return dev.Modes(cfg), 0, nil
 	case "preview":
@@ -313,6 +337,32 @@ func run(args arguments) (any, int, error) {
 		return value, 0, err
 	}
 	return nil, 0, fmt.Errorf("unknown command %q; run `claude-dev help`", args.action)
+}
+
+func planCommand(cfg *config.Config, args arguments) (any, int, error) {
+	action, name := "list", ""
+	if len(args.rest) > 0 {
+		action = args.rest[0]
+	}
+	if len(args.rest) > 1 {
+		name = args.rest[1]
+	}
+	switch action {
+	case "save":
+		plan := &dev.Plan{}
+		if err := args.input(plan, true); err != nil {
+			return nil, 0, err
+		}
+		value, err := dev.PlanSave(cfg, plan, name)
+		return value, 0, err
+	case "list":
+		value, err := dev.PlanList()
+		return value, 0, err
+	case "show":
+		value, err := dev.PlanShow(name)
+		return value, 0, err
+	}
+	return nil, 0, errors.New("usage: claude-dev plan save [name] --file <path>|- | plan list | plan show <name>")
 }
 
 func configCommand(rest []string) (any, int, error) {

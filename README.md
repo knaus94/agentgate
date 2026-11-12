@@ -125,6 +125,21 @@ findings  P0 0  P1 1  P2 2   blocking BLOCKED 3   notes 4
 
 Zed users: `claude-dev install --zed` adds `claude-dev: watch`, `status` and `stop` to Zed's tasks.
 
+The plan of a task is kept in the repository, in `.claude-dev/plans/<name>/`: `plan.json` is what runs,
+`brief.md` is the same plan for a person to read. `claude-dev plan list` shows them; a saved plan can be
+launched from a later session.
+
+## Several subscriptions
+
+```sh
+claude-dev accounts discover --save   # pick up every logged-in CLI profile on this machine
+claude-dev accounts                   # live limits of each account
+```
+
+With more than one Claude or Codex subscription, workers are spread over the accounts by remaining quota, an
+account that hits a limit rests until it resets, and the model is substituted only after every account refused
+it. See [docs/accounts.md](docs/accounts.md).
+
 ## Configure
 
 ```sh
@@ -142,6 +157,7 @@ A repository can carry its own `.claude-dev.json`. See [docs/configuration.md](d
 - [Modes](docs/modes.md) — the rule table and what each mode runs
 - [Why these models](docs/model-selection.md) — the public data behind the defaults
 - [Configuration](docs/configuration.md) — models, pools, fallbacks, per-repository overrides
+- [Several subscriptions](docs/accounts.md) — accounts, limits, load spreading, failover
 - [Releasing](docs/releasing.md) — how versions are published and installed
 - `claude-dev guide` and `claude-dev reference` print what the lead reads
 

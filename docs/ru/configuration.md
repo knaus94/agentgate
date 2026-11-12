@@ -97,6 +97,7 @@ claude-dev config set ui_designer opus:high
 | `worker_memory_mib` | 512 | свободной памяти на воркера; лимиты cgroup учитываются |
 | `retention_days` | 14 | завершённые задачи старше этого срока удаляются |
 | `playwright_mcp` | `~/.local/share/claude-dev/playwright-mcp/…/cli.js` | браузерный инструмент для необязательной визуальной проверки |
+| `accounts` | нет | несколько подписок на провайдера; управляются через `claude-dev accounts`, только в пользовательском файле — см. [аккаунты](accounts.md) |
 
 ## Сброс
 

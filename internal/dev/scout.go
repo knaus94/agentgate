@@ -54,7 +54,7 @@ func scout(resolved *Resolved, subs *substitutions) (string, string) {
 	}
 	plan := resolved.Plan
 	key := digest(map[string]any{"brief": plan.Brief, "files": plan.Files(), "context": plan.Context, "route": spec})
-	dir := filepath.Join(home(), "scout", key[:32])
+	dir := filepath.Join(checkoutDir(""), "scout", key[:32]) // shared by the sessions of a checkout, like designs
 	path := filepath.Join(dir, "pack.json")
 	if _, err := os.Stat(path); err == nil {
 		return path, ""

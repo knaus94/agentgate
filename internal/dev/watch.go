@@ -127,7 +127,7 @@ func Render(cfg *config.Config, gate *Gate, color bool) string {
 		sort.Strings(names)
 		for _, name := range names {
 			writer := latest[name]
-			line("  %-18s %-14s %s", name, writer.Route.String(), p.status(writer.Status))
+			line("  %-18s %-14s %s%s", name, writer.Route.String(), p.status(writer.Status), onAccount(writer.Route))
 			for _, blocker := range writer.Blockers {
 				line("      %s %s", p.yellow("?"), blocker)
 			}
@@ -145,7 +145,7 @@ func Render(cfg *config.Config, gate *Gate, color bool) string {
 					status = report.Status
 				}
 			}
-			line("  %-26s %-14s %s  %d findings", strings.Join(lane.Axes, "+"), lane.Route.String(), p.status(status), count)
+			line("  %-26s %-14s %s  %d findings%s", strings.Join(lane.Axes, "+"), lane.Route.String(), p.status(status), count, onAccount(lane.Route))
 		}
 	}
 	counts := map[string]int{}
@@ -216,4 +216,12 @@ func Watch(cfg *config.Config, once bool) {
 		fmt.Print("\x1b[H\x1b[2J" + text)
 		time.Sleep(time.Second)
 	}
+}
+
+// onAccount names the subscription a lane ran on, when several are configured.
+func onAccount(route config.Route) string {
+	if route.Account == "" {
+		return ""
+	}
+	return "  @" + route.Account
 }

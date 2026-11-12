@@ -39,6 +39,24 @@ What is deliberately not a stage: a separate test-writing agent (tests belong to
 behaviour), a merge step (writers share one checkout with disjoint files), and a second design round by
 default (one optional revision, then the lead decides).
 
+## Where the plan lives
+
+The lead writes the plan as JSON and saves it with `claude-dev plan save <name>`:
+
+```
+<repository>/.claude-dev/plans/<name>/plan.json   what the tool runs
+<repository>/.claude-dev/plans/<name>/brief.md    the same plan for a person: brief, mode and why, streams with
+                                                  their writers and files, checks, the accepted design
+```
+
+Every later command takes `--plan <name>`. Saving again replaces both files, so they always show the plan that
+will run. The directory is yours to commit or to ignore; the gate never counts it as part of a change.
+
+Design receipts and the scout's context pack belong to the checkout, not to one conversation
+(`~/.local/state/claude-dev/<checkout>/designs`, `…/scout`). A plan designed today can therefore be launched
+from a new session tomorrow without paying for the design again; a receipt stays bound to its brief, files and
+mode by a fingerprint.
+
 ## The gate
 
 A task is a *gate*: one JSON state file per lead session and checkout, under `~/.local/state/claude-dev/`.
@@ -121,7 +139,9 @@ heavy writers    fable:high (pool fable), one per stream
 heavy review     opus:high  (pool claude)  ∥  astra:high (pool codex)
 ```
 
-When a provider answers that its limit is exhausted, the lane is retried on the declared alternates in order.
+With several subscriptions configured, each call first picks the account with the most room for its model,
+and an exhausted account hands over to the next one on the same model ([accounts](accounts.md)).
+When every account of a provider answers that its limit is exhausted, the lane is retried on the declared alternates in order.
 Two rules are never broken: the model that wrote the code is not used to review it, and the substitution is
 recorded and shown to the user.
 

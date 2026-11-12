@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/knaus94/claude-dev/internal/accounts"
 	"github.com/knaus94/claude-dev/internal/config"
 )
 
@@ -21,6 +22,7 @@ env > "$lane/env.txt"
 cat > "$lane/stdin.txt"
 (echo probe > "$PWD/probe.txt") 2>/dev/null && echo yes > "$lane/wrote-checkout" || echo no > "$lane/wrote-checkout"
 (echo probe > "$HOME/.claude-dev-probe") 2>/dev/null && echo yes > "$lane/wrote-home" || echo no > "$lane/wrote-home"
+[ -f "$PWD/refresh-token" ] && echo refreshed >> "$CODEX_HOME/auth.json"
 if [ -f "$PWD/limit-codex" ]; then echo "You've hit your usage limit. Try again later." >&2; exit 1; fi
 out=""; prev=""
 for arg in "$@"; do [ "$prev" = "-o" ] && out="$arg"; prev="$arg"; done
@@ -183,5 +185,91 @@ func TestSandboxBindsReadableDirectoriesBeforeTheWritableOnes(t *testing.T) {
 	}
 	if reader := strings.Join(Sandbox("/lane", false, nil, nil, []string{"tool"}), " "); strings.Count(reader, "--bind ") != 1 {
 		t.Fatalf("a reader's only writable path is its lane: %s", reader)
+	}
+}
+
+func TestCallRunsUnderTheChosenProfileAndKeepsItsLoginFresh(t *testing.T) {
+	cfg, root := setup(t)
+	homes := map[string]string{}
+	for _, name := range []string{"one", "two"} {
+		homes[name] = filepath.Join(root, "repo", "profiles", name)
+		_ = os.MkdirAll(homes[name], 0o700)
+		_ = os.WriteFile(filepath.Join(homes[name], "auth.json"), []byte(name+"\n"), 0o600)
+	}
+	_ = os.WriteFile("refresh-token", nil, 0o644)
+	lane := filepath.Join(root, "state", "lane")
+	call := Call{Route: cfg.MustRoute("sol:high"), Prompt: "p", Dir: lane, Timeout: 20 * time.Second, Persist: true}
+	call.Account = config.Account{Name: "one", Provider: "codex", Home: homes["one"]}
+	if _, err := Run(call); err != nil {
+		t.Fatal(err)
+	}
+	// The same session continues under another account: the lane's login now points at that profile.
+	call.Account, call.Resume = config.Account{Name: "two", Provider: "codex", Home: homes["two"]}, "thread-1"
+	if _, err := Run(call); err != nil {
+		t.Fatal(err)
+	}
+	if target, _ := os.Readlink(filepath.Join(lane, "home", "auth.json")); target != filepath.Join(homes["two"], "auth.json") {
+		t.Fatalf("the lane authenticates from the chosen profile, got %s", target)
+	}
+	for name, home := range homes {
+		if got := read(t, filepath.Join(home, "auth.json")); got != name+"\nrefreshed\n" {
+			t.Fatalf("a token refreshed inside the sandbox must reach profile %s, got %q", name, got)
+		}
+	}
+	if strings.TrimSpace(read(t, filepath.Join(lane, "wrote-checkout"))) != "no" {
+		t.Fatal("a writable login file gives a reviewer nothing else to write")
+	}
+}
+
+func TestAnExhaustedAccountHandsOverBeforeTheModelChanges(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", root)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	t.Chdir(root)
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe := func(account config.Account) accounts.Status {
+		return accounts.Status{Account: account, LoggedIn: true, Identity: account.Name, ProbedAt: time.Now().Unix(),
+			Windows: []accounts.Window{{Label: "week", Used: map[string]float64{"main": 10, "second": 40}[account.Name]}}}
+	}
+	previousClaude, previousCodex, previousRun := accounts.ProbeClaude, accounts.ProbeCodex, Run
+	accounts.ProbeClaude, accounts.ProbeCodex = probe, probe
+	t.Cleanup(func() {
+		accounts.ProbeClaude, accounts.ProbeCodex, Run, Accounts = previousClaude, previousCodex, previousRun, nil
+	})
+	Accounts = accounts.New([]config.Account{{Name: "main", Provider: "codex", Home: "~/main"}, {Name: "second", Provider: "codex", Home: "~/second"}},
+		filepath.Join(root, "accounts.json"))
+
+	exhausted := map[string]bool{"main": true}
+	var ran []string
+	Run = func(call Call) (Result, error) {
+		ran = append(ran, call.Route.Alias+"@"+call.Account.Name)
+		if exhausted[call.Account.Name] {
+			return Result{}, ErrLimit
+		}
+		return Result{Answer: "ok", Session: "s"}, nil
+	}
+	_, used, err := RunRouted(cfg, Call{Route: cfg.MustRoute("sol:high"), Dir: root}, nil)
+	if err != nil || used.Alias != "sol" || used.Account != "second" || used.SubstitutedFrom != "" || strings.Join(ran, " ") != "sol@main sol@second" {
+		t.Fatalf("the second account answers on the same model: %+v %v %v", used, ran, err)
+	}
+	ran = nil
+	if _, used, _ = RunRouted(cfg, Call{Route: cfg.MustRoute("sol:high"), Dir: root}, nil); strings.Join(ran, " ") != "sol@second" {
+		t.Fatalf("the exhausted account rests instead of being tried again: %v", ran)
+	}
+	// A continued session asks for its own account first and may move to another one, but never to another model.
+	ran, exhausted = nil, map[string]bool{"second": true}
+	route := cfg.MustRoute("sol:high")
+	route.Account = "second"
+	if _, _, err = RunRouted(cfg, Call{Route: route, Dir: root, Resume: "s"}, nil); !errors.Is(err, ErrLimit) || strings.Join(ran, " ") != "sol@second" {
+		t.Fatalf("with every account resting a resumed session reports the limit: %v %v", ran, err)
+	}
+	// Every codex account is out: only now the declared alternate model runs, on the default claude profile.
+	ran = nil
+	if _, used, err = RunRouted(cfg, Call{Route: cfg.MustRoute("sol:high"), Dir: root}, nil); err != nil || used.Alias != "sonnet" || used.Account != "" ||
+		strings.Join(ran, " ") != "sonnet@" {
+		t.Fatalf("the model changes after the accounts are exhausted: %+v %v %v", used, ran, err)
 	}
 }

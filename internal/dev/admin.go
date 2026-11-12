@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/knaus94/claude-dev/internal/accounts"
 	"github.com/knaus94/claude-dev/internal/assets"
 	"github.com/knaus94/claude-dev/internal/config"
 	"github.com/knaus94/claude-dev/internal/ops"
@@ -162,6 +163,16 @@ func Doctor() map[string]any {
 			if model.Provider == "codex" && len(cache) > 0 {
 				add("model "+alias, strings.Contains(string(cache), `"`+model.Model+`"`), false, model.Model+" in the local Codex model list")
 			}
+		}
+	}
+	if cfg != nil {
+		manager := accounts.New(cfg.Accounts, filepath.Join(Root(), "accounts.json"))
+		for _, status := range manager.Statuses(false) {
+			ok, why := status.Available(status.Provider, time.Now().Unix())
+			if why == "" {
+				why = "ready"
+			}
+			add("account "+status.Name, ok, false, status.Home+": "+why)
 		}
 	}
 	healthy := true

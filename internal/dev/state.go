@@ -393,7 +393,7 @@ func manifest() (map[string]string, error) {
 	}
 	out := map[string]string{}
 	for _, name := range strings.Split(changed+untracked, "\x00") {
-		if name != "" {
+		if name != "" && !strings.HasPrefix(name, ".claude-dev/") { // saved plans are notes about the work, not the work
 			out[name] = entry(name)
 		}
 	}
@@ -604,6 +604,14 @@ func prune(days int) int {
 		}
 		if os.RemoveAll(filepath.Dir(path)) == nil {
 			removed++
+		}
+	}
+	// Designs and context packs belong to a checkout; an old one is not counted, only dropped.
+	shared, _ := filepath.Glob(filepath.Join(Root(), "*", "designs", "*"))
+	packs, _ := filepath.Glob(filepath.Join(Root(), "*", "scout", "*"))
+	for _, path := range append(shared, packs...) {
+		if info, err := os.Stat(path); err == nil && info.ModTime().Before(limit) {
+			_ = os.RemoveAll(path)
 		}
 	}
 	return removed

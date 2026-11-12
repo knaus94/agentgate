@@ -497,6 +497,7 @@ func (g *Gate) runLane(cfg *config.Config, spec laneSpec, index int, dir string,
 	route := spec.Route
 	if previous := g.previousLane(spec); previous != nil {
 		lane.Dir, lane.Session = previous.Dir, previous.Session
+		route.Account = previous.Route.Account
 		route.Effort = config.Lower(route.Effort) // a recheck reads the delta, not the whole change
 		prompt = "The task you reviewed was corrected. A fresh packet is at " + path + ": start from since_last_review and recheck, " +
 			"resolve or keep every finding listed there, report new defects of the correction, and return the same JSON schema.\n"

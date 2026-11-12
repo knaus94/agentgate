@@ -50,6 +50,15 @@ type Mode struct {
 	Blocking             []string `json:"blocking"`
 }
 
+// Account is one logged-in CLI profile: a Claude config directory or a Codex home. Several accounts of one
+// provider share the work, and one that hit its limit is skipped until it resets.
+type Account struct {
+	Name     string `json:"name"`
+	Provider string `json:"provider"` // claude or codex
+	Home     string `json:"home"`
+	Paid     bool   `json:"paid,omitempty"` // an API-key profile bills per token; it is used only when this is set
+}
+
 type Config struct {
 	Version           int                 `json:"version"`
 	MaxParallel       int                 `json:"max_parallel"`
@@ -62,6 +71,7 @@ type Config struct {
 	VisualReviewer    string              `json:"visual_reviewer"`
 	Consultant        string              `json:"consultant"`
 	PlaywrightMCP     string              `json:"playwright_mcp"`
+	Accounts          []Account           `json:"accounts"`
 	Modes             map[string]Mode     `json:"modes"`
 }
 
@@ -73,6 +83,7 @@ type Route struct {
 	Effort          string `json:"effort"`
 	Pool            string `json:"pool"`
 	SubstitutedFrom string `json:"substituted_from,omitempty"`
+	Account         string `json:"account,omitempty"` // configured account the call ran under; a continued session prefers it
 }
 
 func (r Route) String() string { return r.Alias + ":" + r.Effort }
@@ -106,6 +117,9 @@ func Load() (*Config, error) {
 		var layer map[string]any
 		if err := json.Unmarshal(raw, &layer); err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		if path == ProjectFile {
+			delete(layer, "accounts") // a repository does not choose whose subscription pays for its work
 		}
 		merge(merged, layer)
 	}
@@ -194,6 +208,25 @@ func Unset(key string) error {
 	return writeUser(layer)
 }
 
+// SetValue writes one top-level key of the user file to a structured value.
+func SetValue(key string, value any) error {
+	layer, err := readUser()
+	if err != nil {
+		return err
+	}
+	layer[key] = value
+	return writeUser(layer)
+}
+
+// ExpandHome resolves a leading "~/".
+func ExpandHome(path string) string {
+	if rest, ok := strings.CutPrefix(path, "~/"); ok {
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, rest)
+	}
+	return path
+}
+
 // Init creates the user file with the models and fallbacks, the part people actually change.
 func Init() (string, error) {
 	if _, err := os.Stat(UserPath()); err == nil {
@@ -232,6 +265,13 @@ func (c *Config) validate() error {
 				return fmt.Errorf("config: fallbacks reference unknown model %q", other)
 			}
 		}
+	}
+	names := map[string]bool{}
+	for _, account := range c.Accounts {
+		if account.Name == "" || names[account.Name] || account.Home == "" || (account.Provider != "claude" && account.Provider != "codex") {
+			return fmt.Errorf("config: account %q needs a unique name, provider claude|codex and a home directory", account.Name)
+		}
+		names[account.Name] = true
 	}
 	specs := []string{c.UIDesigner, c.VisualReviewer, c.Consultant}
 	for _, name := range ModeNames {

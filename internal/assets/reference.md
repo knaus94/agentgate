@@ -1,7 +1,7 @@
 # claude-dev reference
 
-Every command prints JSON. Inputs are read from `--file <path>` or `--file -` (stdin). Unknown fields are
-rejected.
+Every command prints JSON. Inputs are read from `--file <path>`, `--file -` (stdin) or `--plan <name>` (a plan
+saved with `plan save`). Unknown fields are rejected.
 
 ## Commands
 
@@ -9,6 +9,8 @@ rejected.
 |---|---|---|
 | `parse` | raw request | parse the `/dev` arguments |
 | `preview` | raw request | show mode handling and routes; no files, no models |
+| `plan save [name]` | plan | validate and keep the plan in `.claude-dev/plans/<name>/` with a readable `brief.md` |
+| `plan list`, `plan show <name>` | — | saved plans of this repository; print a brief |
 | `route` | plan | mode decision, reasons and models; read-only |
 | `architecture` | plan | design passes of heavy and ultra |
 | `design` | design input | read-only UI designer |
@@ -26,7 +28,9 @@ rejected.
 | `resume`, `stop`, `status`, `watch` | — | lifecycle and observation |
 
 Setup: `doctor`, `install [--zed] [--uninstall]`, `update [--check]`, `modes`,
-`config show|path|init|set <key> <value>|unset <key>`, `prune`, `version`.
+`config show|path|init|set <key> <value>|unset <key>`, `prune`, `version`,
+`accounts [--json] | discover [--save] | add <name> <claude|codex> <home> [--paid] | remove <name> | reset <name>`
+(several subscriptions: limits, load spreading and failover are automatic).
 
 ## Request
 

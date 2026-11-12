@@ -56,14 +56,16 @@ type Receipt struct {
 
 var receiptID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
-func designsDir() string { return filepath.Join(home(), "designs") }
+// designsDir belongs to the checkout, not to one session: a plan designed in one conversation can be
+// launched from another. A receipt stays bound to its contract by the fingerprint.
+func designsDir() string { return filepath.Join(checkoutDir(""), "designs") }
 
-// loadReceipt reads a receipt of this session and checkout; another session's design cannot be accepted here.
+// loadReceipt reads a receipt of this checkout.
 func loadReceipt(id, kind string) (*Receipt, error) {
 	raw, err := os.ReadFile(filepath.Join(designsDir(), id, "receipt.json"))
 	receipt := &Receipt{}
 	if !receiptID.MatchString(id) || err != nil || json.Unmarshal(raw, receipt) != nil || receipt.Kind != kind {
-		return nil, fmt.Errorf("unknown %s receipt for this session and checkout: %q", kind, id)
+		return nil, fmt.Errorf("unknown %s receipt for this checkout: %q", kind, id)
 	}
 	return receipt, nil
 }
