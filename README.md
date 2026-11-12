@@ -1,0 +1,150 @@
+# claude-dev
+
+[Русский](README.ru.md)
+
+**`/dev` for Claude Code: your session leads, sandboxed Claude and Codex workers write and review, and a
+quality gate decides when the task is done.**
+
+You type `/dev add rate limiting to the export endpoint` in Claude Code. Your session becomes the lead: it
+reads the code, writes the brief and splits the work. `claude-dev` then runs the writers and reviewers as
+separate processes on the models you configured, keeps receipts of everything they did, and refuses to close
+the task while a review, a check or a blocking finding is outstanding.
+
+```
+/dev [-l|-m|-h|-x] <task>
+   │
+   ├─ scout      a cheap model maps the code once; every later worker starts from that map
+   ├─ design     heavy, ultra: two independent designs in parallel; the lead accepts one
+   ├─ write      one sandboxed writer per stream, wave by wave; writers run the declared checks themselves
+   ├─ check      the declared checks run first — reviewers are never paid to read code that fails them
+   ├─ review     reviewers from two vendors in parallel, each on a different model than the writer
+   ├─ correct    failing checks and accepted findings go back to the same writers, in their own sessions
+   └─ finish     only with a current review, passing checks and no blocking finding
+```
+
+## Why
+
+- **Several subscriptions at once.** Each job goes to the model you choose, and parallel jobs run on different
+  pools (Claude, Fable and Codex by default), so no single limit is the bottleneck. When a pool is
+  exhausted, a declared alternate takes over and the substitution is reported.
+- **The strongest model creates, the others verify.** The author never reviews its own code: reviewers are
+  fresh processes on different models, from two vendors in every mode above light.
+- **Evidence, not claims.** Reviews and check results are bound to the exact content they saw. Change a file
+  and they are stale.
+- **Real isolation.** Every worker runs under `bwrap` with a read-only host. A reviewer cannot write; a writer
+  can write only the checkout.
+- **Cheap conversations.** A blocked writer is answered in its own session. Corrections go to the writer that
+  wrote the code, and the reviewer that raised a finding rechecks only the fix.
+- **One dial.** Four modes instead of a matrix of options, and the mode is chosen for you.
+
+## Modes
+
+Without a flag the lead records what it found in the code — size, named risks, whether the change can be
+undone, uncertainty — and the mode follows from a fixed rule table. A flag always wins.
+
+| | light `-l` | medium `-m` | heavy `-h` | ultra `-x` |
+|---|---|---|---|---|
+| Chosen when | trivial, ≤3 files, no risk | ordinary work | a named risk, or complex and uncertain | an irreversible risk, or a severe risk in complex work |
+| Context | the lead's own | scout `sol:medium` | scout `sol:medium` | scout `sol:high` |
+| Architect | the lead | the lead | `fable:high` ∥ `astra:high` | `fable:xhigh` ∥ `astra:xhigh`, then cross-critique |
+| Backend writer | `sol:medium` | `opus:medium` | `fable:high` | `fable:xhigh` |
+| Frontend writer | `sonnet:medium` | `opus:medium` | `fable:high` | `fable:xhigh` |
+| Review: architecture | the lead | `fable:medium` | `opus:high` | `opus:high` |
+| Review: correctness | the lead | `astra:medium` | `astra:high` | `opus:xhigh` ∥ `astra:xhigh` |
+| Review: security | — | — | — | `astra:high` |
+| Effort ceiling | `high` | `high` | `xhigh` | `max` |
+| Blocks completion | P0–P1 | P0–P1 | P0–P2 | P0–P2 |
+
+Each cell is `model:effort`. Two rules run through the table:
+
+- **The strongest model the mode can afford creates; the other frontier models verify.**
+- **Effort is spent where it pays.** A cheap scout reads the repository once, so the expensive models reason
+  instead of exploring. Medium runs every model at the level its vendor ships as default, heavy one step
+  above, ultra two. `max` is never a default: it is reached only when a correction stalls or the lead raises
+  one hard stream. A recheck after a fix runs one step lower and only on the lanes with something to verify.
+
+The choices follow public benchmark, price and vendor-guidance data — see
+[Why these models](docs/model-selection.md) — and every cell can be [changed](docs/configuration.md). Named
+risks: `authorization`, `security`, `money`, `data-integrity`, `concurrency`, `migration`, `public-contract`.
+
+## Install
+
+Linux, x86-64 or arm64. Requires [Claude Code](https://claude.com/claude-code),
+[Codex CLI](https://github.com/openai/codex), `bwrap` (bubblewrap), `git` and `diff`.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/knaus94/claude-dev/main/scripts/install.sh | sh
+```
+
+The script downloads the release binary into `~/.local/bin`, verifies its checksum and runs
+`claude-dev install`, which adds the `/dev` command and a Stop hook to Claude Code. Then:
+
+```sh
+claude-dev doctor     # verify the environment
+claude-dev modes      # see which model does what
+```
+
+Start a new Claude Code session and type `/dev help`.
+
+Update with `claude-dev update`. Remove with `claude-dev install --uninstall` and delete the binary.
+Build from source with `go build ./cmd/claude-dev` (Go 1.25+).
+
+## Use
+
+```
+/dev fix the pagination off-by-one in the orders list
+/dev -h move invoice totals to integer cents
+/dev -2 review --fix the changes on this branch
+/dev plan -x split the wallet service
+/dev status      /dev stop      /dev help
+```
+
+`-N` caps how many model processes run at once. `--preview` shows what would run without starting anything.
+`plan`, `research` and `verify` are read-only. `review` judges an existing diff; add `--fix` to let it correct.
+
+Watch a task from any terminal in the repository:
+
+```sh
+claude-dev watch
+```
+
+```
+/dev  heavy  reviewing  round 1
+move invoice totals to integer cents
+
+▶ review  1m12s
+  review-1-3f2a/lane-0/run           opus:medium    pool claude  1m12s  reads, same session
+  review-1-3f2a/lane-1/run           astra:medium   pool codex   1m12s  reads, same session
+
+writers
+  api                fable:high     COMPLETED
+  web                fable:high     COMPLETED
+
+findings  P0 0  P1 1  P2 2   blocking BLOCKED 3   notes 4
+```
+
+Zed users: `claude-dev install --zed` adds `claude-dev: watch`, `status` and `stop` to Zed's tasks.
+
+## Configure
+
+```sh
+claude-dev config init                               # create ~/.config/claude-dev/config.json
+claude-dev config set models.sol.model gpt-6.1-sol   # point an alias at another model
+claude-dev config set modes.medium.backend sonnet:high  # change who does what
+claude-dev config show
+```
+
+A repository can carry its own `.claude-dev.json`. See [docs/configuration.md](docs/configuration.md).
+
+## Documentation
+
+- [How it works](docs/how-it-works.md) — the gate, the sandbox, how agents talk to each other
+- [Modes](docs/modes.md) — the rule table and what each mode runs
+- [Why these models](docs/model-selection.md) — the public data behind the defaults
+- [Configuration](docs/configuration.md) — models, pools, fallbacks, per-repository overrides
+- [Releasing](docs/releasing.md) — how versions are published and installed
+- `claude-dev guide` and `claude-dev reference` print what the lead reads
+
+## License
+
+MIT

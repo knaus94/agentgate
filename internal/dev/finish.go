@@ -1,0 +1,437 @@
+package dev
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"slices"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/knaus94/claude-dev/internal/config"
+	"github.com/knaus94/claude-dev/internal/ops"
+)
+
+type FixInput struct {
+	Brief        string        `json:"brief"` // the root cause and the coherent remedy
+	Reassessment *Reassessment `json:"reassessment,omitempty"`
+	Escalate     bool          `json:"escalate,omitempty"` // raise the writers' effort one step for this correction
+	Streams      []string      `json:"streams,omitempty"`  // which streams repair a failing check; default: all
+}
+
+// Progress says whether the last correction moved the task forward.
+type Progress struct {
+	Status     string   `json:"status"`
+	Reassess   bool     `json:"reassessment_required"`
+	Resolved   []string `json:"resolved,omitempty"`
+	Unresolved []string `json:"unresolved,omitempty"`
+	Recurring  []string `json:"recurring,omitempty"`
+}
+
+// progress detects corrections that go nowhere: unchanged or cycling content, or a defect that keeps coming back.
+// There is no fixed round limit; a stalled task needs a new diagnosis, not another identical attempt.
+func (g *Gate) progress() Progress {
+	if len(g.Corrections) == 0 {
+		return Progress{Status: "first-correction"}
+	}
+	if g.Phase != "reviewed" {
+		return Progress{Status: "awaiting-review"}
+	}
+	last := g.Corrections[len(g.Corrections)-1]
+	out := Progress{}
+	for _, id := range last.FindingIDs {
+		if _, ok := g.Resolutions[id]; ok {
+			out.Resolved = append(out.Resolved, id)
+			continue
+		}
+		out.Unresolved = append(out.Unresolved, id)
+		if len(g.Corrections) > 1 && slices.Contains(g.Corrections[len(g.Corrections)-2].FindingIDs, id) && g.Dispositions[id].Decision == "accepted" {
+			out.Recurring = append(out.Recurring, id)
+		}
+	}
+	cycle := slices.ContainsFunc(g.Corrections, func(c Correction) bool { return c.StartDigest == g.ReviewDigest })
+	switch {
+	case g.ReviewDigest == last.StartDigest:
+		out.Status = "unchanged-content"
+	case cycle:
+		out.Status = "content-cycle"
+	case len(out.Recurring) > 0:
+		out.Status = "recurring-findings"
+	case len(out.Resolved) == 0:
+		out.Status = "no-confirmed-fix"
+	default:
+		out.Status = "progress"
+	}
+	out.Reassess = out.Status != "progress"
+	return out
+}
+
+// Fix sends the accepted findings back to the writers that own the affected files, in their own sessions.
+func Fix(cfg *config.Config, gate *Gate, input FixInput) (any, error) {
+	if !gate.Request.Writes() {
+		return nil, errors.New("a review without --fix has no authority to change code")
+	}
+	content, _, err := gate.contentDigest()
+	if err != nil {
+		return nil, err
+	}
+	// A correction is driven by accepted review findings, by failing declared checks, or by both.
+	failing := gate.failing()
+	if len(failing) == 0 {
+		if gate.Phase != "reviewed" || content != gate.ReviewDigest {
+			return nil, errors.New("a correction needs a review and triage of the current code, or a failing declared check")
+		}
+		if gate.visualRequired() && gate.currentVisual(content) == nil {
+			return nil, errors.New("collect the opted-in browser report before spending a correction round")
+		}
+		if pending := gate.untriaged(); len(pending) > 0 {
+			return nil, fmt.Errorf("triage these findings first: %s", strings.Join(pending, ", "))
+		}
+	} else if gate.Phase != "awaiting-review" && gate.Phase != "reviewed" {
+		return nil, fmt.Errorf("cannot correct a task that is %s", gate.Phase)
+	}
+	accepted := gate.accepted()
+	if len(accepted) == 0 && len(failing) == 0 {
+		return nil, errors.New("there are no accepted findings and no failing checks to correct")
+	}
+	if strings.TrimSpace(input.Brief) == "" {
+		return nil, errors.New("brief describes the root cause and the coherent remedy")
+	}
+	var checkIDs []string
+	for _, failure := range failing {
+		checkIDs = append(checkIDs, checkID(failure.Argv))
+	}
+	progress := gate.progress()
+	// The same check failing again after a correction aimed at it is a stall, just like a finding that returns.
+	if len(gate.Corrections) > 0 && slices.ContainsFunc(gate.Corrections[len(gate.Corrections)-1].CheckIDs, func(id string) bool {
+		return slices.Contains(checkIDs, id)
+	}) {
+		progress = Progress{Status: "check-still-failing", Reassess: true}
+	}
+	if progress.Reassess && (input.Reassessment == nil || strings.TrimSpace(input.Reassessment.Evidence) == "" ||
+		strings.TrimSpace(input.Reassessment.ChangedApproach) == "") {
+		return nil, fmt.Errorf("the last correction made no verified progress (%s): diagnose again and provide reassessment "+
+			"{evidence, changed_approach}, or hold and ask the user if a decision is missing", progress.Status)
+	}
+	// Each finding goes to the stream that owns its file; files named only by the lead join that stream.
+	touched := map[string]bool{}
+	var extra []string
+	for _, finding := range accepted {
+		target := gate.streamOf(finding.Path)
+		files := gate.Dispositions[finding.ID].Files
+		for _, file := range files {
+			if target == nil {
+				target = gate.streamOf(file)
+			}
+		}
+		if target == nil {
+			target = &gate.Plan.Streams[0]
+		}
+		touched[target.Name] = true
+		for _, file := range files {
+			if gate.streamOf(file) == nil {
+				target.Files = append(target.Files, file)
+				extra = append(extra, file)
+			}
+		}
+	}
+	if len(extra) > 0 {
+		unlock, err := scopeLock()
+		if err != nil {
+			return nil, err
+		}
+		added, err := capture(extra)
+		unlock()
+		if err != nil {
+			return nil, err
+		}
+		for name, state := range added {
+			gate.Baseline[name] = state
+		}
+		gate.Files = append(gate.Files, extra...)
+		sort.Strings(gate.Files)
+		gate.Context = subtract(gate.Context, extra)
+	}
+	// A failing check does not say which stream broke it: every stream gets it unless the lead names the owners.
+	if len(failing) > 0 {
+		for _, stream := range gate.Plan.Streams {
+			if !stream.Done && (len(input.Streams) == 0 || slices.Contains(input.Streams, stream.Name)) {
+				touched[stream.Name] = true
+			}
+		}
+	}
+	if len(touched) == 0 {
+		return nil, errors.New("streams names no stream of the plan")
+	}
+	var streams []Stream
+	var ids []string
+	for _, stream := range gate.Plan.Streams {
+		if touched[stream.Name] {
+			stream.After, stream.Done = nil, false
+			streams = append(streams, stream)
+		}
+	}
+	for _, finding := range accepted {
+		ids = append(ids, finding.ID)
+	}
+	// More effort is earned, not assumed: a correction that made no verified progress, or the lead's explicit
+	// request, raises the writers one step, up to the mode's ceiling.
+	if progress.Reassess || input.Escalate {
+		gate.Boost++
+	}
+	gate.Iteration++
+	gate.Corrections = append(gate.Corrections, Correction{Iteration: gate.Iteration, FindingIDs: ids, StartDigest: content,
+		CheckIDs: checkIDs, Brief: input.Brief, Reassessment: input.Reassessment})
+	gate.Round = &Round{Batch: fmt.Sprintf("v%d.c%d", gate.PlanVersion, gate.Iteration), Streams: streams, Correction: true,
+		Findings: accepted, Remedy: input.Brief, Boost: gate.Boost, Failures: failing}
+	gate.Phase, gate.WriteFiles = "correcting", gate.Files
+	if gate.Manifest, err = manifest(); err != nil {
+		return nil, err
+	}
+	return gate.write(cfg)
+}
+
+type FinishInput struct {
+	Summary              string     `json:"summary"`
+	ArchitectureEvidence string     `json:"architecture_evidence,omitempty"`
+	VisualExclusions     []Excluded `json:"visual_exclusions,omitempty"`
+}
+
+type Final struct {
+	FinishInput
+	At int64 `json:"at"`
+}
+
+// Finish closes the task. It refuses while anything the mode requires is missing or stale.
+func Finish(cfg *config.Config, gate *Gate, input FinishInput) (any, error) {
+	if err := gate.auditScope(); err != nil {
+		return nil, err
+	}
+	content, _, err := gate.contentDigest()
+	if err != nil {
+		return nil, err
+	}
+	if gate.Phase != "reviewed" || content != gate.ReviewDigest {
+		return nil, errors.New("the code has no current independent review")
+	}
+	if gate.Reviews[len(gate.Reviews)-1].Contract != gate.contract() {
+		return nil, errors.New("the task contract changed since the review")
+	}
+	if pending := gate.untriaged(); len(pending) > 0 {
+		return nil, fmt.Errorf("triage these findings first: %s", strings.Join(pending, ", "))
+	}
+	var blocking []string
+	for _, finding := range gate.Findings() {
+		if gate.blocking(cfg, finding) {
+			blocking = append(blocking, finding.ID)
+		}
+	}
+	if len(blocking) > 0 {
+		return nil, fmt.Errorf("these findings still block completion: %s", strings.Join(blocking, ", "))
+	}
+	if gate.visualRequired() {
+		run := gate.currentVisual(content)
+		if run == nil {
+			return nil, errors.New("the opted-in browser verification is unfinished; run it or record why it is skipped")
+		}
+		if missing := gate.unobserved(run, input.VisualExclusions); len(missing) > 0 {
+			return nil, fmt.Errorf("browser scenarios were not observed: %s; check them or list visual_exclusions with reasons", strings.Join(missing, ", "))
+		}
+	}
+	if gate.Request.Writes() && len(gate.Plan.Checks) == 0 && gate.Mode != "light" {
+		return nil, errors.New("this mode needs at least one declared check with a current result")
+	}
+	for _, check := range gate.outstanding() {
+		return nil, fmt.Errorf("check has no current passing result: %s", strings.Join(check.Argv, " "))
+	}
+	needsEvidence := len(cfg.Modes[gate.Mode].Architecture) > 0 && gate.Request.Writes()
+	if strings.TrimSpace(input.Summary) == "" || (needsEvidence && strings.TrimSpace(input.ArchitectureEvidence) == "") {
+		return nil, errors.New("record summary: what was delivered and verified; this mode also needs architecture_evidence: " +
+			"how the result matches the accepted design")
+	}
+	if err := ops.Checkpoint(); err != nil {
+		return nil, err
+	}
+	gate.Final, gate.Phase = &Final{FinishInput: input, At: time.Now().Unix()}, "complete"
+	return gate.Summary(cfg), gate.save()
+}
+
+func (g *Gate) holdNow(reason string) {
+	if g.Phase != "held" {
+		g.ResumePhase = g.Phase
+	}
+	g.Phase, g.HoldReason = "held", reason
+	_ = g.save()
+}
+
+type HoldInput struct {
+	Reason    string `json:"reason"`
+	Cancelled bool   `json:"cancelled,omitempty"` // the user dropped the task for good
+}
+
+// Hold parks the task with the true reason: a missing decision, an authorization, or a user stop.
+func Hold(cfg *config.Config, gate *Gate, input HoldInput) (any, error) {
+	if strings.TrimSpace(input.Reason) == "" {
+		return nil, errors.New("a hold needs its real reason")
+	}
+	gate.holdNow(input.Reason)
+	if input.Cancelled {
+		gate.Phase = "cancelled"
+	}
+	return gate.Summary(cfg), gate.save()
+}
+
+// Resume returns a held task to the phase it was in. Only the lead resumes, never a status call.
+func Resume(cfg *config.Config, gate *Gate) (any, error) {
+	if gate.Phase != "held" {
+		return nil, errors.New("only a held task can be resumed")
+	}
+	gate.Phase, gate.ResumePhase, gate.HoldReason = gate.ResumePhase, "", ""
+	if gate.Phase == "reviewing" {
+		gate.Phase = "awaiting-review"
+	}
+	return gate.Summary(cfg), gate.save()
+}
+
+// Stop asks the running operation to stop, or holds an idle task. It does not take the operation lock.
+func Stop(cfg *config.Config) (any, error) {
+	if err := requireLead(nil); err != nil {
+		return nil, err
+	}
+	if ops.RequestStop(home(), "the user stopped /dev") {
+		return map[string]any{"cancellation_requested": true, "operation": ops.Status(home()),
+			"next": "The running operation is terminating its processes and will hold the task. Check status to confirm."}, nil
+	}
+	gate := Current()
+	if gate == nil || !gate.active() {
+		return map[string]any{"stopped": true}, nil
+	}
+	return Hold(cfg, gate, HoldInput{Reason: "the user stopped /dev"})
+}
+
+// Summary is the read-only picture of a task that every operation returns.
+func (g *Gate) Summary(cfg *config.Config) map[string]any {
+	var open, notes, blocking []Finding
+	for _, finding := range g.Findings() {
+		switch _, resolved := g.Resolutions[finding.ID]; {
+		case resolved:
+		case g.isNote(finding):
+			notes = append(notes, finding)
+		default:
+			open = append(open, finding)
+			if g.blocking(cfg, finding) {
+				blocking = append(blocking, finding)
+			}
+		}
+	}
+	ids := func(findings []Finding) []string {
+		out := []string{}
+		for _, finding := range findings {
+			out = append(out, finding.ID)
+		}
+		return out
+	}
+	var writers []*Writer
+	for _, writer := range g.latest() {
+		writers = append(writers, writer)
+	}
+	sort.Slice(writers, func(a, b int) bool { return writers[a].Stream < writers[b].Stream })
+	var outstanding [][]string
+	for _, check := range g.outstanding() {
+		outstanding = append(outstanding, check.Argv)
+	}
+	dir := sessionDir(g.Cwd, g.Session)
+	out := map[string]any{"id": g.ID, "mode": g.Mode, "action": g.Request.Action, "phase": g.Phase, "iteration": g.Iteration,
+		"writers": writers, "findings": open, "blocking": ids(blocking), "untriaged": g.untriaged(), "notes": notes,
+		"checks_outstanding": outstanding, "checks_failed": g.failing(), "progress": g.progress(), "foreign_changes": g.Foreign,
+		"substitutions": g.Substitutions, "operation": ops.Status(dir), "timings_s": ops.Timings(dir, g.ID),
+		"board": g.board(), "state": dir, "next": g.next(cfg, len(blocking) > 0)}
+	if g.ContextPack != "" {
+		out["context_pack"] = g.ContextPack
+	}
+	if g.ScoutNote != "" {
+		out["scout_note"] = g.ScoutNote
+	}
+	if g.Phase == "held" {
+		out["hold_reason"], out["resume_phase"] = g.HoldReason, g.ResumePhase
+	}
+	if g.ReviewError != "" {
+		out["review_error"] = g.ReviewError
+	}
+	if g.Plan.Visual != nil {
+		out["visual"] = g.visualSummary()
+	}
+	return out
+}
+
+// next tells the lead the one thing to do now, so the workflow does not live only in a document.
+func (g *Gate) next(cfg *config.Config, blocked bool) string {
+	switch g.Phase {
+	case "implementing", "correcting":
+		return "Writers have not finished this round: launch (or answer the blocked stream)."
+	case "awaiting-review":
+		if g.Request.Writes() && len(g.failing()) > 0 {
+			return "A declared check fails, so no reviewer was started. Read its output, then `fix` {brief}: the failure goes back to the writers in their own sessions."
+		}
+		if len(cfg.Modes[g.Mode].Review) == 0 {
+			return "Run `review`: it returns the diffs for you to read, then call it again with lead_review."
+		}
+		return "Inspect the change, then run `review`: declared checks run first, reviewers only on code that passes them."
+	case "held":
+		for _, writer := range g.latest() {
+			if writer.Status == "BLOCKED" {
+				return "Decide the blocker, then `answer` {stream, answer}: the writer continues in its own session."
+			}
+		}
+		return "Resolve the hold reason, then `resume`. Never resume a user stop on your own."
+	case "reviewed":
+		switch {
+		case len(g.untriaged()) > 0:
+			return "Verify each finding against the code and `triage` it: accepted, rejected, deferred or needs-approval."
+		case len(g.accepted()) > 0:
+			return "Run `fix` with the root cause and remedy; the owning writers correct it in their sessions."
+		case blocked:
+			return "Blocking findings remain: accept and fix them, or reject them with contrary evidence."
+		case len(g.outstanding()) > 0:
+			return "Run the outstanding checks with `check`."
+		}
+		return "Everything required is current: `finish` with a summary."
+	case "complete":
+		return "Done. Report the work, the checks that ran and any limits to the user."
+	}
+	return ""
+}
+
+// StopHook is the Claude Code Stop hook: it keeps the lead from ending a turn on an unfinished task
+// unless an operation is still running or the task is honestly on hold.
+func StopHook(cwd, sessionID string) map[string]any {
+	gate := readGate(cwd, sessionID)
+	if gate == nil || gate.Session != sessionID || gate.Phase == "held" || gate.Phase == "cancelled" {
+		return map[string]any{}
+	}
+	if gate.Phase == "complete" {
+		if gate.Reported {
+			return map[string]any{}
+		}
+		previous, _ := os.Getwd()
+		if os.Chdir(gate.Cwd) == nil {
+			content, _, err := gate.contentDigest()
+			_ = os.Chdir(previous)
+			// A finished task is bound to the reviewed content, not to HEAD: committing it must not reopen it.
+			if err == nil && content == gate.ReviewDigest {
+				gate.Reported = true
+				_ = gate.save()
+				return map[string]any{}
+			}
+		}
+		gate.Phase, gate.Final = "awaiting-review", nil
+		_ = gate.save()
+	}
+	// A live operation reports its own completion; the lead may end the turn and wait for it.
+	if record := ops.Status(sessionDir(cwd, sessionID)); record != nil && record.Live {
+		return map[string]any{}
+	}
+	return map[string]any{"decision": "block", "reason": "/dev task is " + gate.Phase + ". Run `claude-dev status` and follow its `next`. " +
+		"If you are waiting for the user's decision or were stopped, `claude-dev hold` with the true reason and report INCOMPLETE. Do not claim it is done."}
+}

@@ -1,0 +1,43 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install bubblewrap
+        run: |
+          sudo apt-get update && sudo apt-get install -y bubblewrap
+          # Hosted runners restrict unprivileged user namespaces, which the sandbox tests need.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - name: Verify
+        run: |
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go test -race ./...
+      - name: Build
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          flags="-s -w -X github.com/${GITHUB_REPOSITORY}/internal/update.Version=${version} -X github.com/${GITHUB_REPOSITORY}/internal/update.Repo=${GITHUB_REPOSITORY}"
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            GOOS=linux GOARCH="$arch" go build -trimpath -ldflags "$flags" -o "dist/$arch/claude-dev" ./cmd/claude-dev
+            tar -C "dist/$arch" -czf "dist/claude-dev_linux_${arch}.tar.gz" claude-dev
+          done
+          (cd dist && sha256sum claude-dev_linux_*.tar.gz > checksums.txt)
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/claude-dev_linux_*.tar.gz dist/checksums.txt --generate-notes --verify-tag

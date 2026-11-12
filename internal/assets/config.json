@@ -1,0 +1,182 @@
+{
+  "version": 1,
+  "max_parallel": 4,
+  "worker_memory_mib": 512,
+  "retention_days": 14,
+  "models": {
+    "opus": {
+      "provider": "claude",
+      "model": "claude-opus-5-5",
+      "pool": "claude"
+    },
+    "sonnet": {
+      "provider": "claude",
+      "model": "claude-sonnet-5-5",
+      "pool": "claude"
+    },
+    "fable": {
+      "provider": "claude",
+      "model": "claude-fable-5-2",
+      "pool": "fable"
+    },
+    "sol": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "pool": "codex"
+    },
+    "astra": {
+      "provider": "codex",
+      "model": "gpt-6-astra",
+      "pool": "codex"
+    }
+  },
+  "fallbacks": {
+    "fable": [
+      "opus",
+      "astra"
+    ],
+    "opus": [
+      "fable",
+      "astra",
+      "sonnet"
+    ],
+    "sonnet": [
+      "opus",
+      "sol"
+    ],
+    "sol": [
+      "sonnet",
+      "opus"
+    ],
+    "astra": [
+      "opus",
+      "fable"
+    ]
+  },
+  "reviewers_excluded": [
+    "sol"
+  ],
+  "ui_designer": "opus:medium",
+  "visual_reviewer": "astra:medium",
+  "consultant": "sonnet:medium",
+  "playwright_mcp": "~/.local/share/claude-dev/playwright-mcp/node_modules/@playwright/mcp/cli.js",
+  "modes": {
+    "light": {
+      "scout": "",
+      "architecture": [],
+      "critique": false,
+      "backend": "sol:medium",
+      "frontend": "sonnet:medium",
+      "review": [],
+      "blocking": [
+        "P0",
+        "P1"
+      ],
+      "escalate_to": "high"
+    },
+    "medium": {
+      "scout": "sol:medium",
+      "architecture": [],
+      "critique": false,
+      "backend": "opus:medium",
+      "frontend": "opus:medium",
+      "review": [
+        {
+          "axes": [
+            "architecture"
+          ],
+          "route": "fable:medium"
+        },
+        {
+          "axes": [
+            "correctness"
+          ],
+          "route": "astra:medium"
+        }
+      ],
+      "blocking": [
+        "P0",
+        "P1"
+      ],
+      "escalate_to": "high"
+    },
+    "heavy": {
+      "scout": "sol:medium",
+      "architecture": [
+        "fable:high",
+        "astra:high"
+      ],
+      "critique": false,
+      "architecture_timeout_s": 900,
+      "writer_timeout_s": 1800,
+      "reviewer_timeout_s": 1200,
+      "backend": "fable:high",
+      "frontend": "fable:high",
+      "review": [
+        {
+          "axes": [
+            "architecture"
+          ],
+          "route": "opus:high"
+        },
+        {
+          "axes": [
+            "correctness"
+          ],
+          "route": "astra:high"
+        }
+      ],
+      "blocking": [
+        "P0",
+        "P1",
+        "P2"
+      ],
+      "escalate_to": "xhigh"
+    },
+    "ultra": {
+      "scout": "sol:high",
+      "architecture": [
+        "fable:xhigh",
+        "astra:xhigh"
+      ],
+      "critique": true,
+      "architecture_timeout_s": 1800,
+      "writer_timeout_s": 3600,
+      "reviewer_timeout_s": 1800,
+      "backend": "fable:xhigh",
+      "frontend": "fable:xhigh",
+      "review": [
+        {
+          "axes": [
+            "architecture"
+          ],
+          "route": "opus:high"
+        },
+        {
+          "axes": [
+            "correctness"
+          ],
+          "route": "opus:xhigh"
+        },
+        {
+          "axes": [
+            "correctness"
+          ],
+          "route": "astra:xhigh"
+        },
+        {
+          "axes": [
+            "security"
+          ],
+          "route": "astra:high"
+        }
+      ],
+      "blocking": [
+        "P0",
+        "P1",
+        "P2"
+      ],
+      "escalate_to": "max"
+    }
+  }
+}

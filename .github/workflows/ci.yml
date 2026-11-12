@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install bubblewrap
+        run: |
+          sudo apt-get update && sudo apt-get install -y bubblewrap
+          # Hosted runners restrict unprivileged user namespaces, which the sandbox tests need.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - name: Format
+        run: test -z "$(gofmt -l .)"
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test -race ./...
+      - name: Build
+        run: go build ./cmd/claude-dev
+      - name: Installer syntax
+        run: sh -n scripts/install.sh

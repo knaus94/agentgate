@@ -1,0 +1,4 @@
+/claude-dev
+/dist/
+*.test
+*.out
