@@ -40,7 +40,7 @@ func TestBuiltInTableIsValidAndComplete(t *testing.T) {
 		}
 	}
 	alternates := cfg.Alternates(route)
-	if len(alternates) != 2 || alternates[0].Alias != "opus" || alternates[0].Effort != "xhigh" || alternates[0].SubstitutedFrom != "fable:xhigh" {
+	if len(alternates) != 2 || alternates[0].Alias != "astra" || alternates[0].Effort != "xhigh" || alternates[0].SubstitutedFrom != "fable:xhigh" {
 		t.Fatalf("alternates keep the effort and remember what they replace: %+v", alternates)
 	}
 	if !cfg.Modes["heavy"].Blocks("P2") || cfg.Modes["medium"].Blocks("P2") {

@@ -616,7 +616,7 @@ func TestRouteAndPreviewStartNothing(t *testing.T) {
 	if _, err := os.Stat(Root()); err == nil {
 		t.Fatal("route and preview write nothing")
 	}
-	if table := Modes(f.cfg); !strings.Contains(table, "ultra") || !strings.Contains(table, "fallback opus, astra") {
+	if table := Modes(f.cfg); !strings.Contains(table, "ultra") || !strings.Contains(table, "fallback astra, opus") {
 		t.Fatalf("modes table: %s", table)
 	}
 }

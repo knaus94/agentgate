@@ -96,9 +96,10 @@ points, so the choice trades some front-end quality for spend and moves that wor
 **4. Every review above light comes from two vendors.** Astra reviews correctness in medium and heavy and is
 the second architect: it is strongest exactly where the Claude models are weakest (algorithms, operations,
 scientific reasoning), 2–3× faster per task, and a reviewer from another vendor fails in different ways than
-the writer. The Claude reviewer is Fable in medium and Opus in heavy and ultra; in heavy and ultra Opus also writes the back-end, so the architecture lane there is not independent of the writer there.
+the writer. The Claude reviewer is Fable in every mode above light: it writes nowhere, so it is never the author of the code it
+reads, and a review spends far fewer output tokens than writing.
 
-**5. Ultra checks correctness twice.** Correctness is reviewed by Opus and by Astra independently, both at
+**5. Ultra checks correctness twice.** Correctness is reviewed by Fable and by Astra independently, both at
 `xhigh`; a defect has to get past both. Ultra is also the only mode whose effort ceiling is `max`.
 
 **6. Light stays cheap, and Sol reads for everyone.** Sol is 5–10× cheaper per task and the fastest; for an
@@ -116,8 +117,8 @@ safety classifiers; a review lane that can be declined is not a dependable gate.
 | Architect | the lead | the lead | `fable:high` ∥ `astra:high` | `fable:xhigh` ∥ `astra:xhigh`, then cross-critique |
 | Backend writer | `sol:medium` | `opus:medium` | `opus:high` | `opus:xhigh` |
 | Frontend writer | `sonnet:medium` | `opus:medium` | `astra:high` | `astra:xhigh` |
-| Review: architecture | the lead | `fable:medium` | `opus:high` | `opus:high` |
-| Review: correctness | the lead | `astra:medium` | `astra:high` | `opus:xhigh` ∥ `astra:xhigh` |
+| Review: architecture | the lead | `fable:medium` | `fable:high` | `fable:high` |
+| Review: correctness | the lead | `astra:medium` | `astra:high` | `fable:xhigh` ∥ `astra:xhigh` |
 | Review: security | — | — | — | `astra:high` |
 | Effort ceiling | `high` | `high` | `xhigh` | `max` |
 
@@ -136,7 +137,7 @@ Codex, with the parallel design and review phases split across them.
   and `medium` (53.6 against 60.6), so it runs at `medium`.
 - **Fable at `high` already equals Opus at its maximum**, for roughly half the output tokens (98,000 against
   173,000 per task). That makes `fable:high` the efficient strong setting for the architects. Its margin over
-  Opus opens at `xhigh`, which is what ultra pays for. Writers run on Opus and Astra at the same levels.
+  Opus opens at `xhigh`, which is what ultra pays for. Writers run on Opus and Astra at the same levels, and Fable reviews at them.
 - **Returns flatten near the top and cost does not.** In the published sweep `xhigh` adds about two points over
   `high` for roughly 47% more cost. In our own runs of the same toy task, a design pass took 110 seconds at
   `xhigh` and 349 seconds at `max`. So `max` is an escalation, not a default: it is used when a correction has

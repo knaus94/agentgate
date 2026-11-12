@@ -174,7 +174,7 @@ are routed to different pools by the mode table, so they do not compete for one 
 heavy scout      sol:medium (pool codex), once
 heavy design     fable:high (pool fable)   ∥  astra:high (pool codex)
 heavy writers    opus:high  (pool claude), one per stream
-heavy review     opus:high  (pool claude)  ∥  astra:high (pool codex)
+heavy review     fable:high (pool fable)   ∥  astra:high (pool codex)
 ```
 
 With several subscriptions configured, each call first picks the account with the most room for its model,

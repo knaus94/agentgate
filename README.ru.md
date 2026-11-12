@@ -50,8 +50,8 @@ Codex пишут и проверяют код, а гейт решает, ког�
 | Архитектор | лид | лид | `fable:high` ∥ `astra:high` | `fable:xhigh` ∥ `astra:xhigh`, затем перекрёстная критика |
 | Бэкенд | `sol:medium` | `opus:medium` | `opus:high` | `opus:xhigh` |
 | Фронтенд | `sonnet:medium` | `opus:medium` | `astra:high` | `astra:xhigh` |
-| Ревью: архитектура | лид | `fable:medium` | `opus:high` | `opus:high` |
-| Ревью: корректность | лид | `astra:medium` | `astra:high` | `opus:xhigh` ∥ `astra:xhigh` |
+| Ревью: архитектура | лид | `fable:medium` | `fable:high` | `fable:high` |
+| Ревью: корректность | лид | `astra:medium` | `astra:high` | `fable:xhigh` ∥ `astra:xhigh` |
 | Ревью: безопасность | — | — | — | `astra:high` |
 | Потолок усилия | `high` | `high` | `xhigh` | `max` |
 | Блокирует | P0–P1 | P0–P1 | P0–P2 | P0–P2 |

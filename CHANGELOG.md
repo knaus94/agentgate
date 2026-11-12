@@ -2,6 +2,15 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.8.1
+
+- **Fable reviews in heavy and ultra.** The architecture lane of both and the first correctness lane of ultra
+  run on `fable` (`high`, `xhigh`) instead of `opus`. Opus writes the back-end there, so these lanes were being
+  substituted on every run; Fable writes nowhere and is never the author.
+- **Fallbacks spare the Claude subscription.** Fable and Codex are the pools that run out, so each now falls
+  back to the other's model of the same tier first: `fable → astra → opus`, `astra → fable → opus`,
+  `sol → sonnet`.
+
 ## 0.8.0
 
 - **Writers moved off Fable.** In heavy and ultra the backend writer is `opus` (`high`, `xhigh`) and the

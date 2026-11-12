@@ -38,8 +38,8 @@
   },
   "fallbacks": {
     "fable": [
-      "opus",
-      "astra"
+      "astra",
+      "opus"
     ],
     "opus": [
       "fable",
@@ -51,12 +51,11 @@
       "sol"
     ],
     "sol": [
-      "sonnet",
-      "opus"
+      "sonnet"
     ],
     "astra": [
-      "opus",
-      "fable"
+      "fable",
+      "opus"
     ]
   },
   "reviewers_excluded": [
@@ -125,7 +124,7 @@
             "architecture",
             "simplicity"
           ],
-          "route": "opus:high"
+          "route": "fable:high"
         },
         {
           "axes": [
@@ -159,13 +158,13 @@
             "architecture",
             "simplicity"
           ],
-          "route": "opus:high"
+          "route": "fable:high"
         },
         {
           "axes": [
             "correctness"
           ],
-          "route": "opus:xhigh"
+          "route": "fable:xhigh"
         },
         {
           "axes": [

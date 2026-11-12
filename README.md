@@ -52,8 +52,8 @@ undone, uncertainty — and the mode follows from a fixed rule table. A flag alw
 | Architect | the lead | the lead | `fable:high` ∥ `astra:high` | `fable:xhigh` ∥ `astra:xhigh`, then cross-critique |
 | Backend writer | `sol:medium` | `opus:medium` | `opus:high` | `opus:xhigh` |
 | Frontend writer | `sonnet:medium` | `opus:medium` | `astra:high` | `astra:xhigh` |
-| Review: architecture | the lead | `fable:medium` | `opus:high` | `opus:high` |
-| Review: correctness | the lead | `astra:medium` | `astra:high` | `opus:xhigh` ∥ `astra:xhigh` |
+| Review: architecture | the lead | `fable:medium` | `fable:high` | `fable:high` |
+| Review: correctness | the lead | `astra:medium` | `astra:high` | `fable:xhigh` ∥ `astra:xhigh` |
 | Review: security | — | — | — | `astra:high` |
 | Effort ceiling | `high` | `high` | `xhigh` | `max` |
 | Blocks completion | P0–P1 | P0–P1 | P0–P2 | P0–P2 |

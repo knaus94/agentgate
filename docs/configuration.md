@@ -79,11 +79,12 @@ agentgate config set ui_designer opus:high
 ## Fallbacks
 
 ```json
-{"fallbacks": {"fable": ["opus", "astra"], "opus": ["fable", "astra", "sonnet"]}}
+{"fallbacks": {"fable": ["astra", "opus"], "astra": ["fable", "opus"], "sol": ["sonnet"]}}
 ```
 
 When a provider reports an exhausted usage limit, the lane is retried on these aliases in order, at the same
-effort. A substitute is skipped if it wrote the code under review. Every substitution is reported in the task
+effort. Fable and Codex are the pools that run out, so by default each falls back to the other's model of the
+same tier first and to the Claude subscription last: Fable and Astra to each other, then Opus; Sol to Sonnet. A substitute is skipped if it wrote the code under review. Every substitution is reported in the task
 summary. Other failures are not retried on another model.
 
 `reviewers_excluded` lists aliases that may never review (by default `sol`, the weakest of the five on
