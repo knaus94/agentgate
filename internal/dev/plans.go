@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -225,4 +226,64 @@ func architectureLane(plan *Plan) string {
 		return strings.TrimSpace(lane.Report.Design)
 	}
 	return ""
+}
+
+// PlanLink keeps this repository's .claude-dev directory (plans, personal settings, helper scripts) inside a
+// synced folder and leaves a link in its place, so the same plans are there on every computer.
+// home is the synced folder; the repository gets a subdirectory named after itself.
+func PlanLink(cfg *config.Config, home string) (any, error) {
+	if home == "" {
+		home = cfg.PlansHome
+	}
+	if home == "" {
+		return nil, errors.New("usage: claude-dev plan link <synced directory>, e.g. ~/iCloud/claude-dev (remembered for other repositories)")
+	}
+	top, err := git("rev-parse", "--show-toplevel")
+	if err != nil {
+		return nil, errors.New("run inside a git repository")
+	}
+	top = strings.TrimSpace(top)
+	local := filepath.Join(top, ".claude-dev")
+	target := filepath.Join(config.ExpandHome(home), filepath.Base(top))
+	info, localErr := os.Lstat(local)
+	_, targetErr := os.Stat(target)
+	switch {
+	case localErr == nil && info.Mode()&os.ModeSymlink != 0:
+		current, _ := os.Readlink(local)
+		if current != target {
+			return nil, fmt.Errorf(".claude-dev already links to %s; remove that link first to move it", current)
+		}
+	case localErr == nil && targetErr == nil:
+		return nil, fmt.Errorf("both %s and %s hold data; merge them by hand, remove one, then link again", local, target)
+	case localErr == nil:
+		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+			return nil, err
+		}
+		if err := os.Rename(local, target); err != nil {
+			// Another filesystem: copy, then remove the original only when the copy is complete.
+			if out, err := exec.Command("cp", "-a", "--", local, target).CombinedOutput(); err != nil {
+				return nil, fmt.Errorf("copy to %s: %s", target, strings.TrimSpace(string(out)))
+			}
+			if err := os.RemoveAll(local); err != nil {
+				return nil, err
+			}
+		}
+		if err := os.Symlink(target, local); err != nil {
+			return nil, err
+		}
+	default:
+		if err := os.MkdirAll(target, 0o700); err != nil {
+			return nil, err
+		}
+		if err := os.Symlink(target, local); err != nil {
+			return nil, err
+		}
+	}
+	if cfg.PlansHome != home {
+		if err := config.Set("plans_home", home); err != nil {
+			return nil, err
+		}
+	}
+	return map[string]any{"link": local, "target": target,
+		"next": "Plans of this repository now live in the synced folder. On another computer run the same command in its checkout."}, nil
 }

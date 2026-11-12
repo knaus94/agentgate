@@ -11,6 +11,7 @@ saved with `plan save`). Unknown fields are rejected.
 | `preview` | raw request | show mode handling and routes; no files, no models |
 | `plan save [name]` | plan | validate and keep the plan in `.claude-dev/plans/<name>/` with a readable `brief.md` |
 | `plan list`, `plan show <name>` | — | saved plans of this repository; print a brief |
+| `plan link [folder]` | — | user's setup: keep `.claude-dev` in a synced folder and link it here |
 | `route` | plan | mode decision, reasons and models; read-only |
 | `architecture` | plan | design passes of heavy and ultra |
 | `design` | design input | read-only UI designer |

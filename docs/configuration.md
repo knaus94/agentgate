@@ -98,6 +98,7 @@ real-repository tasks).
 | `retention_days` | 14 | finished tasks older than this are removed |
 | `playwright_mcp` | `~/.local/share/claude-dev/playwright-mcp/…/cli.js` | browser tooling for optional visual verification |
 | `worktree` | `{default: false, copy: [], setup: [], setup_timeout_s: 1800}` | isolated tasks (`-w`): what a fresh worktree needs — see [isolation](isolation.md) |
+| `plans_home` | none | synced folder holding each repository's `.claude-dev`; set by `claude-dev plan link <folder>` |
 | `accounts` | none | several subscriptions per provider; managed with `claude-dev accounts`, user file only — see [accounts](accounts.md) |
 
 ## Reset

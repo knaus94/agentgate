@@ -2,6 +2,7 @@ package dev
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1232,5 +1233,65 @@ func TestLandingRefusesToOverwriteTheUsersOwnEdits(t *testing.T) {
 	gitOut(t, "checkout", "-q", "--", "a.txt")
 	if landed := f.land("apply"); landed["landed"] != "apply" || fileText(t, "a.txt") != "after\n" {
 		t.Fatalf("once the edit is out of the way the task lands: %v", landed)
+	}
+}
+
+func TestPlansMoveToASyncedFolderAndStayUsable(t *testing.T) {
+	f := newFixture(t)
+	identity(t)
+	repo, _ := os.Getwd()
+	synced := filepath.Join(filepath.Dir(repo), "cloud")
+	plan := f.plan("-w change the line")
+	_, err := PlanSave(f.cfg, plan, "the-change")
+	must(t, err)
+	must(t, os.MkdirAll(".claude-dev/tools", 0o755))
+	must(t, os.WriteFile(".claude-dev/tools/check.sh", []byte("#!/bin/sh\ntest -n \"$1\"\n"), 0o755))
+	must(t, os.WriteFile(".claude-dev/config.json", []byte(`{"max_parallel": 2, "accounts": [{"name": "x", "provider": "claude", "home": "/x"}],
+		"worktree": {"setup": [["sh", "-c", "echo \"$CLAUDE_DEV_CHECKOUT\" > .origin"]]}}`), 0o644))
+
+	linked, err := PlanLink(f.cfg, synced)
+	must(t, err)
+	target := filepath.Join(synced, "repo")
+	if linked.(map[string]any)["target"] != target || fileText(t, filepath.Join(target, "plans", "the-change", "plan.json")) == "" {
+		t.Fatalf("the directory moves into the synced folder under the repository's name: %v", linked)
+	}
+	if where, _ := os.Readlink(".claude-dev"); where != target {
+		t.Fatalf("a link is left in its place: %q", where)
+	}
+	cfg, err := config.Load()
+	must(t, err)
+	if cfg.PlansHome != synced || cfg.MaxParallel != 2 || len(cfg.Accounts) != 0 || len(cfg.Worktree.Setup) != 1 {
+		t.Fatalf("the folder is remembered and the personal file next to the plans is read, without accounts: %+v", cfg)
+	}
+	if again, err := PlanLink(cfg, ""); err != nil || again.(map[string]any)["target"] != target {
+		t.Fatalf("linking again is harmless: %v %v", again, err)
+	}
+	if listed, _ := PlanList(); !strings.Contains(fmt.Sprint(listed), "the-change") {
+		t.Fatalf("plans are found through the link: %v", listed)
+	}
+
+	// The link itself is not part of any change, and an isolated task still reaches the helper scripts.
+	f.cfg = cfg
+	plan.Checks = []Check{{Argv: []string{".claude-dev/tools/check.sh", "x"}}}
+	f.launch(plan)
+	gate := Current()
+	if len(gate.Foreign) != 0 || fileText(t, filepath.Join(gate.Worktree, ".origin")) != repo+"\n" {
+		t.Fatalf("setup knows the checkout it was started from; the link is not a foreign change: %v", gate.Foreign)
+	}
+	f.review()
+	f.finish()
+	if landed := f.land("apply"); landed["landed"] != "apply" || len(landed["files"].([]any)) != 1 {
+		t.Fatalf("only the task's file lands, not the link: %v", landed)
+	}
+
+	// A second computer: the synced folder already has the data, the checkout has none.
+	must(t, os.Remove(".claude-dev"))
+	if _, err := PlanLink(cfg, ""); err != nil || fileText(t, ".claude-dev/plans/the-change/brief.md") == "" {
+		t.Fatalf("linking picks up what the other computer saved: %v", err)
+	}
+	must(t, os.Remove(".claude-dev"))
+	must(t, os.MkdirAll(".claude-dev/plans", 0o755))
+	if _, err := PlanLink(cfg, ""); err == nil || !strings.Contains(err.Error(), "merge them by hand") {
+		t.Fatalf("two copies are never merged silently: %v", err)
 	}
 }

@@ -52,6 +52,16 @@ The lead writes the plan as JSON and saves it with `claude-dev plan save <name>`
 Every later command takes `--plan <name>`. Saving again replaces both files, so they always show the plan that
 will run. The directory is yours to commit or to ignore; the gate never counts it as part of a change.
 
+To have the same plans on every computer, keep the directory in a synced folder:
+
+```sh
+claude-dev plan link ~/iCloud/claude-dev    # once per repository and computer; the folder is remembered
+```
+
+This moves `.claude-dev` to `<folder>/<repository name>/` and leaves a link in its place. On the second
+computer the same command links the checkout to what is already there. `.claude-dev/config.json` — your own
+settings for this repository, read after the team's `.claude-dev.json` — travels with it.
+
 Design receipts and the scout's context pack belong to the checkout, not to one conversation
 (`~/.local/state/claude-dev/<checkout>/designs`, `…/scout`). A plan designed today can therefore be launched
 from a new session tomorrow without paying for the design again; a receipt stays bound to its brief, files and

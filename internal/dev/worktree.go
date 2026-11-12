@@ -116,6 +116,11 @@ func (g *Gate) isolate(cfg *config.Config) error {
 			return fail(fmt.Errorf("worktree.copy %s: %s", path, strings.TrimSpace(string(out))))
 		}
 	}
+	// Plans, the personal settings and helper scripts kept next to them are not tracked: the worktree sees the
+	// checkout's own copy.
+	if _, err := os.Stat(filepath.Join(main, ".claude-dev")); err == nil {
+		_ = os.Symlink(filepath.Join(main, ".claude-dev"), filepath.Join(g.Worktree, ".claude-dev"))
+	}
 	if err := g.enter(); err != nil {
 		return fail(err)
 	}
@@ -128,6 +133,7 @@ func (g *Gate) isolate(cfg *config.Config) error {
 		}
 		cmd := exec.Command(argv[0], argv[1:]...)
 		cmd.Stdout, cmd.Stderr = output, output
+		cmd.Env = append(os.Environ(), "CLAUDE_DEV_CHECKOUT="+main, "CLAUDE_DEV_WORKTREE="+g.Worktree)
 		err = ops.Run(cmd, seconds(cfg.Worktree.SetupTimeoutS))
 		output.Close()
 		if err != nil {

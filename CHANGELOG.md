@@ -2,6 +2,14 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.3.1
+
+- `claude-dev plan link <folder>` keeps a repository's `.claude-dev` (plans, helper scripts, personal settings)
+  in a synced folder and links it in place; the same command on another computer picks the data up.
+- `.claude-dev/config.json`: personal per-repository settings, read after `.claude-dev.json`.
+- Worktree setup commands see `CLAUDE_DEV_CHECKOUT` and `CLAUDE_DEV_WORKTREE`; the checkout's `.claude-dev` is
+  linked into the worktree.
+
 ## 0.3.0
 
 - **Isolated tasks.** `/dev -w` runs a task in its own git worktree and branch: the checkout stays clean,

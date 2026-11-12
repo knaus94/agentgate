@@ -32,8 +32,9 @@ Setup
     config show|path|init|set <key> <value>|unset <key>
   accounts [discover [--save] | add <name> <claude|codex> <home> | remove <name> | reset <name>]
                                   several subscriptions: limits, load spreading, failover
-    plan save [name] | list | show <name>
-                                  keep a plan and its readable brief in .claude-dev/plans/
+      plan save [name] | list | show <name> | link [synced directory]
+                                  keep a plan and its readable brief in .claude-dev/plans/;
+                                  link moves .claude-dev into a synced folder
   watch [--once]                  live panel of the task in this checkout
   status | stop | prune | version
 
@@ -371,8 +372,11 @@ func planCommand(cfg *config.Config, args arguments) (any, int, error) {
 	case "show":
 		value, err := dev.PlanShow(name)
 		return value, 0, err
+	case "link":
+		value, err := dev.PlanLink(cfg, name)
+		return value, 0, err
 	}
-	return nil, 0, errors.New("usage: claude-dev plan save [name] --file <path>|- | plan list | plan show <name>")
+	return nil, 0, errors.New("usage: claude-dev plan save [name] --file <path>|- | plan list | plan show <name> | plan link [synced directory]")
 }
 
 func configCommand(rest []string) (any, int, error) {

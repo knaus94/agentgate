@@ -62,11 +62,22 @@ fresh one needs in the repository's `.claude-dev.json` (or in your user file):
 ```
 
 `copy` brings untracked files or directories from your checkout; `setup` commands run once in the new worktree,
-outside the sandbox, like the repository's own scripts. A failing setup command stops the launch and removes
+outside the sandbox, like the repository's own scripts. They see `CLAUDE_DEV_CHECKOUT` (your checkout) and
+`CLAUDE_DEV_WORKTREE`. The checkout's `.claude-dev` directory is linked into the worktree, so plans and helper
+scripts kept there stay reachable. Settings that are yours rather than the team's go into
+`.claude-dev/config.json`. A failing setup command stops the launch and removes
 the worktree. `"default": true` isolates every writing task without the flag.
 
 Do not link `node_modules` from the checkout into the worktree in a workspace monorepo: workspace packages in it
-point back at the checkout's sources, and the checks would silently test the wrong code. Install instead.
+point back at the checkout's sources, and the checks would silently test the wrong code. Install instead — or,
+when the checkout's dependencies are current and on the same filesystem, copy them with hard links, which takes
+seconds and no disk space, and keeps the relative workspace links pointing into the worktree:
+
+```json
+{"worktree": {"setup": [["sh", "-c", "cp -al \"$CLAUDE_DEV_CHECKOUT/node_modules\" node_modules"]]}}
+```
+
+Hard-linked files are shared with the checkout: fine for reading, wrong for a task that changes dependencies.
 
 ## Limits
 

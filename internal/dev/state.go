@@ -398,7 +398,7 @@ func manifest() (map[string]string, error) {
 	}
 	out := map[string]string{}
 	for _, name := range strings.Split(changed+untracked, "\x00") {
-		if name != "" && !strings.HasPrefix(name, ".claude-dev/") { // saved plans are notes about the work, not the work
+		if name != "" && name != ".claude-dev" && !strings.HasPrefix(name, ".claude-dev/") { // saved plans are notes about the work, not the work
 			out[name] = entry(name)
 		}
 	}

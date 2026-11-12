@@ -80,6 +80,7 @@ type Config struct {
 	Consultant        string              `json:"consultant"`
 	PlaywrightMCP     string              `json:"playwright_mcp"`
 	Accounts          []Account           `json:"accounts"`
+	PlansHome         string              `json:"plans_home"` // synced directory that holds the .claude-dev of each repository
 	Worktree          Worktree            `json:"worktree"`
 	Modes             map[string]Mode     `json:"modes"`
 }
@@ -109,13 +110,17 @@ func UserPath() string {
 // ProjectFile is the optional per-repository override, read from the working directory.
 const ProjectFile = ".claude-dev.json"
 
+// PersonalFile is the user's own override for one repository. It lives next to the saved plans, so it is
+// never committed with the team's file and travels with the plans when that directory is synced.
+const PersonalFile = ".claude-dev/config.json"
+
 // Load returns the built-in table with the user's and then the repository's overrides merged in.
 func Load() (*Config, error) {
 	var merged map[string]any
 	if err := json.Unmarshal(assets.Config, &merged); err != nil {
 		return nil, fmt.Errorf("built-in config: %w", err)
 	}
-	for _, path := range []string{UserPath(), ProjectFile} {
+	for _, path := range []string{UserPath(), ProjectFile, PersonalFile} {
 		raw, err := os.ReadFile(path)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
@@ -127,7 +132,7 @@ func Load() (*Config, error) {
 		if err := json.Unmarshal(raw, &layer); err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
-		if path == ProjectFile {
+		if path != UserPath() {
 			delete(layer, "accounts") // a repository does not choose whose subscription pays for its work
 		}
 		merge(merged, layer)
