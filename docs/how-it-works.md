@@ -173,7 +173,7 @@ are routed to different pools by the mode table, so they do not compete for one 
 ```
 heavy scout      sol:medium (pool codex), once
 heavy design     fable:high (pool fable)   ∥  astra:high (pool codex)
-heavy writers    fable:high (pool fable), one per stream
+heavy writers    opus:high  (pool claude), one per stream
 heavy review     opus:high  (pool claude)  ∥  astra:high (pool codex)
 ```
 

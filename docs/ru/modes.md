@@ -41,8 +41,8 @@
 | Контекстный пакет | собственный контекст лида | разведка `sol:medium` | разведка `sol:medium` | разведка `sol:high` |
 | Архитекторы | лид | лид | `fable:high` ∥ `astra:high`, независимо и параллельно | `fable:xhigh` ∥ `astra:xhigh`, затем каждый критикует другой на `high` |
 | Раунд блокеров | — | — | по желанию, один | по желанию, один |
-| Бэкенд | `sol:medium` | `opus:medium` | `fable:high` | `fable:xhigh` |
-| Фронтенд | `sonnet:medium` | `opus:medium` | `fable:high` | `fable:xhigh` |
+| Бэкенд | `sol:medium` | `opus:medium` | `opus:high` | `opus:xhigh` |
+| Фронтенд | `sonnet:medium` | `opus:medium` | `astra:high` | `astra:xhigh` |
 | Ревью | лид | архитектура+простота `fable:medium` ∥ корректность `astra:medium` | архитектура+простота `opus:high` ∥ корректность `astra:high` | архитектура+простота `opus:high` ∥ корректность `opus:xhigh` ∥ корректность `astra:xhigh` ∥ безопасность `astra:high` |
 | Потолок усилия | `high` | `high` | `xhigh` | `max` |
 | Блокирующие уровни | P0, P1 | P0, P1 | P0, P1, P2 | P0, P1, P2 |

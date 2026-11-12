@@ -63,7 +63,7 @@ func TestSetUnsetAndRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg, _ := Load()
-	if cfg.Modes["heavy"].Backend != "sol:xhigh" || cfg.Models["haiku"].Model != "claude-haiku-5-5" || cfg.Modes["heavy"].Frontend != "fable:high" {
+	if cfg.Modes["heavy"].Backend != "sol:xhigh" || cfg.Models["haiku"].Model != "claude-haiku-5-5" || cfg.Modes["heavy"].Frontend != "astra:high" {
 		t.Fatalf("a set key changes and its siblings stay: %+v", cfg.Modes["heavy"])
 	}
 	before, _ := os.ReadFile(UserPath())
@@ -79,7 +79,7 @@ func TestSetUnsetAndRollback(t *testing.T) {
 	if err := Unset("modes.heavy.backend"); err != nil {
 		t.Fatal(err)
 	}
-	if cfg, _ = Load(); cfg.Modes["heavy"].Backend != "fable:high" {
+	if cfg, _ = Load(); cfg.Modes["heavy"].Backend != "opus:high" {
 		t.Fatal("unset restores the built-in value")
 	}
 }

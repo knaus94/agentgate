@@ -175,7 +175,7 @@ Stop-хук не даёт лиду закончить ход на незавер
 ```
 разведка heavy   sol:medium (пул codex), один раз
 дизайн heavy     fable:high (пул fable)   ∥  astra:high (пул codex)
-писатели heavy   fable:high (пул fable), по одному на поток
+писатели heavy   opus:high  (пул claude), по одному на поток
 ревью heavy      opus:high  (пул claude)  ∥  astra:high (пул codex)
 ```
 

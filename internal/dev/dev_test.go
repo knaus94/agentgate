@@ -510,8 +510,8 @@ func TestUltraRequiresAnAnswerForEveryBlocker(t *testing.T) {
 	f.fails("launch", "blocker", func() (any, error) { return Launch(f.cfg, plan) })
 	plan.Architecture.Blockers = map[string]string{"fable/race": "resolved by the lock", "astra/race": "same root cause"}
 	f.launch(plan)
-	if writer := Current().latest()["core"]; writer.Route.Alias != "fable" || writer.Route.Effort != "xhigh" {
-		t.Fatalf("ultra writes with fable at xhigh by default, never max, got %s", writer.Route.Alias)
+	if writer := Current().latest()["core"]; writer.Route.Alias != "opus" || writer.Route.Effort != "xhigh" {
+		t.Fatalf("ultra writes with opus at xhigh by default, never max, got %s", writer.Route.Alias)
 	}
 	f.review()
 	for _, lane := range Current().Reviews[0].Lanes {

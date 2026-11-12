@@ -117,8 +117,8 @@
       "architecture_timeout_s": 900,
       "writer_timeout_s": 1800,
       "reviewer_timeout_s": 1200,
-      "backend": "fable:high",
-      "frontend": "fable:high",
+      "backend": "opus:high",
+      "frontend": "astra:high",
       "review": [
         {
           "axes": [
@@ -151,8 +151,8 @@
       "architecture_timeout_s": 1800,
       "writer_timeout_s": 3600,
       "reviewer_timeout_s": 1800,
-      "backend": "fable:xhigh",
-      "frontend": "fable:xhigh",
+      "backend": "opus:xhigh",
+      "frontend": "astra:xhigh",
       "review": [
         {
           "axes": [

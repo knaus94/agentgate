@@ -48,8 +48,8 @@ Codex пишут и проверяют код, а гейт решает, ког�
 | Когда | мелочь, ≤3 файлов, без риска | обычная работа | назван риск, либо сложно и неясно | необратимый риск, либо серьёзный риск в сложной работе |
 | Контекст | собственный у лида | разведка `sol:medium` | разведка `sol:medium` | разведка `sol:high` |
 | Архитектор | лид | лид | `fable:high` ∥ `astra:high` | `fable:xhigh` ∥ `astra:xhigh`, затем перекрёстная критика |
-| Бэкенд | `sol:medium` | `opus:medium` | `fable:high` | `fable:xhigh` |
-| Фронтенд | `sonnet:medium` | `opus:medium` | `fable:high` | `fable:xhigh` |
+| Бэкенд | `sol:medium` | `opus:medium` | `opus:high` | `opus:xhigh` |
+| Фронтенд | `sonnet:medium` | `opus:medium` | `astra:high` | `astra:xhigh` |
 | Ревью: архитектура | лид | `fable:medium` | `opus:high` | `opus:high` |
 | Ревью: корректность | лид | `astra:medium` | `astra:high` | `opus:xhigh` ∥ `astra:xhigh` |
 | Ревью: безопасность | — | — | — | `astra:high` |

@@ -203,7 +203,7 @@ func TestConfigCommands(t *testing.T) {
 		t.Fatalf("modes shows the override:\n%s", table)
 	}
 	unset := s.ok("", "config", "unset", "modes.heavy.backend")
-	if unset["modes"].(map[string]any)["heavy"].(map[string]any)["backend"] != "fable:high" {
+	if unset["modes"].(map[string]any)["heavy"].(map[string]any)["backend"] != "opus:high" {
 		t.Fatal("unset restores the default")
 	}
 	if _, _, code := s.run("", "config", "bogus"); code != 1 {

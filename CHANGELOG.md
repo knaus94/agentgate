@@ -2,6 +2,14 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.8.0
+
+- **Writers moved off Fable.** In heavy and ultra the backend writer is `opus` (`high`, `xhigh`) and the
+  frontend writer is `astra` (same levels); Fable keeps the architects. Writing is the largest token spend of a
+  run, and Fable is the most expensive model. Because the author's model never reviews its own code, the Opus
+  review lanes of heavy and ultra now fall back to `fable` and report a substitution. Override per mode with
+  `agentgate config set modes.heavy.backend <route>`.
+
 ## 0.7.1
 
 - A worker now runs in a lane whose recorded path holds a symbolic link — the case of a task started before

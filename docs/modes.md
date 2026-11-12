@@ -41,8 +41,8 @@ not a risk; it is ordinary work, and ordinary work is medium.
 | Context pack | the lead's own context | scout `sol:medium` | scout `sol:medium` | scout `sol:high` |
 | Architects | the lead | the lead | `fable:high` ∥ `astra:high`, independent, in parallel | `fable:xhigh` ∥ `astra:xhigh`, then each critiques the other at `high` |
 | Blocker round | — | — | optional, once | optional, once |
-| Backend writer | `sol:medium` | `opus:medium` | `fable:high` | `fable:xhigh` |
-| Frontend writer | `sonnet:medium` | `opus:medium` | `fable:high` | `fable:xhigh` |
+| Backend writer | `sol:medium` | `opus:medium` | `opus:high` | `opus:xhigh` |
+| Frontend writer | `sonnet:medium` | `opus:medium` | `astra:high` | `astra:xhigh` |
 | Review lanes | the lead | architecture+simplicity `fable:medium` ∥ correctness `astra:medium` | architecture+simplicity `opus:high` ∥ correctness `astra:high` | architecture+simplicity `opus:high` ∥ correctness `opus:xhigh` ∥ correctness `astra:xhigh` ∥ security `astra:high` |
 | Effort ceiling | `high` | `high` | `xhigh` | `max` |
 | Blocking severities | P0, P1 | P0, P1 | P0, P1, P2 | P0, P1, P2 |

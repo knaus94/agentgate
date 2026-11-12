@@ -50,8 +50,8 @@ undone, uncertainty — and the mode follows from a fixed rule table. A flag alw
 | Chosen when | trivial, ≤3 files, no risk | ordinary work | a named risk, or complex and uncertain | an irreversible risk, or a severe risk in complex work |
 | Context | the lead's own | scout `sol:medium` | scout `sol:medium` | scout `sol:high` |
 | Architect | the lead | the lead | `fable:high` ∥ `astra:high` | `fable:xhigh` ∥ `astra:xhigh`, then cross-critique |
-| Backend writer | `sol:medium` | `opus:medium` | `fable:high` | `fable:xhigh` |
-| Frontend writer | `sonnet:medium` | `opus:medium` | `fable:high` | `fable:xhigh` |
+| Backend writer | `sol:medium` | `opus:medium` | `opus:high` | `opus:xhigh` |
+| Frontend writer | `sonnet:medium` | `opus:medium` | `astra:high` | `astra:xhigh` |
 | Review: architecture | the lead | `fable:medium` | `opus:high` | `opus:high` |
 | Review: correctness | the lead | `astra:medium` | `astra:high` | `opus:xhigh` ∥ `astra:xhigh` |
 | Review: security | — | — | — | `astra:high` |

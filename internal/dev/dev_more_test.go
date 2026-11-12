@@ -594,7 +594,7 @@ func TestRouteAndPreviewStartNothing(t *testing.T) {
 	routed, err := Route(f.cfg, plan)
 	must(t, err)
 	raw, _ := json.Marshal(routed)
-	for _, want := range []string{`"mode":"heavy"`, `"api":"fable:high"`, `"web":"fable:high"`, `[["api"],["web"]]`, `"read_only":true`, "opus:high", `"scout":"sol:medium"`} {
+	for _, want := range []string{`"mode":"heavy"`, `"api":"opus:high"`, `"web":"astra:high"`, `[["api"],["web"]]`, `"read_only":true`, "opus:high", `"scout":"sol:medium"`} {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("route lacks %s: %s", want, raw)
 		}
@@ -954,7 +954,7 @@ func TestSavedPlanIsReadableAndRunsFromAnotherSession(t *testing.T) {
 	}
 	brief, err := PlanShow("contract-change")
 	must(t, err)
-	for _, want := range []string{"# contract-change", "**Mode:** heavy", "### core — backend, fable:high", "- `a.txt`", "the first design as written", "- `true`"} {
+	for _, want := range []string{"# contract-change", "**Mode:** heavy", "### core — backend, opus:high", "- `a.txt`", "the first design as written", "- `true`"} {
 		if !strings.Contains(brief.(string), want) {
 			t.Errorf("the brief lacks %q:\n%s", want, brief)
 		}
