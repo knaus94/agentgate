@@ -43,7 +43,7 @@
 | Раунд блокеров | — | — | по желанию, один | по желанию, один |
 | Бэкенд | `sol:medium` | `opus:medium` | `fable:high` | `fable:xhigh` |
 | Фронтенд | `sonnet:medium` | `opus:medium` | `fable:high` | `fable:xhigh` |
-| Ревью | лид | архитектура `fable:medium` ∥ корректность `astra:medium` | архитектура `opus:high` ∥ корректность `astra:high` | архитектура `opus:high` ∥ корректность `opus:xhigh` ∥ корректность `astra:xhigh` ∥ безопасность `astra:high` |
+| Ревью | лид | архитектура+простота `fable:medium` ∥ корректность `astra:medium` | архитектура+простота `opus:high` ∥ корректность `astra:high` | архитектура+простота `opus:high` ∥ корректность `opus:xhigh` ∥ корректность `astra:xhigh` ∥ безопасность `astra:high` |
 | Потолок усилия | `high` | `high` | `xhigh` | `max` |
 | Блокирующие уровни | P0, P1 | P0, P1 | P0, P1, P2 | P0, P1, P2 |
 | Проверки для завершения | необязательны | минимум одна | минимум одна | минимум одна |
