@@ -36,4 +36,11 @@ twenty lines, one per difference, most important first:
 - `font X → drawn with Y` means the font is not loaded on that element, usually a missing `font-family`.
 - Look at `marked.png` only when a line cannot be understood from its numbers.
 
+- `<button>`, `<input>` and `<select>` do not inherit the font: set it on them, or the text is drawn with the
+  browser's own.
+- The check may already report differences before you start; the task says how many. Leave no more than that.
+
+Before you report, look at `frame.png` and at the page once, side by side: the check judges numbers, and a
+wrong icon or a missing gradient has none.
+
 Do not change the package, its map file or the tolerances to make the check pass.
