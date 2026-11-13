@@ -45,6 +45,12 @@ var scoutSchema = object(map[string]any{"summary": text,
 
 const scoutTimeout = 600
 
+func scoutPath(resolved *Resolved) string {
+	plan := resolved.Plan
+	key := digest(map[string]any{"brief": plan.Brief, "requirements": plan.Requirements, "files": plan.Files(), "context": plan.Context, "route": resolved.ModeConfig().Scout})
+	return filepath.Join(checkoutDir(""), "scout", key[:32], "pack.json")
+}
+
 // scout returns the path of the task's context pack, gathering it on first use. The pack is keyed by the
 // contract, so a task launched again finds it made. A mode without a scout route returns "". A scout that
 // fails is reported and skipped: a cheap convenience never blocks the task.
@@ -54,9 +60,8 @@ func scout(resolved *Resolved, subs *substitutions) (string, string) {
 		return "", ""
 	}
 	plan := resolved.Plan
-	key := digest(map[string]any{"brief": plan.Brief, "requirements": plan.Requirements, "files": plan.Files(), "context": plan.Context, "route": spec})
-	dir := filepath.Join(checkoutDir(""), "scout", key[:32]) // shared by the sessions of a checkout, like designs
-	path := filepath.Join(dir, "pack.json")
+	path := scoutPath(resolved)
+	dir := filepath.Dir(path)
 	if _, err := os.Stat(path); err == nil {
 		return path, ""
 	}

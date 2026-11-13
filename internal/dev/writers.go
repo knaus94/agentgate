@@ -136,6 +136,15 @@ func Launch(cfg *config.Config, plan *Plan) (any, error) {
 		if err := gate.extend(continued); err != nil {
 			return nil, err
 		}
+		// A failed preparation may have opened the gate before the first writer. Retry it without treating
+		// already-written code as the original layout baseline.
+		before, _, err := gate.contentDigest()
+		if err != nil {
+			return nil, err
+		}
+		if err := gate.prepareDesigns(len(gate.Writers) == 0 && before == digest(gate.Baseline)); err != nil {
+			return nil, err
+		}
 	default:
 		return nil, fmt.Errorf("the task is %s; finish it or use `fix` for accepted findings", gate.Phase)
 	}
@@ -285,8 +294,9 @@ func (g *Gate) assignment(stream Stream) map[string]any {
 			handoffs[other.Name] = last.Handoff
 		}
 	}
+	checks := slices.DeleteFunc(slices.Clone(g.Plan.Checks), generatedDesignCheck)
 	packet := map[string]any{"task": g.Request.Task, "brief": g.Plan.Brief, "stream": stream, "other_streams": others,
-		"context": g.Context, "checks": g.Plan.Checks, "ui": ui, "architecture": architectureFor(g.Plan),
+		"context": g.Context, "checks": checks, "ui": ui, "architecture": architectureFor(g.Plan),
 		"handoffs": handoffs, "board": g.board(), "your_board_note": filepath.Join(g.board(), stream.Name+".md"),
 		"context_pack": g.ContextPack, "design": g.designFor(stream.Name),
 		"checks_note": "You may run these exact commands to verify your stream. The lead's run is the one that counts.", "requirements": g.Plan.Requirements}
@@ -361,7 +371,7 @@ func (g *Gate) runWriter(resolved *Resolved, stream Stream, record *Writer, answ
 	tools, toolDirs, toolNote := workerTools(resolved.Config, "writer")
 	result, used, err := subs.invoke(resolved.Config, provider.Call{Route: record.Route, Prompt: prompt + toolNote, Dir: record.Dir,
 		Schema: writerSchema, Timeout: seconds(timeout), Writer: true, Persist: true, Resume: record.Session, MCP: tools,
-		Writable: append([]string{g.board()}, toolDirs...), ReadDirs: append(packDirs(g.ContextPack), filepath.Join(g.dir(), "checks"))}, nil)
+		Writable: append([]string{g.board()}, toolDirs...), ReadDirs: append(append(packDirs(g.ContextPack), filepath.Join(g.dir(), "checks")), g.designReadDirs(stream.Name)...)}, nil)
 	if err != nil {
 		return fail(err)
 	}

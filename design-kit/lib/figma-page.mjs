@@ -124,17 +124,24 @@ export function readVariables(ids) {
 }
 
 // The frames of the page a node is on: what a lead chooses from before pulling anything.
-export function listFrames(nodeId) {
+export function listFrames(input) {
+  const { nodeId, depth = 1 } = typeof input === 'string' ? { nodeId: input } : input;
   const graph = window._fullscreen_._store.getState().mirror.sceneGraph;
-  const canvas = graph.get(graph.get(nodeId).containingCanvas);
+  const selected = graph.get(nodeId);
+  const canvas = selected.type === 'CANVAS' || selected.type === 'DOCUMENT' ? selected : graph.get(selected.containingCanvas);
   const rows = [];
-  const add = (node, level) => rows.push({ level, id: node.guid, name: node.name, type: node.type.toLowerCase(),
-    width: Math.round(node.size.x), height: Math.round(node.size.y) });
-  for (const child of canvas.childrenNodes) {
-    add(child, 0);
-    if (child.type === 'SECTION') for (const inner of child.childrenNodes) add(inner, 1);
-  }
-  return { page: canvas.name, rows };
+  let truncated = false;
+  const add = (node, level, parent) => {
+    if (rows.length >= 250) { truncated = true; return; }
+    rows.push({ level, parent, id: node.guid, name: node.name, type: node.type.toLowerCase(),
+      width: Math.round(node.size?.x || 0), height: Math.round(node.size?.y || 0) });
+    if (level < depth) for (const child of node.childrenNodes || []) add(child, level + 1, node.guid);
+  };
+  // A section link already bounds the requested feature. Keep its content nodes in the catalogue so the
+  // preparation worker can pair a content export with a content root, rather than masking the app shell.
+  const roots = ['CANVAS', 'DOCUMENT'].includes(selected.type) ? (canvas.childrenNodes || []) : [selected];
+  for (const child of roots) add(child, 0, null);
+  return { page: canvas.name, selected: nodeId, rows, truncated };
 }
 
 export function account() {

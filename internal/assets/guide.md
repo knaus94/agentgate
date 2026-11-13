@@ -1,6 +1,7 @@
 # /dev — lead guide
 
-You are the lead. You own decisions, the plan, integration and acceptance. Workers are separate sandboxed
+You are the lead. You own product decisions, authorization and the final report. Preparation, implementation,
+measurement and technical review belong to the tool and its workers. Workers are separate sandboxed
 processes started by `agentgate`; you never spawn agents or teams for this task yourself. Every command prints
 JSON with a `next` field: follow it. `agentgate reference` has every input schema; read it before your first
 plan.
@@ -13,23 +14,26 @@ command line. Check the exit code before reading output. One operation runs at a
 
 Parse the request with `agentgate parse --file -`. For `status`, `stop` and `help`, run that command and stop.
 
-A Figma link in the request: go to "From a Figma design" in section 7 before anything else. You do not open
-the link, look for a Figma plugin or ask the user for access — `agentgate figma frames <link>` answers.
+For work that needs repository discovery or a Figma design, start with `agentgate prepare --file request.json`
+where the file holds {request, name?, context?, notes?}. The tool collects the design catalogue and a read-only
+worker discovers conventions, scopes files, selects matching content nodes and drafts the plan. Do not repeat
+that investigation, export frames, parse raw design data or inspect pictures in the lead session.
 
-Read the repository instructions, the relevant module docs and an analogous implementation. Discover facts
-yourself; ask the user only for material product, data, security or authorization decisions, in their language,
-with a recommendation, all at once. `--grill` forces clarification, `--no-grill` skips optional questions but
+Read the repository instructions that govern authorization. Review the preparation summary and saved brief
+for scope and decisions. The preparation worker reads module docs and analogous implementations. Ask the
+user only for its unresolved product, data, security or authorization decisions, with a recommendation, all at once. `--grill` forces clarification, `--no-grill` skips optional questions but
 never an approval. Silence is not agreement.
 
-Write the brief: requirements, non-goals, invariants, acceptance criteria. Split the work into streams with
-disjoint files; use `after` when one stream needs another's contract first.
+The prepared plan contains the brief, requirements, non-goals, invariants and disjoint streams. Approve or
+return corrections through prepare.notes; do not rewrite the worker's technical plan yourself. For an exact
+light edit whose scope is already known, a short lead-authored plan remains sufficient.
 
 For substantial work, put acceptance criteria in `requirements [{id, text, method?}]`, including on a
 single-pass plan. Keep them observable and few. `method` can require `code`, `check` or `browser` evidence;
 omit it when the reviewer should choose. Declare only authorized checks, with `kind` when useful (test,
 typecheck, lint, build, measurement, runtime). Criteria do not authorize new tests or browser runs.
 
-Keep the plan in the repository: `agentgate plan save <name> --file -` validates it and writes
+`prepare` saves its validated plan in the repository. For an explicitly edited plan, `agentgate plan save <name> --file -` writes
 `.agentgate/plans/<name>/plan.json` plus a readable `brief.md`. Give the user the brief path — that is where
 they read and discuss the plan. From then on pass `--plan <name>` instead of `--file`, and save again whenever
 the plan changes (an accepted architecture, an `update`), so the file always shows what will run. A saved plan
@@ -116,10 +120,11 @@ they report, so declare checks that are narrow and fast. Then read every report.
 
 ## 5. Verify
 
-Inspect the actual diff yourself. Then `agentgate review`. It runs in this order:
+Run `agentgate review`. Independent reviewers inspect the diff, behavior and design; do not duplicate their
+source and screenshot inspection as the lead. It runs in this order:
 
-1. **Declared checks first.** If one fails, no reviewer is started: read its output in `checks_failed`, then
-   `agentgate fix` `{brief}` — the failing command and its output go back to the writers in their own sessions
+1. **Declared checks first.** If one fails, no reviewer is started. For a code failure,
+   `agentgate fix` sends the command and its output back to the owning writers for diagnosis and correction
    (`streams` narrows which ones). Reviewers are never paid to read code that fails its own checks.
 2. **Reviewers**, in parallel on different models, only on code that passes. In light mode `review` hands you
    the diffs instead; read them and call it again with `lead_review`.
@@ -148,15 +153,17 @@ like any other; triage them on the evidence, not on taste. In light mode you are
 
 Pass `finish` `{summary, ...}` to `review` and a clean result closes the task in the same call.
 
-`agentgate triage`: judge each P0–P2 finding against the code — `accepted`, `rejected` (with contrary
+`agentgate triage`: assess each P0–P2 finding from the reviewer's cited evidence — `accepted`, `rejected` (with contrary
 evidence), `deferred`, or `needs-approval`. P3 arrives as notes and needs no triage; accept one only with a
 named basis. Link duplicates with `duplicate_of`; in ultra two reviewers check correctness, so expect them.
 
-`agentgate fix` `{brief}` sends accepted findings to the writers that own the files, in their own sessions;
+`agentgate fix` sends accepted findings to their writers for diagnosis in their own sessions; `brief` is an
+optional decision or constraint, not a demand that the lead diagnose CSS or source code;
 then `review` again. A recheck is cheap by design: only the lanes with something to verify run, plus one
 correctness lane that reads the delta, each one effort step lower. There is no round limit, but a correction
 without verified progress requires `reassessment {evidence, changed_approach}` — diagnose again instead of
-repeating — and raises the writers' effort one step. Hold and ask when a decision is missing.
+repeating — and raises the writers' effort one step. Delegate that diagnosis through `consult`; pass its
+evidence and changed approach, rather than investigating the implementation as the lead. Hold when a decision is missing.
 
 ## 6. Finish
 
@@ -181,33 +188,26 @@ Starting a stand needs the user's approval of the exact commands.
 
 ### From a Figma design
 
-You prepare; tools measure; workers read one short brief. Never open Figma for a worker and never paste design
-data into a brief.
+Use `prepare` with the user's request. The host tool reads a bounded catalogue; the preparation worker finds
+repo conventions, selects desktop/mobile content nodes and pairs them with implementation roots. The lead
+gets a brief, product questions and exact proposed setup/check commands to authorize. It does not extract
+layers, compare screenshots, tune CSS or write measurement scripts.
 
-1. `agentgate figma frames <figma-url>` lists the frames of the page. A screen is usually several — one per
-   state and per width: decide which the task covers and say which it does not. `agentgate figma login` signs
-   in once, in a window; nobody passes cookies or tokens.
-2. `agentgate figma pull <figma-url> --node <id> --out <dir>`, once per frame. Pull the node the task changes,
-   not the screen around it. The command prints what the brief costs a reader in tokens: above about three
-   thousand, pull a narrower node or split the work into streams with a package each.
-3. Read `brief.md` yourself. What it cannot tell is yours to write in the plan's brief: what each control does,
-   the states the design does not draw and which existing screen each follows, the widths between the drawn
-   ones, and where the product deliberately differs from the mock-up.
-4. What the product shows differently goes into a map, each entry with its reason:
-   `{"ignore": {"<handle>": "why"}, "dynamic": ["<handle>"]}`. The map is yours; a writer may not edit it. A
-   map that ignores most of a design leaves little checked: tell the user.
-5. Put `design [{figma, url, root, name, stream}]` into the plan and `ui {summary, criteria, preserve}`. That is
-   all the user or you do: at `launch` the design is pulled into a screen directory, the front end is started
-   and stopped by the tool, the page is measured before anyone writes, and only what the task makes worse
-   blocks it. A screen that exists is `design [{screen, stream}]`; `agentgate layout <screen>` checks it by hand.
-6. Once per repository, when `.agentgate.json` has no `design.stand`, write it: the command that starts the
-   front end, the address it answers at, and the variables that point it at its backend (`reference`). Find
-   them in the repository; do not ask the user for what the code says.
+After scope and resource authorization, `launch` imports the selected nodes, prepares the design packages and
+records the original measurement. A new page/root is allowed to be absent. Writers read their package and
+implement the code; they run only their declared source checks. The gate owns layout commands, browser/stand
+lifecycle, baseline files and output paths. `review` measures, then an independent reviewer checks pictures
+and behavior. A missing tool prerequisite is `checks_failed.setup`, not a CSS defect for a writer to guess at.
 
-After the writers, `review` runs the layout check first; a new difference fails it like any check and goes
-back with `fix`. When it passes, the first reviewer also judges `design`: it is shown the design next to the
-page and looks for what numbers do not carry — a wrong icon, a lost gradient — and reads your map for excuses.
-Browser verification by a model stays for behaviour scenarios.
+If the measurement contract is wrong, use `prepare` with notes and the current task context, then
+`agentgate replan --plan <name>` with a concrete update reason. It preserves the gate, original source snapshot,
+findings and writer sessions, regenerates managed checks and invalidates review. It starts no workers or
+stand and never rebaselines already-written code. A held task must first be explicitly resumed; a staged
+plan is revised at its existing between-stage boundary. Never edit gate state or recreate the task.
+
+Layout differences return to writers through `fix`; product exceptions need the user's decision and a reason.
+Do not broaden tolerances, replace a content root with the shell, or ignore most of the design to pass a check.
+Model-driven browser verification is for the explicitly agreed behavior scenarios.
 
 ## 8. Isolated tasks (`-w`)
 

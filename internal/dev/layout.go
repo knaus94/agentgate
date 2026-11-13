@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -62,21 +63,22 @@ func (d DesignRef) digest() string {
 // dir is where the measurements of one design in one checkout are kept: what was there before the task, and
 // the pictures of the last check.
 func (d DesignRef) dir() string {
-	return filepath.Join(checkoutDir(""), "layout", digest(map[string]any{"package": d.Package, "url": d.URL, "root": d.Root})[:16])
+	return filepath.Join(checkoutDir(""), "layout", digest(map[string]any{"package": d.Package, "figma": d.Figma,
+		"url": d.URL, "root": d.Root, "viewport": d.Viewport, "locale": d.Locale})[:16])
 }
 
 func (d DesignRef) argv(extra ...string) []string {
+	target := d.Package
 	if d.Screen != "" {
-		// A screen knows its page, its root and its exceptions, and its stand is started for it.
-		return append([]string{layoutCommand(), "layout", d.Screen}, extra...)
+		target = d.Screen
 	}
-	out := []string{layoutCommand(), "layout", d.Package, "--url", d.URL}
-	for flag, value := range map[string]string{"--root": d.Root, "--map": d.Map, "--storage-state": d.StorageState, "--locale": d.Locale, "--viewport": d.Viewport} {
+	out := []string{layoutCommand(), "layout", target}
+	for flag, value := range map[string]string{"--url": d.URL, "--root": d.Root, "--map": d.Map, "--storage-state": d.StorageState, "--locale": d.Locale, "--viewport": d.Viewport} {
 		if value != "" {
 			out = append(out, flag, value)
 		}
 	}
-	return append(pairsSorted(out[:5], out[5:]), extra...)
+	return append(pairsSorted(out[:3], out[3:]), extra...)
 }
 
 // pairsSorted keeps the argv of a check the same from run to run: a map does not.
@@ -96,12 +98,56 @@ func pairsSorted(head, pairs []string) []string {
 
 func (d DesignRef) check() Check {
 	return Check{Argv: d.argv("--baseline", filepath.Join(d.dir(), "baseline.json"), "--out", filepath.Join(d.dir(), "last")),
-		TimeoutS: layoutTimeout, NoReuse: true}
+		TimeoutS: layoutTimeout, NoReuse: true, Generated: "design", Kind: "measurement"}
+}
+
+func (d DesignRef) imported() bool {
+	if !fileExists(filepath.Join(d.Package, "data", "spec.json")) {
+		return false
+	}
+	if d.Figma == "" {
+		return true
+	}
+	var manifest struct{ Source struct{ Key, Node string } }
+	raw, err := os.ReadFile(filepath.Join(d.Package, "manifest.json"))
+	if err != nil || json.Unmarshal(raw, &manifest) != nil {
+		return false
+	}
+	link, err := url.Parse(d.Figma)
+	if err != nil {
+		return false
+	}
+	parts := strings.Split(strings.Trim(link.Path, "/"), "/")
+	return len(parts) >= 2 && manifest.Source.Key == parts[1] &&
+		manifest.Source.Node == strings.ReplaceAll(link.Query().Get("node-id"), "-", ":")
+}
+
+// Older saved plans contain expanded layout commands without an owner marker. Recognize only the gate's
+// baseline/output pair, never an independent layout command or another user-declared check.
+func generatedDesignCheck(check Check) bool {
+	if check.Generated == "design" {
+		return true
+	}
+	if !check.NoReuse || len(check.Argv) < 7 || check.Argv[1] != "layout" {
+		return false
+	}
+	baseline, out := "", ""
+	for i := 3; i+1 < len(check.Argv); i += 2 {
+		switch check.Argv[i] {
+		case "--baseline":
+			baseline = check.Argv[i+1]
+		case "--out":
+			out = check.Argv[i+1]
+		}
+	}
+	return filepath.Base(baseline) == "baseline.json" && filepath.Base(filepath.Dir(filepath.Dir(baseline))) == "layout" &&
+		out == filepath.Join(filepath.Dir(baseline), "last")
 }
 
 // validateDesign checks every design of the plan and declares its layout check, once.
 func (r *Resolved) validateDesign() error {
 	plan := r.Plan
+	plan.Checks = slices.DeleteFunc(slices.Clone(plan.Checks), generatedDesignCheck)
 	for index := range plan.Design {
 		design := &plan.Design[index]
 		if design.Figma != "" && design.Screen == "" {
@@ -170,12 +216,16 @@ func (r *Resolved) validateDesign() error {
 
 // designBaselines measures every design's page before anyone writes: what differs already is not this task's.
 func (g *Gate) designBaselines() error {
+	return g.prepareDesigns(true)
+}
+
+func (g *Gate) prepareDesigns(measureBefore bool) error {
 	for _, design := range g.Plan.Design {
 		if err := os.MkdirAll(design.dir(), 0o700); err != nil {
 			return err
 		}
 		// A design named by its link becomes a screen here, once: the lead pulls nothing by hand.
-		if design.Figma != "" && !fileExists(filepath.Join(design.Screen, "package", "data", "spec.json")) {
+		if design.Figma != "" && !design.imported() {
 			argv := []string{layoutCommand(), "layout", "new", design.Screen, design.Figma, "--url", design.URL, "--root", design.Root}
 			if design.Locale != "" {
 				argv = append(argv, "--locale", design.Locale)
@@ -186,6 +236,9 @@ func (g *Gate) designBaselines() error {
 			if err := ops.Run(cmd, seconds(layoutTimeout)); err != nil {
 				return fmt.Errorf("the design %s could not be pulled: %s", design.Figma, lastLine(strings.TrimSpace(out.String())))
 			}
+		}
+		if !measureBefore {
+			continue
 		}
 		argv := design.argv("--write-baseline", filepath.Join(design.dir(), "baseline.json"))
 		var out bytes.Buffer
@@ -206,14 +259,25 @@ func (g *Gate) designFor(stream string) any {
 			continue
 		}
 		out = append(out, map[string]any{"brief": filepath.Join(design.Package, "brief.md"), "picture": filepath.Join(design.Package, "frame.png"),
-			"assets": filepath.Join(design.Package, "assets"),
-			"check":  strings.Join(design.check().Argv, " "),
-			"layer":  "agentgate figma node " + design.Package + " <handle>"})
+			"assets":       filepath.Join(design.Package, "assets"),
+			"verification": "The gate runs layout and sends measured differences back to this stream. Do not start the stand or edit its baselines, maps or tolerances.",
+			"layer":        "agentgate figma node " + design.Package + " <handle>"})
 	}
 	if out == nil {
 		return nil
 	}
 	return out
+}
+
+func (g *Gate) designReadDirs(stream string) []string {
+	var dirs []string
+	for _, design := range g.Plan.Design {
+		if design.Stream == stream {
+			path, _ := filepath.Abs(design.Package)
+			dirs = append(dirs, path)
+		}
+	}
+	return dirs
 }
 
 // designReview is what a reviewer of the `design` axis is given: the design, the page as the last check saw
@@ -240,7 +304,7 @@ func (g *Gate) designDigests() []string {
 }
 
 func lastLine(text string) string {
-	lines := strings.Split(text, "\n")
+	lines := strings.Split(strings.TrimSpace(text), "\n")
 	return lines[len(lines)-1]
 }
 

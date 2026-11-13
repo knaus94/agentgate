@@ -48,7 +48,7 @@ Setup
   status | stop | prune | version
 
 For the lead (used by /dev)
-  guide | reference | parse | preview | route | architecture | design | consult | launch | answer | tell
+  guide | reference | parse | preview | prepare | route | architecture | design | consult | launch | replan | answer | tell
     check | review | visual | triage | fix | finish | land | hold | resume | hook
 
 Inputs are JSON from --file <path>, --file - (stdin) or --plan <name> (a saved plan).
@@ -210,8 +210,8 @@ func run(args arguments) (any, int, error) {
 			out := map[string]any{}
 			raw, _ := json.Marshal(request)
 			_ = json.Unmarshal(raw, &out)
-			out["design"] = "The request holds a Figma link. Do not open it and do not ask for a Figma plugin or access: " +
-				"`agentgate figma frames <link>` lists its frames, and `agentgate guide`, section 7 \"From a Figma design\", says how the link goes into the plan."
+			out["design"] = "The request holds a Figma link. Use `agentgate prepare --file <request JSON>`: the tool reads its catalogue and a read-only worker prepares the plan. " +
+				"Do not explore the repository, export frames, parse design data or inspect pictures as the lead."
 			return out, 0, nil
 		}
 		return request, 0, err
@@ -234,6 +234,20 @@ func run(args arguments) (any, int, error) {
 		return plan, args.input(plan, true)
 	}
 	switch args.action {
+	case "prepare":
+		input := dev.PrepareInput{}
+		if err := args.input(&input, true); err != nil {
+			return nil, 0, err
+		}
+		value, err := dev.Execute("prepare", func() (any, error) { return dev.Prepare(cfg, input) })
+		return value, 0, err
+	case "replan":
+		plan, err := loadPlan()
+		if err != nil {
+			return nil, 0, err
+		}
+		value, err := gated(cfg, "replan", func(gate *dev.Gate) (any, error) { return dev.Replan(cfg, gate, plan) })
+		return value, 0, err
 	case "plan":
 		return planCommand(cfg, args)
 	case "modes":
@@ -354,7 +368,7 @@ func run(args arguments) (any, int, error) {
 		return value, 0, err
 	case "fix":
 		input := dev.FixInput{}
-		if err := args.input(&input, true); err != nil {
+		if err := args.input(&input, false); err != nil {
 			return nil, 0, err
 		}
 		value, err := gated(cfg, "fix", func(gate *dev.Gate) (any, error) { return dev.Fix(cfg, gate, input) })

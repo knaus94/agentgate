@@ -10,7 +10,7 @@ import { assetName, brief, buildSpec, detail } from '../lib/outline.mjs';
 const usage = `usage:
   figma login                         sign in to Figma in a browser window, once; the session stays in this tool's profile
   figma status                        who is signed in, and whether the session still works
-  figma frames <figma-url>            the frames of the page the URL points into: choose what to pull
+  figma frames <figma-url> [--json] [--depth 3]  a bounded catalogue for the preparation worker
   figma pull <figma-url> --out <dir>  write the design package of the node the URL points at
         [--node <id>]                 another node of the same file instead of the one in the URL
         [--scales 2]                  extra PNG scales of the node, for tools
@@ -21,8 +21,7 @@ const usage = `usage:
 The profile lives in ${figmaHome} (AGENTGATE_FIGMA_HOME overrides it).`;
 
 const fail = (message, code = 1) => {
-  console.error(`figma: ${message}`);
-  process.exit(code);
+  throw Object.assign(new Error(message), { exitCode: code });
 };
 
 function parse(argv) {
@@ -31,6 +30,7 @@ function parse(argv) {
   for (let index = 0; index < argv.length; index++) {
     const value = argv[index];
     if (!value.startsWith('--')) rest.push(value);
+    else if (value === '--json') flags.json = true;
     else if (value.startsWith('--no-')) flags[value.slice(5)] = false;
     else flags[value.slice(2)] = argv[++index];
   }
@@ -146,10 +146,16 @@ async function withNode(url, node, work) {
   }
 }
 
-async function frames(url) {
+async function frames(url, flags) {
   if (!url) fail(usage, 2);
   await withNode(url, null, async (page, where) => {
-    const listed = await page.evaluate(listFrames, where.id);
+    const depth = Number(flags.depth ?? 1);
+    if (!Number.isInteger(depth) || depth < 0 || depth > 6) fail('depth must be an integer from 0 to 6', 2);
+    const listed = await page.evaluate(listFrames, { nodeId: where.id, depth });
+    if (flags.json) {
+      console.log(JSON.stringify({ source: where.url, ...listed }));
+      return;
+    }
     console.log(`page “${listed.page}” — pull one with: figma pull <url> --node <id> --out <dir>`);
     for (const row of listed.rows) console.log(`${'  '.repeat(row.level)}${row.id}  ${row.name}  ${row.width}×${row.height}${row.type === 'frame' ? '' : '  ' + row.type}`);
   });
@@ -241,7 +247,12 @@ if (command === '--help' || command === 'help' || command === '-h') {
   console.log(usage);
   process.exit(0);
 }
-const commands = { login, status, frames: () => frames(rest[0]), pull: () => pull(rest[0], flags),
+const commands = { login, status, frames: () => frames(rest[0], flags), pull: () => pull(rest[0], flags),
   node: async () => node(rest[0], rest[1], flags), 'import-cookies': () => importCookies(rest[0]) };
-if (!commands[command]) fail(usage, 2);
-commands[command]().catch((error) => fail(String(error.message || error).split('\n')[0]));
+Promise.resolve().then(() => {
+  if (!commands[command]) fail(usage, 2);
+  return commands[command]();
+}).catch((error) => {
+  console.error(`figma: ${error.message || error}`);
+  process.exitCode = error.exitCode || 1;
+});

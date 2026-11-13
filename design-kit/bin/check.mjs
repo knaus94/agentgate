@@ -2,6 +2,7 @@
 // check — does the page look as the design package says? Prints a short list of differences; exit 1 when there are any.
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { openBrowser } from '../lib/browser.mjs';
 import { compare, defaults, summary } from '../lib/compare.mjs';
 import { diffImages, readPage, still } from '../lib/page-read.mjs';
@@ -26,146 +27,145 @@ const usage = `usage:
         [--write-baseline <f>]  record the differences the page has now, and exit 0
         [--baseline <f>]        fail only for differences that are not in that record
 
-exit: 0 the page matches (or is no worse than the baseline), 1 it differs, 2 nothing could be compared`;
+exit: 0 the page matches (or only unchanged baseline differences remain), 1 it differs, 2 nothing could be compared`;
 
 const fail = (message, code = 2) => {
-  console.error(`check: ${message}`);
-  process.exit(code);
+  throw Object.assign(new Error(message), { exitCode: code });
 };
 
-const flags = {};
-const rest = [];
-for (let index = 2; index < process.argv.length; index++) {
-  const value = process.argv[index];
-  if (value === '--keep') flags.keep = true;
-  else if (value === '--record' && !/^https?:/.test(process.argv[index + 1] || '')) flags.record = true;
-  else if (value.startsWith('--')) flags[value.slice(2)] = process.argv[++index];
-  else rest.push(value);
-}
-if (process.argv.includes('--help') || process.argv.includes('-h') || rest[0] === 'help') {
-  console.log(usage);
-  process.exit(0);
-}
-if (rest[0] === 'new') {
-  // A screen is made in one go: the design and where it is shown.
-  const [, target, figma] = rest;
-  if (!target || !figma || !flags.url || !flags.root) fail(usage);
-  fs.mkdirSync(target, { recursive: true });
-  const { execFileSync } = await import('node:child_process');
-  try {
-    execFileSync(process.execPath, [new URL('./figma.mjs', import.meta.url).pathname, 'pull', figma, '--out', path.join(target, 'package')], { stdio: ['ignore', 'ignore', 'inherit'] });
-  } catch {
-    process.exit(1);
+async function main() {
+  const flags = {};
+  const rest = [];
+  for (let index = 2; index < process.argv.length; index++) {
+    const value = process.argv[index];
+    if (value === '--keep') flags.keep = true;
+    else if (value === '--record' && !/^https?:/.test(process.argv[index + 1] || '')) flags.record = true;
+    else if (value.startsWith('--')) flags[value.slice(2)] = process.argv[++index];
+    else rest.push(value);
   }
-  // A screen somebody described already keeps its description: only the design was missing.
-  if (!fs.existsSync(path.join(target, 'screen.json'))) {
-    fs.writeFileSync(path.join(target, 'screen.json'), JSON.stringify({ url: flags.url, root: flags.root, locale: flags.locale, viewport: flags.viewport }, null, 2) + '\n');
+  if (process.argv.includes('--help') || process.argv.includes('-h') || rest[0] === 'help') {
+    console.log(usage);
+    return;
   }
-  const brief = fs.readFileSync(path.join(target, 'package', 'brief.md'), 'utf8');
-  console.log(JSON.stringify({ screen: target, brief: path.join(target, 'package', 'brief.md'), brief_tokens_about: Math.round(Buffer.byteLength(brief) / 3.2) }, null, 2));
-  process.exit(0);
-}
-let dir = rest[0];
-if (!dir) fail(usage);
-// A screen is a directory that knows its own page: nothing else has to be said.
-let screen = null;
-try {
-  screen = readScreen(dir);
-} catch (error) {
-  fail(error.message);
-}
-if (screen) {
-  dir = screen.package;
-  flags.url ??= screen.url;
-  flags.root ??= screen.screen.root;
-  flags.locale ??= screen.screen.locale;
-  flags.viewport ??= screen.screen.viewport;
-  flags.map ??= screen.map;
-}
-if (!flags.url) fail(usage);
-
-const read = (name) => {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8'));
-  } catch {
-    return fail(`${dir} is not a design package: ${name} is missing`);
-  }
-};
-const manifest = read('manifest.json');
-const spec = read(path.join('data', 'spec.json'));
-const map = flags.map ? JSON.parse(fs.readFileSync(flags.map, 'utf8')) : {};
-for (const [handle, why] of Object.entries(map.ignore || {})) {
-  if (!String(why).trim()) fail(`the map ignores ${handle} without saying why`);
-}
-const limits = { ...defaults };
-if (flags.tolerance) limits.position = limits.size = Number(flags.tolerance);
-const [width, height] = (flags.viewport || `${manifest.screen?.width || spec.frame.width}x${Math.min(manifest.screen?.height || 1080, 1200)}`).split('x').map(Number);
-
-let stopStand = async () => {};
-if (screen) {
-  stopStand = await ensureStand(rest[0], { record: flags.record, keep: flags.keep, log: (text) => console.error(`layout: ${text}`) }).catch((error) => fail(error.message));
-}
-const browser = await openBrowser();
-let code = 0;
-try {
-  const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1, reducedMotion: 'reduce',
-    locale: flags.locale, storageState: flags['storage-state'] || screen?.storageState });
-  const page = await context.newPage();
-  await page.goto(flags.url, { waitUntil: 'load', timeout: 60000 }).catch((error) => fail(`the page did not open: ${String(error).split('\n')[0]}`));
-  await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
-  if (flags.wait) await page.waitForSelector(flags.wait, { timeout: 30000 }).catch(() => fail(`${flags.wait} never appeared at ${page.url()}`));
-  await page.addStyleTag({ content: still });
-  await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(400);
-
-  const seen = await page.evaluate(readPage, flags.root || '');
-  if (seen.error && flags['write-baseline']) {
-    // The page or its root is not there before the work: it is what the task builds.
-    fs.writeFileSync(flags['write-baseline'], JSON.stringify({ known: [] }) + '\n');
-    console.log(`design baseline: ${page.url()} does not show “${spec.frame.name}” yet`);
-    await browser.close().catch(() => {});
-    if (!flags.keep) await stopStand();
-    process.exit(0);
-  }
-  if (seen.error) fail(`${seen.error} at ${page.url()}`);
-  const result = compare(spec, seen, map, limits);
-  if (result.compared === 0 && flags['write-baseline']) {
-    // Nothing is built yet: every difference the finished screen has will be a new one.
-    fs.writeFileSync(flags['write-baseline'], JSON.stringify({ known: [] }) + '\n');
-    console.log(`design baseline: the page shows nothing of “${spec.frame.name}” yet`);
-    process.exit(0);
-  }
-  if (result.compared === 0) fail(`nothing on ${page.url()} corresponds to the design: is --root the element that implements “${spec.frame.name}”?`);
-  // A difference is known by the layer and what kind it is; how large it is may still change.
-  const keyOf = (issue) => `${issue.ref}|${issue.kind}`;
-  if (flags['write-baseline']) {
-    // A page that shows next to nothing of the design is not a screen with differences: it is not built, and
-    // nothing it lacks may count as known.
-    const built = result.compared >= result.total / 10;
-    fs.writeFileSync(flags['write-baseline'], JSON.stringify({ known: built ? result.issues.map(keyOf) : [] }) + '\n');
-    console.log(built ? `design baseline: ${result.issues.length} differences recorded` : `design baseline: the page shows ${result.compared} of ${result.total} layers — taken as not built yet`);
-    await browser.close().catch(() => {});
-    if (!flags.keep) await stopStand();
-    process.exit(0);
-  }
-  if (flags.baseline) {
-    // No record of the page before the work means nothing about it is known: every difference counts.
-    const known = new Set(fs.existsSync(flags.baseline) ? JSON.parse(fs.readFileSync(flags.baseline, 'utf8')).known : []);
-    result.known = result.issues.filter((issue) => known.has(keyOf(issue))).length;
-    result.issues = result.issues.filter((issue) => !known.has(keyOf(issue)));
-  }
-
-  const shot = flags.root ? await page.locator(flags.root).first().screenshot() : await page.screenshot({ fullPage: true });
-  const blank = await context.newPage();
-  const data = (bytes) => `data:image/png;base64,${bytes.toString('base64')}`;
-  const pictures = await blank.evaluate(diffImages, { design: data(fs.readFileSync(path.join(dir, 'frame.png'))), actual: data(shot),
-    crop: { x: 0, y: 0, width: spec.frame.width, height: spec.frame.height },
-    marks: result.issues.slice(0, 20).map((issue, index) => ({ number: index + 1, box: issue.box, color: issue.kind === 'missing' ? '#ff3b30' : '#ffcc00' })).filter((mark) => mark.box) });
-
-  let written;
-  if (flags.out) {
-    // A worker runs the same command in a sandbox where this directory is read-only: the pictures are the gate's.
+  if (rest[0] === 'new') {
+    // A screen is made in one go: the design and where it is shown.
+    const [, target, figma] = rest;
+    if (!target || !figma || !flags.url || !flags.root) fail(usage);
+    fs.mkdirSync(target, { recursive: true });
+    const { execFileSync } = await import('node:child_process');
     try {
+      execFileSync(process.execPath, [new URL('./figma.mjs', import.meta.url).pathname, 'pull', figma, '--out', path.join(target, 'package')], { stdio: ['ignore', 'ignore', 'inherit'] });
+    } catch {
+      fail("could not import the design; see the exporter error above");
+    }
+    // A screen somebody described already keeps its description: only the design was missing.
+    if (!fs.existsSync(path.join(target, 'screen.json'))) {
+      fs.writeFileSync(path.join(target, 'screen.json'), JSON.stringify({ url: flags.url, root: flags.root, locale: flags.locale, viewport: flags.viewport }, null, 2) + '\n');
+    }
+    const brief = fs.readFileSync(path.join(target, 'package', 'brief.md'), 'utf8');
+    console.log(JSON.stringify({ screen: target, brief: path.join(target, 'package', 'brief.md'), brief_tokens_about: Math.round(Buffer.byteLength(brief) / 3.2) }, null, 2));
+    return;
+  }
+  let dir = rest[0];
+  if (!dir) fail(usage);
+  // A screen is a directory that knows its own page: nothing else has to be said.
+  let screen = null;
+  try {
+    screen = readScreen(dir);
+  } catch (error) {
+    fail(error.message);
+  }
+  if (screen) {
+    dir = screen.package;
+    flags.url = new URL(flags.url || screen.url, screen.url).href;
+    flags.root ??= screen.screen.root;
+    flags.locale ??= screen.screen.locale;
+    flags.viewport ??= screen.screen.viewport;
+    flags.map ??= screen.map;
+  }
+  if (!flags.url) fail(usage);
+
+  const read = (name) => {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8'));
+    } catch {
+      return fail(`${dir} is not a design package: ${name} is missing`);
+    }
+  };
+  const manifest = read('manifest.json');
+  const spec = read(path.join('data', 'spec.json'));
+  const map = flags.map ? JSON.parse(fs.readFileSync(flags.map, 'utf8')) : {};
+  for (const [handle, why] of Object.entries(map.ignore || {})) {
+    if (!String(why).trim()) fail(`the map ignores ${handle} without saying why`);
+  }
+  const limits = { ...defaults };
+  if (flags.tolerance) limits.position = limits.size = Number(flags.tolerance);
+  const [width, height] = (flags.viewport || `${manifest.screen?.width || spec.frame.width}x${Math.min(manifest.screen?.height || 1080, 1200)}`).split('x').map(Number);
+  const contract = crypto.createHash('sha256').update(JSON.stringify({ package: manifest.digest,
+    url: flags.url, root: flags.root || '', viewport: [width, height], locale: flags.locale, map, limits })).digest('hex');
+
+  let stopStand = async () => {};
+  if (screen) {
+    stopStand = await ensureStand(rest[0], { record: flags.record, keep: flags.keep, log: (text) => console.error(`layout: ${text}`) }).catch((error) => fail(error.message));
+  }
+  let browser;
+  let code = 0;
+  try {
+    browser = await openBrowser();
+    const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1, reducedMotion: 'reduce',
+      locale: flags.locale, storageState: flags['storage-state'] || screen?.storageState });
+    const page = await context.newPage();
+    await page.goto(flags.url, { waitUntil: 'load', timeout: 60000 }).catch((error) => fail(`the page did not open: ${String(error).split('\n')[0]}`));
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    if (flags.wait) await page.waitForSelector(flags.wait, { timeout: 30000 }).catch(() => fail(`${flags.wait} never appeared at ${page.url()}`));
+    await page.addStyleTag({ content: still });
+    await page.evaluate(() => document.fonts.ready);
+    await page.waitForTimeout(400);
+
+    const seen = await page.evaluate(readPage, flags.root || '');
+    if (seen.error && flags['write-baseline']) {
+      // The page or its root is not there before the work: it is what the task builds.
+      fs.writeFileSync(flags['write-baseline'], JSON.stringify({ contract, known: [] }) + '\n');
+      console.log(`design baseline: ${page.url()} does not show “${spec.frame.name}” yet`);
+      return;
+    }
+    if (seen.error) fail(`${seen.error} at ${page.url()}`);
+    const result = compare(spec, seen, map, limits);
+    if (result.compared === 0 && flags['write-baseline']) {
+      // Nothing is built yet: every difference the finished screen has will be a new one.
+      fs.writeFileSync(flags['write-baseline'], JSON.stringify({ contract, known: [] }) + '\n');
+      console.log(`design baseline: the page shows nothing of “${spec.frame.name}” yet`);
+      return;
+    }
+    if (result.compared === 0) fail(`nothing on ${page.url()} corresponds to the design: is --root the element that implements “${spec.frame.name}”?`);
+    // Only an unchanged discrepancy is grandfathered. Matching a kind alone would hide a larger offset or
+    // a newly wrong font under an older finding of the same kind.
+    const keyOf = (issue) => JSON.stringify([issue.ref, issue.kind, issue.text]);
+    if (flags['write-baseline']) {
+      // A page that shows next to nothing of the design is not a screen with differences: it is not built, and
+      // nothing it lacks may count as known.
+      const built = result.compared >= result.total / 10;
+      fs.writeFileSync(flags['write-baseline'], JSON.stringify({ contract, known: built ? result.issues.map(keyOf) : [] }) + '\n');
+      console.log(built ? `design baseline: ${result.issues.length} differences recorded` : `design baseline: the page shows ${result.compared} of ${result.total} layers — taken as not built yet`);
+      return;
+    }
+    if (flags.baseline) {
+      // No record of the page before the work means nothing about it is known: every difference counts.
+      const baseline = fs.existsSync(flags.baseline) ? JSON.parse(fs.readFileSync(flags.baseline, 'utf8')) : null;
+      const known = new Set(baseline?.contract === contract ? baseline.known : []);
+      result.known = result.issues.filter((issue) => known.has(keyOf(issue))).length;
+      result.issues = result.issues.filter((issue) => !known.has(keyOf(issue)));
+    }
+
+    const shot = flags.root ? await page.locator(flags.root).first().screenshot() : await page.screenshot({ fullPage: true });
+    const blank = await context.newPage();
+    const data = (bytes) => `data:image/png;base64,${bytes.toString('base64')}`;
+    const pictures = await blank.evaluate(diffImages, { design: data(fs.readFileSync(path.join(dir, 'frame.png'))), actual: data(shot),
+      crop: { x: 0, y: 0, width: spec.frame.width, height: spec.frame.height },
+      marks: result.issues.slice(0, 20).map((issue, index) => ({ number: index + 1, box: issue.box, color: issue.kind === 'missing' ? '#ff3b30' : '#ffcc00' })).filter((mark) => mark.box) });
+
+    let written;
+    if (flags.out) {
       fs.mkdirSync(flags.out, { recursive: true });
       const save = (name, url) => fs.writeFileSync(path.join(flags.out, name), Buffer.from(url.split(',')[1], 'base64'));
       save('marked.png', pictures.marked);
@@ -173,18 +173,21 @@ try {
       fs.writeFileSync(path.join(flags.out, 'actual.png'), shot);
       fs.writeFileSync(path.join(flags.out, 'report.json'), JSON.stringify({ url: page.url(), package: manifest.digest, pixels: pictures.ratio, ...result }, null, 1));
       written = { marked: path.join(flags.out, 'marked.png'), diff: path.join(flags.out, 'diff.png') };
-    } catch {
-      written = undefined;
     }
+    const text = summary(result, pictures.ratio, written);
+    if (written) fs.writeFileSync(path.join(flags.out, 'report.md'), text);
+    process.stdout.write(text);
+    const tooDifferent = flags['max-pixel-diff'] !== undefined && pictures.ratio > Number(flags['max-pixel-diff']);
+    if (tooDifferent) console.log(`more than ${flags['max-pixel-diff']} of the pixels differ`);
+    code = result.issues.length || tooDifferent ? 1 : 0;
+  } finally {
+    await browser?.close().catch(() => {});
+    if (!flags.keep) await stopStand();
   }
-  const text = summary(result, pictures.ratio, written);
-  if (written) fs.writeFileSync(path.join(flags.out, 'report.md'), text);
-  process.stdout.write(text);
-  const tooDifferent = flags['max-pixel-diff'] !== undefined && pictures.ratio > Number(flags['max-pixel-diff']);
-  if (tooDifferent) console.log(`more than ${flags['max-pixel-diff']} of the pixels differ`);
-  code = result.issues.length || tooDifferent ? 1 : 0;
-} finally {
-  await browser.close().catch(() => {});
-  if (!flags.keep) await stopStand();
+  process.exitCode = code;
 }
-process.exit(code);
+
+main().catch((error) => {
+  console.error(`check: ${error.message || error}`);
+  process.exitCode = error.exitCode || 2;
+});

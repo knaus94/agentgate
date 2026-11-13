@@ -257,6 +257,9 @@ func ReviewTask(cfg *config.Config, gate *Gate, input ReviewInput) (any, error) 
 	if _, err := loadReviewRules(cfg, gate.Files); err != nil {
 		return nil, err
 	}
+	if err := gate.prepareDesigns(false); err != nil {
+		return nil, err
+	}
 	// Checks cost seconds and reviewers cost minutes and quota, so checks go first. Code that fails its own
 	// checks is going to change: reviewing it would be paid for twice. A read-only review has no writer to send
 	// the failure to, so there the checks only inform the reviewers.

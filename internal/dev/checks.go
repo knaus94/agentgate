@@ -284,7 +284,8 @@ func (g *Gate) failing() []CheckFailure {
 		if len(raw) > 4000 {
 			raw = raw[len(raw)-4000:]
 		}
-		out = append(out, CheckFailure{Argv: receipt.Argv, ReturnCode: receipt.ReturnCode, Log: receipt.Log, Tail: string(raw)})
+		out = append(out, CheckFailure{Argv: receipt.Argv, ReturnCode: receipt.ReturnCode, Log: receipt.Log, Tail: string(raw),
+			Setup: generatedDesignCheck(g.Plan.Checks[index]) && receipt.ReturnCode != 1})
 	}
 	return out
 }

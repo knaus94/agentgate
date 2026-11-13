@@ -28,6 +28,8 @@ saved with `plan save`). Unknown fields are rejected.
 | `land` | `{how?}` | isolated task only: bring it into the checkout — `apply` (default), `commit`, `branch` or `drop` |
 | `hold` | `{reason, cancelled?}` | park the task |
 | `resume`, `stop`, `status` | — | lifecycle and observation |
+| `prepare` | `{request, name?, context?, notes?}` | read-only worker drafts and saves the plan; no source edits or checks |
+| `replan` | complete plan with `update` | replace an idle single-pass task contract while preserving its original baseline |
 | `watch [--all] [--once]` | — | the user's interactive panel; `--once` prints it as text |
 
 Setup: `doctor`, `install [--zed] [--uninstall]`, `update [--check]`, `modes`,
@@ -143,6 +145,9 @@ covered by a stage. Each stage has `name`, `goal`, `covers`, `streams`, and opti
   UI files (`.tsx .jsx .vue .svelte .html .css .scss .sass .less`) are in scope.
 - `visual.scenarios[]`: `{id, screen, state, viewport: "1440x900", role, expected}`.
 - Continuation of an unfinished task: the complete plan again plus `update` (what changed and why).
+  At `awaiting-review` or `reviewed`, apply it with `replan`; `plan save` only saves the file. Replan keeps
+  every owned file and all findings, invalidates review and regenerates managed design checks. It cannot
+  resume a hold, change write authority or capture a new baseline. Staged plans use their between-stage flow.
 - `review` and `clean`: `base_ref` (default `HEAD`) is where the reviewed diff starts.
 - Timeouts: `writer_timeout_s`, `reviewer_timeout_s`, 120–7200; default is the mode's ceiling, else 1200.
 - Architecture revision: add `revise: "<receipt id>"` and `revise_blockers: ["id"]` to the same plan.

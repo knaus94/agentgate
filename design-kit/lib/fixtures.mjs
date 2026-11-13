@@ -10,7 +10,7 @@ const nameOf = (operation) => operation.operationName || /(?:query|mutation|subs
 const digestOf = (operation) => crypto.createHash('sha256').update(JSON.stringify(operation.variables || {})).digest('hex').slice(0, 8);
 
 export function serveFixtures({ dir, port, record }) {
-  fs.mkdirSync(dir, { recursive: true });
+  if (record) fs.mkdirSync(dir, { recursive: true });
   const answer = async (operation, headers) => {
     const name = nameOf(operation);
     const exact = path.join(dir, `${name}.${digestOf(operation)}.json`);

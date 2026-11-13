@@ -5,16 +5,32 @@
 A stream can implement a Figma design, and the gate can tell whether it did. What can be computed is computed
 by tools; a model reads short results.
 
+
+## Coordination
+
+Start with `agentgate prepare --file <JSON with request>`. The tool reads a bounded Figma catalogue and a
+read-only worker selects content nodes, discovers the repository and saves the plan. The lead handles product
+questions and authorization, not exports, CSS inspection or screenshot comparison. Writers receive packages
+and source checks; the gate owns layout commands, baseline files and stand lifecycle. It sends measured
+failures back through `fix`, and an independent reviewer checks pictures.
+
+Use `replan --plan <name>` with an update reason to correct an idle task's measurement contract. This retains
+its original source snapshot and findings; it regenerates managed layout checks and invalidates review.
+No new baseline is captured after implementation. An absent/mismatched baseline makes all differences count.
+Only an identical discrepancy under the same design, root, viewport, map and tolerances is grandfathered;
+changed discrepancies remain visible. Exit 1 means a measured difference; exit 2 means verification could not
+run and must be repaired before asking a writer to change CSS.
+
 ## The flow
 
 | Step | Who | What happens |
 |---|---|---|
 | Sign in | you, once | `agentgate figma login` opens a browser window. The session stays in a profile under `~/.local/share/agentgate/private`, which no worker sees. No token and no cookie file |
-| Choose | the lead | `agentgate figma frames <url>` lists the frames of a page |
-| Pull | the lead | `agentgate figma pull <url> --node <id> --out <dir>` writes a design package |
-| Plan | the lead | `design [{figma, url, root, stream}]` in the plan: the design is pulled at launch |
+| Choose | preparation worker | receives the bounded catalogue and selects matching content nodes |
+| Pull | the gate | imports the selected design at launch |
+| Plan | preparation worker, then lead | drafts the plan; the lead accepts scope and authorizations |
 | Measure | the gate | before anyone writes, the page is compared with the package: what differs already is not the task's |
-| Write | the stream's writer | reads the brief, about two thousand tokens for a page section, and runs the layout check itself |
+| Write | the stream's writer | reads the brief, about two thousand tokens for a page section, and runs its declared source checks |
 | Check | the gate | the layout check again, as a declared check. A new difference blocks the review |
 | Judge | the first reviewer | is shown the design next to the page and looks for what numbers do not carry |
 

@@ -149,6 +149,8 @@ func kindOf(call provider.Call) string {
 		return "visual"
 	case strings.Contains(call.Dir, "/scout/"):
 		return "scout"
+	case strings.Contains(call.Dir, "/preparations/"):
+		return "prepare"
 	case strings.Contains(call.Dir, "/consults/"):
 		return "consult"
 	case strings.Contains(call.Dir, "/designs/") && filepath.Base(call.Dir) == "designer":

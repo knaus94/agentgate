@@ -21,13 +21,13 @@ Every stage exists because skipping it costs more than running it.
 
 | # | Stage | Who | Why it is there |
 |---|---|---|---|
-| 1 | Brief | the lead | Someone has to decide what is being built; this is the only stage that talks to the user |
+| 1 | Preparation | read-only worker, then lead | The worker discovers the repository and drafts the plan; the lead handles product decisions and authorization |
 | 2 | Scout | one cheap model, once | Medium only: nobody designs there, so writers and reviewers start from its map. Architects read the code themselves, and in heavy and ultra the accepted design is the map |
 | 3 | Design | two top models, independently | Heavy and ultra only. Two designs take the time of one and show where the real decision is. The lead accepts one. A critique (ultra) and a revision continue the architect's own session: the code is already read |
 | 4 | Write | one writer per stream | Writers run the declared checks themselves, so the first thing the gate sees is code its author already tested |
 | 5 | Check | the declared commands | Runs before any reviewer. Seconds, against minutes and quota: code that fails its checks is not reviewed |
 | 6 | Review | models that did not write the code | The independent judgement. Two vendors in every mode above light |
-| 7 | Triage | the lead | A finding is a claim, not a fact. The lead verifies each against the code before anyone acts on it |
+| 7 | Triage | the lead | A finding is a claim, not a fact. The lead assesses the reviewer's cited evidence and sends technical uncertainty back to a specialist |
 | 8 | Correct | the same writers, same sessions | Failing checks and accepted findings go back to whoever wrote the code, with its context intact |
 | 9 | Finish | the gate | Refuses unless the review is current, the checks pass and nothing blocks |
 

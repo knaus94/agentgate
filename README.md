@@ -9,7 +9,8 @@ workers write and review, and the gate decides when the task is done.**
 install renames itself on `claude-dev update`.*
 
 You type `/dev add rate limiting to the export endpoint` in Claude Code (`$dev …` in Codex). Your session becomes the lead: it
-reads the code, writes the brief and splits the work. `agentgate` then runs the writers and reviewers as
+accepts scope and authorizes work. `agentgate prepare` delegates discovery and plan drafting to a read-only
+worker, then `agentgate` runs the writers and reviewers as
 separate processes on the models you configured, keeps receipts of everything they did, and refuses to close
 the task while a review, a check or a blocking finding is outstanding.
 

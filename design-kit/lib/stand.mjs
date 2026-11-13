@@ -93,27 +93,43 @@ export async function ensureStand(dir, { record, keep, log = () => {} } = {}) {
   // `--record` by itself records from the backend the project's own environment names.
   if (record === true) record = env[(stand.graphql_env || [])[0]];
   if (!record && record !== undefined) throw new Error('`--record` found no backend: give its URL');
-  const server = await serveFixtures({ dir: fixtures, port: 0, record });
-  const endpoint = `http://127.0.0.1:${server.address().port}/graphql`;
   // Recorded answers stand in for the backend when there are any; a screen without them is shown by the
   // backend the project's own environment names.
   const recorded = fs.existsSync(fixtures) && fs.readdirSync(fixtures).some((name) => name.endsWith('.json'));
-  if (recorded || record) for (const name of stand.graphql_env || []) env[name] = endpoint;
+  const server = recorded || record ? await serveFixtures({ dir: fixtures, port: 0, record }) : null;
+  if (server) for (const name of stand.graphql_env || []) env[name] = `http://127.0.0.1:${server.address().port}/graphql`;
   log(`starting the stand: ${stand.command.join(' ')}`);
   const child = spawn(stand.command[0], stand.command.slice(1), { cwd: root, env, detached: true, stdio: 'ignore' });
+  let stopping;
+  const onExit = () => { if (child.pid) stopTree(child.pid); };
+  const onSignal = () => { void stop().finally(() => process.exit(143)); };
   const stop = async () => {
-    stopTree(child.pid);
-    await new Promise((resolve) => server.close(resolve));
+    if (stopping) return stopping;
+    stopping = (async () => {
+      onExit();
+      if (server) await new Promise((resolve) => server.close(resolve));
+      process.removeListener('exit', onExit);
+      process.removeListener('SIGTERM', onSignal);
+      process.removeListener('SIGINT', onSignal);
+    })();
+    return stopping;
   };
   // However this process ends, what it started ends with it.
-  if (!keep) process.once('exit', () => stopTree(child.pid));
+  if (!keep) {
+    process.once('exit', onExit);
+    process.once('SIGTERM', onSignal);
+    process.once('SIGINT', onSignal);
+  }
   let exited = false;
+  let spawnError;
   child.once('exit', () => { exited = true; });
+  child.once('error', (error) => { spawnError = error; exited = true; });
   for (const deadline = Date.now() + (stand.ready_timeout_s || 240) * 1000; Date.now() < deadline;) {
     if (exited) break;
     if (await answers(stand.ready)) return stop;
     await new Promise((resolve) => setTimeout(resolve, 1500));
   }
   await stop();
+  if (spawnError) throw spawnError;
   throw new Error(`the stand did not answer at ${stand.ready}: ${stand.command.join(' ')}`);
 }

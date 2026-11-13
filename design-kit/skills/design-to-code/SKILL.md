@@ -48,29 +48,20 @@ A mock-up is one still frame. These are yours to get right, and no number in the
 
 ## Proving
 
-Check as you go, a section at a time, not once at the end. Measure again after every fix; if eight rounds
-have not cleared a difference, stop and report it rather than keep adjusting.
+Run the source checks in your assignment. Layout verification belongs to the gate: it starts the stand,
+measures the page and saves its evidence outside your write scope. Do not run an undeclared layout command,
+create baseline files, tune tolerances, edit maps or diagnose the gate's private state.
 
+When a correction includes measured layout failures:
 
-Run the check the task declares, of the form `agentgate layout <package> --url <page> --root <css>`. It prints at most
-twenty lines, one per difference, most important first:
+- Read the brief and the relevant reported layers. Fix the cause top down; a moved parent explains children.
+- Use the assigned package's node command for a specific layer when needed, not its raw data tree.
+- Missing business data or an ambiguous product state is a question, not permission to fabricate values.
+- A tool/setup failure is not a request to adjust CSS. Report the concrete prerequisite instead.
+- `<button>`, `<input>` and `<select>` need an explicit/inherited font or they use the browser's own.
 
-    3 ‹84b1› left-payment-method-panel → div.panel: off by x +8 y 0
-
-- `‹84b1›` is the layer in the brief, the selector is the element it was matched to.
-- Fix causes, top down: one moved parent explains its children, and they are not listed.
-- `not on the page` for data the stand does not have is not yours to fix: report it.
-- `font X → drawn with Y` means the font is not loaded on that element, usually a missing `font-family`.
-- Look at `marked.png` only when a line cannot be understood from its numbers.
-
-- `<button>`, `<input>` and `<select>` do not inherit the font: set it on them, or the text is drawn with the
-  browser's own.
-- The check may already report differences before you start; the task says how many. Leave no more than that.
-
-Before you report, look at `frame.png` and at the page once, side by side: the check judges numbers, and a
-wrong icon or a missing gradient has none.
-
-The check measures the screen at rest. A hover, a pressed or a disabled look it has not seen is not proven by
-its PASS: say in your report which states you built and what each was taken from.
-
-Do not change the package, its map file or the tolerances to make the check pass.
+Return COMPLETED when your implementation is ready for independent verification and its authorized source
+checks have run; say layout is pending, never that it passed without a gate receipt. Use BLOCKED for a real
+missing decision or inability to implement, not because the gate-owned layout phase has not run yet.
+The reviewer checks the design against the page. A check of the resting state does not prove hover, focus,
+pressed or disabled states; identify which states you built and which existing component defines them.

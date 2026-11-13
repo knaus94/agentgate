@@ -14,6 +14,7 @@ interpolate it into a shell command:
 
 $ARGUMENTS
 
-A Figma link in the request is not yours to open: no browser, no web fetch, no Figma plugin or MCP server, and
-no question to the user about access. `agentgate figma` reads the design through a session the user already
-signed in to, and `agentgate guide` (section 7, "From a Figma design") says how the link goes into the plan.
+For repository discovery or a Figma task, call `agentgate prepare --file <JSON with request>` first. Its
+read-only worker investigates the repository and prepares the saved plan; the host tool reads Figma without
+exposing the session to workers. The lead reviews scope and authorizations, not source, design exports or
+screenshots. Follow the returned next step and `agentgate guide`.

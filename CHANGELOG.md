@@ -2,7 +2,17 @@
 
 [Русский](CHANGELOG.ru.md)
 
-## Unreleased
+## 0.10.0
+
+- **Preparation belongs to a worker.** `prepare` collects a bounded design catalogue and delegates repository
+  discovery and plan drafting to a read-only worker. Its map is reused by the implementation; the lead handles
+  product decisions and authorization. Writers no longer run gate-owned layout commands.
+- **An idle task can be replanned.** `replan` preserves its identity, original source snapshot and findings,
+  regenerates managed design checks and requires fresh review. Screen overrides reach the checker; failed
+  preparation can resume without rebaselining implemented code. Setup failures are not sent to CSS writers.
+- Design checks close their browser and task-owned stand on failure/cancellation, serve existing fixtures
+  without writing their directory, and bind baseline exceptions to the measurement contract and exact discrepancy.
+- Go regression scenarios and a real Chromium workflow now run before release, with pinned browser tooling.
 
 - Acceptance requirements now carry per-criterion review evidence for single-pass and staged tasks. The gate
   validates code locations, current successful check receipts and observed browser scenarios; partial or missing

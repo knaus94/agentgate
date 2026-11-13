@@ -78,6 +78,9 @@ func Fix(cfg *config.Config, gate *Gate, input FixInput) (any, error) {
 	}
 	// A correction is driven by accepted review findings, by failing declared checks, or by both.
 	failing := gate.failing()
+	if slices.ContainsFunc(failing, func(f CheckFailure) bool { return f.Setup }) {
+		return nil, errors.New("layout verification could not run: repair the stand or measurement contract, then replan/check; do not send a tooling failure to a CSS writer")
+	}
 	conflicts := gate.unresolved()
 	if len(failing) == 0 && len(conflicts) == 0 {
 		if gate.Phase != "reviewed" || content != gate.ReviewDigest {
@@ -97,7 +100,7 @@ func Fix(cfg *config.Config, gate *Gate, input FixInput) (any, error) {
 		return nil, errors.New("there are no accepted findings and no failing checks to correct")
 	}
 	if strings.TrimSpace(input.Brief) == "" {
-		return nil, errors.New("brief describes the root cause and the coherent remedy")
+		input.Brief = "Diagnose and correct the accepted findings and failing checks in this assignment. Repair the root cause, preserve the contract, and report the diagnosis and actual checks."
 	}
 	var checkIDs []string
 	for _, failure := range failing {
@@ -112,7 +115,7 @@ func Fix(cfg *config.Config, gate *Gate, input FixInput) (any, error) {
 	}
 	if progress.Reassess && (input.Reassessment == nil || strings.TrimSpace(input.Reassessment.Evidence) == "" ||
 		strings.TrimSpace(input.Reassessment.ChangedApproach) == "") {
-		return nil, fmt.Errorf("the last correction made no verified progress (%s): diagnose again and provide reassessment "+
+		return nil, fmt.Errorf("the last correction made no verified progress (%s): delegate diagnosis through consult and provide reassessment "+
 			"{evidence, changed_approach}, or hold and ask the user if a decision is missing", progress.Status)
 	}
 	// Each finding goes to the stream that owns its file; files named only by the lead join that stream.
@@ -420,7 +423,10 @@ func (g *Gate) next(cfg *config.Config, blocked bool) string {
 				". `fix` {brief}: say how the two changes combine; the owning writers resolve them in their sessions."
 		}
 		if g.Request.Writes() && len(g.failing()) > 0 {
-			return "A declared check fails, so no reviewer was started. Read its output, then `fix` {brief}: the failure goes back to the writers in their own sessions."
+			if slices.ContainsFunc(g.failing(), func(f CheckFailure) bool { return f.Setup }) {
+				return "A layout tool could not observe the page (checks_failed.setup). Repair the stand or use prepare with the failure context, then replan the corrected contract and review. Do not tune CSS, baselines or tolerances to bypass it."
+			}
+			return "A declared check fails, so no reviewer was started. Run `fix`: the owning writers receive the output and diagnose the defect in their own sessions. The lead need not inspect source or pictures."
 		}
 		if g.Integration && len(g.Reviews) == 0 {
 			return "Every stage is accepted. Run `review` for the pass over the whole change: it looks at the seams between the stages."
@@ -428,7 +434,7 @@ func (g *Gate) next(cfg *config.Config, blocked bool) string {
 		if len(cfg.Modes[g.Mode].Review) == 0 {
 			return "Run `review`: it returns the diffs for you to read, then call it again with lead_review."
 		}
-		return "Inspect the change, then run `review`: declared checks run first, reviewers only on code that passes them."
+		return "Run `review`: declared checks run first; independent reviewers inspect the code and design. The lead need not duplicate their investigation."
 	case "held":
 		for _, writer := range g.latest() {
 			if writer.Status == "BLOCKED" {
@@ -439,9 +445,9 @@ func (g *Gate) next(cfg *config.Config, blocked bool) string {
 	case "reviewed":
 		switch {
 		case len(g.untriaged()) > 0:
-			return "Verify each finding against the code and `triage` it: accepted, rejected, deferred or needs-approval."
+			return "Assess the reviewers' cited evidence and `triage`: accepted, rejected, deferred or needs-approval. Delegate disputed technical details through consult."
 		case len(g.accepted()) > 0:
-			return "Run `fix` with the root cause and remedy; the owning writers correct it in their sessions."
+			return "Run `fix`; the owning writers diagnose and correct accepted findings in their sessions. Supply brief only for an additional decision or constraint."
 		case blocked:
 			return "Blocking findings remain: accept and fix them, or reject them with contrary evidence."
 		case len(g.outstanding()) > 0:

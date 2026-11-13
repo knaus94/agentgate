@@ -49,6 +49,7 @@ type CheckFailure struct {
 	ReturnCode int      `json:"returncode"`
 	Log        string   `json:"log"`
 	Tail       string   `json:"output_tail"`
+	Setup      bool     `json:"setup,omitempty"` // the measuring tool could not observe the page, not a measured code defect
 }
 
 type Writer struct {
