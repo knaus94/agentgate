@@ -12,7 +12,7 @@ by tools; a model reads short results.
 | Sign in | you, once | `agentgate figma login` opens a browser window. The session stays in a profile under `~/.local/share/agentgate/private`, which no worker sees. No token and no cookie file |
 | Choose | the lead | `agentgate figma frames <url>` lists the frames of a page |
 | Pull | the lead | `agentgate figma pull <url> --node <id> --out <dir>` writes a design package |
-| Plan | the lead | `design [{package, url, root, stream, map}]` in the plan |
+| Plan | the lead | `design [{screen, stream}]` in the plan |
 | Measure | the gate | before anyone writes, the page is compared with the package: what differs already is not the task's |
 | Write | the stream's writer | reads the brief, about two thousand tokens for a page section, and runs the layout check itself |
 | Check | the gate | the layout check again, as a declared check. A new difference blocks the review |
@@ -43,13 +43,30 @@ follow from auto layout are not printed. `agentgate figma node <dir> <handle>` p
 The layout check finds a text by its words and a painted box by where it lies, so the code needs no markup. It
 judges a layer against its matched parent: a panel that moved is one finding, not one per child.
 
-## The stand and the map
+## A screen and its stand
 
-The check opens a page of a local stand. The page has to be in the state the design shows; `agentgate
-fixtures <dir> --record <gateway>` keeps a real gateway's GraphQL answers in files, and `agentgate fixtures
-<dir>` serves them to the browser and to server-side rendering alike, so the screen needs nothing behind it.
+A screen is a directory, and a project describes its front end once:
 
-What the product deliberately shows differently is named in a map, each entry with its reason:
+```
+<screens>/stand.json           how the front end starts, once per project
+<screens>/<screen>/screen.json where the screen is: url, root, and optionally locale, viewport, cookies
+<screens>/<screen>/package/    the design, written by `agentgate figma pull`
+<screens>/<screen>/fixtures/   recorded GraphQL answers: the state the screen is shown in
+<screens>/<screen>/map.json    what the product shows differently
+```
+
+```json
+{ "command": ["yarn", "nx", "run", "client:dev"], "ready": "http://localhost:4200",
+  "env_file": "env/.env.local", "graphql_env": ["VITE_PUBLIC_GRAPHQL_ENDPOINT", "GRAPHQL_INTERNAL_URL"] }
+```
+
+`agentgate layout <screen>` is the whole of it. When nothing answers at `ready`, it serves the screen's
+fixtures as the GraphQL endpoint, starts `command` with the variables of `graphql_env` pointing there, waits,
+compares, and stops everything it started; the screen needs no backend behind it. In a plan the screen is
+`design [{screen, stream}]`, and the gate runs the same command. `agentgate layout <screen> --record
+<gateway>` runs against a real gateway instead and keeps its answers as the fixtures.
+
+What the product deliberately shows differently is named in the screen's `map.json`, each entry with its reason:
 `{"ignore": {"<handle>": "why"}, "dynamic": ["<handle>"]}`.
 
 ## Limits

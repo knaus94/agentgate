@@ -2,6 +2,14 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.9.4
+
+- **A screen is one argument.** `agentgate layout <screen>` starts the project's front end with the screen's
+  recorded answers in place of the backend when it is not running, compares, and stops what it started. A
+  project says how its front end starts once, in `stand.json`; nobody writes a script. In a plan a design is
+  `design [{screen, stream}]`.
+- `screen.json` may carry the cookies the page needs, so a check needs no session prepared by hand.
+
 ## 0.9.3
 
 - **A stream can implement a Figma design, and the gate can tell whether it did.** `design [{package, url,

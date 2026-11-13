@@ -19,8 +19,9 @@ import (
 // hands the brief to that stream alone, measures the page before the work and after it, blocks what got worse,
 // and shows a reviewer the design next to the result.
 type DesignRef struct {
-	Package      string `json:"package"`                 // a directory written by `agentgate figma pull`
-	URL          string `json:"url"`                     // the page that shows the result, on a local stand
+	Screen       string `json:"screen,omitempty"`        // a screen directory: screen.json, package/, fixtures/ and map.json. It needs nothing else here
+	Package      string `json:"package,omitempty"`       // without a screen: a directory written by `agentgate figma pull`
+	URL          string `json:"url,omitempty"`           // without a screen: the page that shows the result, on a local stand
 	Root         string `json:"root,omitempty"`          // the element that implements the pulled node
 	Stream       string `json:"stream,omitempty"`        // who builds it; default: the plan's only stream
 	Map          string `json:"map,omitempty"`           // what the product shows differently, with reasons
@@ -46,6 +47,10 @@ func (d DesignRef) digest() string {
 	raw, _ := os.ReadFile(filepath.Join(d.Package, "manifest.json"))
 	_ = json.Unmarshal(raw, &manifest)
 	exceptions, _ := os.ReadFile(d.Map)
+	if d.Screen != "" {
+		screen, _ := os.ReadFile(filepath.Join(d.Screen, "screen.json"))
+		exceptions = append(exceptions, screen...)
+	}
 	return digest(map[string]any{"package": manifest.Digest, "map": string(exceptions), "url": d.URL, "root": d.Root, "viewport": d.Viewport})
 }
 
@@ -56,6 +61,10 @@ func (d DesignRef) dir() string {
 }
 
 func (d DesignRef) argv(extra ...string) []string {
+	if d.Screen != "" {
+		// A screen knows its page, its root and its exceptions, and its stand is started for it.
+		return append([]string{layoutCommand(), "layout", d.Screen}, extra...)
+	}
 	out := []string{layoutCommand(), "layout", d.Package, "--url", d.URL}
 	for flag, value := range map[string]string{"--root": d.Root, "--map": d.Map, "--storage-state": d.StorageState, "--locale": d.Locale, "--viewport": d.Viewport} {
 		if value != "" {
@@ -90,6 +99,15 @@ func (r *Resolved) validateDesign() error {
 	plan := r.Plan
 	for index := range plan.Design {
 		design := &plan.Design[index]
+		if design.Screen != "" {
+			if _, err := os.Stat(filepath.Join(design.Screen, "screen.json")); err != nil {
+				return fmt.Errorf("design %q is not a screen: screen.json is missing", design.Screen)
+			}
+			design.Package = filepath.Join(design.Screen, "package")
+			if exceptions := filepath.Join(design.Screen, "map.json"); design.Map == "" && fileExists(exceptions) {
+				design.Map = exceptions
+			}
+		}
 		if _, err := os.Stat(filepath.Join(design.Package, "data", "spec.json")); err != nil {
 			return fmt.Errorf("design %q is not a package written by `agentgate figma pull`", design.Package)
 		}
@@ -99,7 +117,9 @@ func (r *Resolved) validateDesign() error {
 		if !slices.ContainsFunc(plan.Streams, func(stream Stream) bool { return stream.Name == design.Stream }) {
 			return fmt.Errorf("design %q: say which stream builds it", design.Package)
 		}
-		if strings.HasPrefix(design.URL, "http") {
+		if design.Screen != "" {
+			// the screen's own files say where it is shown; the check reads them
+		} else if strings.HasPrefix(design.URL, "http") {
 			if _, err := standOrigins([]string{strings.SplitN(design.URL, "/", 4)[0] + "//" + strings.SplitN(design.URL, "/", 4)[2]}); err != nil {
 				return err
 			}
@@ -130,7 +150,7 @@ func (g *Gate) designBaselines() error {
 		cmd := exec.Command(argv[0], argv[1:]...)
 		cmd.Stdout, cmd.Stderr = &out, &out
 		if err := ops.Run(cmd, seconds(layoutTimeout)); err != nil {
-			return fmt.Errorf("the page of design %q could not be measured before the work — is the stand up at %s? %s", design.Package, design.URL, firstLine(strings.TrimSpace(out.String())))
+			return fmt.Errorf("the page of design %q could not be measured before the work: %s", design.Package, lastLine(strings.TrimSpace(out.String())))
 		}
 	}
 	return nil
@@ -144,9 +164,9 @@ func (g *Gate) designFor(stream string) any {
 			continue
 		}
 		out = append(out, map[string]any{"brief": filepath.Join(design.Package, "brief.md"), "picture": filepath.Join(design.Package, "frame.png"),
-			"assets": filepath.Join(design.Package, "assets"), "page": design.URL, "root": design.Root,
-			"check": strings.Join(design.check().Argv, " "),
-			"layer": "agentgate figma node " + design.Package + " <handle>"})
+			"assets": filepath.Join(design.Package, "assets"),
+			"check":  strings.Join(design.check().Argv, " "),
+			"layer":  "agentgate figma node " + design.Package + " <handle>"})
 	}
 	if out == nil {
 		return nil
@@ -175,6 +195,11 @@ func (g *Gate) designDigests() []string {
 		out = append(out, design.digest())
 	}
 	return out
+}
+
+func lastLine(text string) string {
+	lines := strings.Split(text, "\n")
+	return lines[len(lines)-1]
 }
 
 var errNoDesignSkill = errors.New("the design skill is not built in")

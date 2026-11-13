@@ -5,9 +5,13 @@ import path from 'node:path';
 import { openBrowser } from '../lib/browser.mjs';
 import { compare, defaults, summary } from '../lib/compare.mjs';
 import { diffImages, readPage, still } from '../lib/page-read.mjs';
+import { ensureStand, readScreen } from '../lib/stand.mjs';
 
 const usage = `usage:
-  check <package> --url <page> [--root <css>]   compare the page with a design package written by \`figma pull\`
+  layout <screen>                                compare a screen with its design: starts the stand when it is not running
+        [--keep]                 leave the stand running afterwards
+        [--record <gateway>]     start the stand against a real gateway and keep its answers as the screen's fixtures
+  layout <package> --url <page> [--root <css>]   compare any page with a design package written by \`figma pull\`
         --root <css>            the element that implements the pulled node (default: the whole document)
         [--storage-state <f>]   a browser session for the stand, as Playwright saves it
         [--wait <css>]          an element that must be there before anything is measured
@@ -31,11 +35,28 @@ const flags = {};
 const rest = [];
 for (let index = 2; index < process.argv.length; index++) {
   const value = process.argv[index];
-  if (value.startsWith('--')) flags[value.slice(2)] = process.argv[++index];
+  if (value === '--keep') flags.keep = true;
+  else if (value.startsWith('--')) flags[value.slice(2)] = process.argv[++index];
   else rest.push(value);
 }
-const dir = rest[0];
-if (!dir || !flags.url) fail(usage);
+let dir = rest[0];
+if (!dir) fail(usage);
+// A screen is a directory that knows its own page: nothing else has to be said.
+let screen = null;
+try {
+  screen = readScreen(dir);
+} catch (error) {
+  fail(error.message);
+}
+if (screen) {
+  dir = screen.package;
+  flags.url ??= screen.url;
+  flags.root ??= screen.screen.root;
+  flags.locale ??= screen.screen.locale;
+  flags.viewport ??= screen.screen.viewport;
+  flags.map ??= screen.map;
+}
+if (!flags.url) fail(usage);
 
 const read = (name) => {
   try {
@@ -54,11 +75,15 @@ const limits = { ...defaults };
 if (flags.tolerance) limits.position = limits.size = Number(flags.tolerance);
 const [width, height] = (flags.viewport || `${manifest.screen?.width || spec.frame.width}x${Math.min(manifest.screen?.height || 1080, 1200)}`).split('x').map(Number);
 
+let stopStand = async () => {};
+if (screen) {
+  stopStand = await ensureStand(rest[0], { record: flags.record, keep: flags.keep, log: (text) => console.error(`layout: ${text}`) }).catch((error) => fail(error.message));
+}
 const browser = await openBrowser();
 let code = 0;
 try {
   const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1, reducedMotion: 'reduce',
-    locale: flags.locale, storageState: flags['storage-state'] });
+    locale: flags.locale, storageState: flags['storage-state'] || screen?.storageState });
   const page = await context.newPage();
   await page.goto(flags.url, { waitUntil: 'load', timeout: 60000 }).catch((error) => fail(`the page did not open: ${String(error).split('\n')[0]}`));
   await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
@@ -120,5 +145,6 @@ try {
   code = result.issues.length || tooDifferent ? 1 : 0;
 } finally {
   await browser.close().catch(() => {});
+  if (!flags.keep) await stopStand();
 }
 process.exit(code);

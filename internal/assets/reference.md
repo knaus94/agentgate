@@ -71,17 +71,17 @@ after every accepted stage until the user says to go on.
   ],
   "ui": {"summary": "Show a truncation note", "criteria": ["Shown only when total > shown"], "preserve": ["Columns, navigation"]},
   "visual": {"enabled": false, "reason": "User chose code-based verification"},
-  "design": [{"package": "apps/web/testing/design/checkout/package", "url": "http://localhost:4200/checkout",
-              "root": "main .checkout", "stream": "web", "map": "apps/web/testing/design/checkout/map.json"}],
+  "design": [{"screen": "apps/web/testing/design/checkout", "stream": "web"}],
   "architecture": {"id": "<receipt id>", "base": "fable", "acceptance": "Your amendments to that design",
                    "blockers": {"astra/b1": "Resolved by ..."}}
 }
 ```
 
-`design` is for a stream that implements a Figma design: `package` is a directory written by
-`agentgate figma pull`, `url` the page of a local stand that shows the result, `root` the element that
-implements the pulled node, `map` the file of what the product shows differently (optional, as are
-`storage_state`, `locale`, `viewport`). The layout check is declared for you.
+`design` is for a stream that implements a Figma design. `screen` is a directory holding `screen.json`
+(`url`, `root`, optionally `locale`, `viewport`, `cookies`), `package/` written by `agentgate figma pull`,
+optionally `fixtures/` and `map.json`; next to the screens lies `stand.json`, which says once how the project's
+front end starts (`command`, `ready`, `env_file`, `graphql_env`). The stand is started and stopped for you and
+the layout check is declared for you. Without a screen, give `package`, `url` and `root` and keep the stand up.
 
 A staged plan has no top-level `streams`: it lists `requirements` and `stages`, and every requirement is
 covered by a stage. Each stage has `name`, `goal`, `covers`, `streams`, and optionally `acceptance`, `checks`

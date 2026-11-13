@@ -27,13 +27,13 @@ data into a brief: point at the package.
 
 ## In the plan
 
-- `design`: `[{package, url, root, stream, map}]`. The brief and the worker's rules go to that stream alone,
-  the layout check is declared for you, and the page is measured before the work: only what the task makes
-  worse blocks it. Nothing from `data/` goes anywhere.
+- `design`: `[{screen, stream}]`, a screen being a directory with `package/`, `screen.json` and `map.json`.
+  The brief and the worker's rules go to that stream alone, the stand is started and stopped for the check, and
+  the page is measured before the work: only what the task makes worse blocks it. Nothing from `data/` goes
+  anywhere.
 - `ui`: a local contract `{summary, criteria, preserve}` that names the package; no design pass is needed when
   the design exists.
-- The stand is running before `launch`, started by you with the user's approval of the commands. A page that
-  cannot be opened stops the launch.
+- The project's `stand.json` says how its front end starts. A page that cannot be opened stops the launch.
 - Browser verification by a model is for behaviour scenarios only. Layout is the check's job.
 
 ## After the writers
