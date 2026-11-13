@@ -125,10 +125,12 @@ func (r *Resolved) validateDesign() error {
 				return '-'
 			}, name), "-"))
 		}
-		made := design.Screen != "" && fileExists(filepath.Join(design.Screen, "screen.json"))
+		// A screen is made when it has both its description and its design; a link fills in what is missing.
+		made := design.Screen != "" && fileExists(filepath.Join(design.Screen, "screen.json")) &&
+			fileExists(filepath.Join(design.Screen, "package", "data", "spec.json"))
 		if design.Screen != "" {
 			if !made && design.Figma == "" {
-				return fmt.Errorf("design %q is not a screen: screen.json is missing", design.Screen)
+				return fmt.Errorf("design %q is not a screen: it needs screen.json and package/, or a `figma` link to make them from", design.Screen)
 			}
 			design.Package = filepath.Join(design.Screen, "package")
 			if exceptions := filepath.Join(design.Screen, "map.json"); design.Map == "" && fileExists(exceptions) {
@@ -173,7 +175,7 @@ func (g *Gate) designBaselines() error {
 			return err
 		}
 		// A design named by its link becomes a screen here, once: the lead pulls nothing by hand.
-		if design.Figma != "" && !fileExists(filepath.Join(design.Screen, "screen.json")) {
+		if design.Figma != "" && !fileExists(filepath.Join(design.Screen, "package", "data", "spec.json")) {
 			argv := []string{layoutCommand(), "layout", "new", design.Screen, design.Figma, "--url", design.URL, "--root", design.Root}
 			if design.Locale != "" {
 				argv = append(argv, "--locale", design.Locale)

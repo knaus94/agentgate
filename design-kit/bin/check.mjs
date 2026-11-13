@@ -53,7 +53,10 @@ if (rest[0] === 'new') {
   } catch {
     process.exit(1);
   }
-  fs.writeFileSync(path.join(target, 'screen.json'), JSON.stringify({ url: flags.url, root: flags.root, locale: flags.locale, viewport: flags.viewport }, null, 2) + '\n');
+  // A screen somebody described already keeps its description: only the design was missing.
+  if (!fs.existsSync(path.join(target, 'screen.json'))) {
+    fs.writeFileSync(path.join(target, 'screen.json'), JSON.stringify({ url: flags.url, root: flags.root, locale: flags.locale, viewport: flags.viewport }, null, 2) + '\n');
+  }
   const brief = fs.readFileSync(path.join(target, 'package', 'brief.md'), 'utf8');
   console.log(JSON.stringify({ screen: target, brief: path.join(target, 'package', 'brief.md'), brief_tokens_about: Math.round(Buffer.byteLength(brief) / 3.2) }, null, 2));
   process.exit(0);
@@ -112,6 +115,14 @@ try {
   await page.waitForTimeout(400);
 
   const seen = await page.evaluate(readPage, flags.root || '');
+  if (seen.error && flags['write-baseline']) {
+    // The page or its root is not there before the work: it is what the task builds.
+    fs.writeFileSync(flags['write-baseline'], JSON.stringify({ known: [] }) + '\n');
+    console.log(`design baseline: ${page.url()} does not show “${spec.frame.name}” yet`);
+    await browser.close().catch(() => {});
+    if (!flags.keep) await stopStand();
+    process.exit(0);
+  }
   if (seen.error) fail(`${seen.error} at ${page.url()}`);
   const result = compare(spec, seen, map, limits);
   if (result.compared === 0 && flags['write-baseline']) {
@@ -124,8 +135,13 @@ try {
   // A difference is known by the layer and what kind it is; how large it is may still change.
   const keyOf = (issue) => `${issue.ref}|${issue.kind}`;
   if (flags['write-baseline']) {
-    fs.writeFileSync(flags['write-baseline'], JSON.stringify({ known: result.issues.map(keyOf) }) + '\n');
-    console.log(`design baseline: ${result.issues.length} differences recorded`);
+    // A page that shows next to nothing of the design is not a screen with differences: it is not built, and
+    // nothing it lacks may count as known.
+    const built = result.compared >= result.total / 10;
+    fs.writeFileSync(flags['write-baseline'], JSON.stringify({ known: built ? result.issues.map(keyOf) : [] }) + '\n');
+    console.log(built ? `design baseline: ${result.issues.length} differences recorded` : `design baseline: the page shows ${result.compared} of ${result.total} layers — taken as not built yet`);
+    await browser.close().catch(() => {});
+    if (!flags.keep) await stopStand();
     process.exit(0);
   }
   if (flags.baseline) {

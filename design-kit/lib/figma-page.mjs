@@ -48,6 +48,10 @@ export async function exportNode({ nodeId, scales, svg }) {
   const render = async (settings) => base64(await node.loadImagesAndExport({
     exportSettings: [{ suffix: '', contentsOnly: true, useAbsoluteBounds: false, colorProfile: 'DOCUMENT', useBicubicSampler: true, ...settings }],
   }));
+  // A page or a section has no box and no picture of its own: only its description is returned, to say so.
+  if (!node.size || !node.absoluteBoundingBox || ['CANVAS', 'SECTION', 'DOCUMENT'].includes(node.type)) {
+    return { rest: { document: { id: nodeId, name: node.name, type: node.type } }, png: {}, screen: null };
+  }
   // The frame the node sits in is the width the screen was drawn for: the implementation is opened at that size.
   let top = node;
   while (top.parentNode && !['CANVAS', 'SECTION', 'DOCUMENT'].includes(top.parentNode.type)) top = top.parentNode;

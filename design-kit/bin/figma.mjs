@@ -166,6 +166,12 @@ async function pull(url, flags) {
   const scales = [...new Set([1, ...String(flags.scales || '').split(',').map(Number).filter((scale) => scale > 1 && scale <= 4)])];
   await withNode(url, flags.node, async (page, where, state) => {
     const data = await page.evaluate(exportNode, { nodeId: where.id, scales, svg: false });
+    if (!data.rest.document.absoluteBoundingBox) {
+      // A link copied from the page list or from a section points at something that has no picture of its own.
+      const listed = await page.evaluate(listFrames, where.id);
+      fail(`node ${where.id} is a ${String(data.rest.document.type).toLowerCase()} (“${data.rest.document.name}”), not a frame. Pull one of its frames with --node:\n` +
+        listed.rows.slice(0, 12).map((row) => `  ${row.id}  ${row.name}  ${row.width}×${row.height}`).join('\n'));
+    }
     const raw = JSON.stringify(data.rest);
     const variables = await page.evaluate(readVariables, [...new Set(raw.match(/VariableID:\d+:\d+/g) || [])]);
     const spec = buildSpec(data.rest, variables);
@@ -231,6 +237,10 @@ function node(dir, handle, flags) {
 
 const [command, ...argv] = process.argv.slice(2);
 const { flags, rest } = parse(argv);
+if (command === '--help' || command === 'help' || command === '-h') {
+  console.log(usage);
+  process.exit(0);
+}
 const commands = { login, status, frames: () => frames(rest[0]), pull: () => pull(rest[0], flags),
   node: async () => node(rest[0], rest[1], flags), 'import-cookies': () => importCookies(rest[0]) };
 if (!commands[command]) fail(usage, 2);

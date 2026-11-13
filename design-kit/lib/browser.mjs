@@ -56,13 +56,19 @@ export async function openProfile({ headless, channel }) {
   };
   const order = channel ? [channel] : ['chrome', 'chromium'];
   let failure;
-  for (const name of order) {
-    try {
-      const context = await chromium.launchPersistentContext(profileDir, { ...options, channel: name });
-      return { context, channel: name };
-    } catch (error) {
-      failure = error;
+  // One browser holds the profile at a time. Another command of this tool may be using it: that is a wait,
+  // not a failure.
+  for (const deadline = Date.now() + 120000; ;) {
+    for (const name of order) {
+      try {
+        const context = await chromium.launchPersistentContext(profileDir, { ...options, channel: name });
+        return { context, channel: name };
+      } catch (error) {
+        failure = error;
+      }
     }
+    if (!/ProcessSingleton|profile is already in use|SingletonLock/i.test(String(failure)) || Date.now() > deadline) break;
+    await new Promise((resolve) => setTimeout(resolve, 2000));
   }
   throw new Error(`no browser could open the Figma profile: ${String(failure).split('\n')[0]}`);
 }

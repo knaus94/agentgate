@@ -2,6 +2,15 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.9.10
+
+- **A page that does not exist yet can be designed.** Measuring before the work no longer fails when the page
+  or its root element is not there, and a page that shows next to nothing of the design is taken as not built:
+  nothing it lacks counts as known.
+- A screen that has its description but no design is completed from its `figma` link at launch.
+- A link to a Figma page or section, not a frame, is answered with the frames to choose from; two Figma
+  commands at once wait for each other instead of failing; `agentgate figma --help` is not an error.
+
 ## 0.9.9
 
 - A lead that meets a Figma link is told at once what to do with it — by the `$dev` skill, the `/dev`
