@@ -193,6 +193,13 @@ func TestSandboxBindsReadableDirectoriesBeforeTheWritableOnes(t *testing.T) {
 	if reader := strings.Join(Sandbox("/lane", false, nil, nil, []string{"tool"}), " "); strings.Count(reader, "--bind ") != 1 {
 		t.Fatalf("a reader's only writable path is its lane: %s", reader)
 	}
+	t.Setenv("HOME", t.TempDir())
+	if err := os.MkdirAll(PrivateDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if hidden := strings.Join(Sandbox("/lane", false, nil, nil, []string{"tool"}), " "); !strings.Contains(hidden, "--tmpfs "+PrivateDir()) {
+		t.Fatalf("what the tool keeps for the lead alone is covered: %s", hidden)
+	}
 }
 
 func TestCallRunsUnderTheChosenProfileAndKeepsItsLoginFresh(t *testing.T) {

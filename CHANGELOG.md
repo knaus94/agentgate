@@ -14,6 +14,9 @@
   start as new processes and read the code again. They now continue the session that designed; when it cannot
   be continued, a fresh architect is started as before.
 
+- **A private directory no worker sees.** A worker reads the host; `~/.local/share/agentgate/private` is now
+  covered in its sandbox, so a session kept there for the lead (a signed-in browser profile) stays the lead's.
+
 ## 0.9.1
 
 - **A staged plan is scouted stage by stage.** The architecture pass of a staged plan now runs one scout per

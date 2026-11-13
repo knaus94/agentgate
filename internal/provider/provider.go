@@ -145,6 +145,12 @@ func Sandbox(dir string, writer bool, readable, writable []string, argv []string
 	out := []string{"bwrap", "--ro-bind", "/", "/", "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/dev/shm",
 		"--unshare-pid", "--unshare-ipc", "--unshare-uts", "--new-session", "--die-with-parent",
 		"--tmpfs", "/tmp", "--tmpfs", "/run", "--ro-bind-try", "/run/systemd/resolve", "/run/systemd/resolve"}
+	// The host is readable, so what a worker must never read is covered: sessions the tool keeps for the lead.
+	if private := PrivateDir(); private != "" {
+		if info, err := os.Stat(private); err == nil && info.IsDir() {
+			out = append(out, "--tmpfs", private)
+		}
+	}
 	for _, extra := range readable {
 		out = append(out, "--ro-bind", extra, extra)
 	}
@@ -153,6 +159,15 @@ func Sandbox(dir string, writer bool, readable, writable []string, argv []string
 		out = append(out, "--bind", extra, extra)
 	}
 	return append(append(out, "--chdir", cwd, "--"), argv...)
+}
+
+// PrivateDir holds what belongs to the lead alone, such as a signed-in browser profile. No worker sees inside it.
+func PrivateDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".local", "share", "agentgate", "private")
 }
 
 func environment(extra ...string) []string {
