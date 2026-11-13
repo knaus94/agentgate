@@ -89,17 +89,16 @@ export async function ensureStand(dir, { record, keep, log = () => {} } = {}) {
   const { stand, fixtures } = readScreen(dir);
   if (await answers(stand.ready)) return async () => {};
   const root = repository(dir);
-  // `--record` by itself records from the backend the project names.
-  if (record === true) record = stand.graphql;
-  if (record === true) throw new Error('`--record` needs a gateway: give its URL, or name it as design.stand.graphql in .agentgate.json');
+  const env = { ...process.env, ...envFile(stand.env_file && path.join(root, stand.env_file)), ...(stand.env || {}) };
+  // `--record` by itself records from the backend the project's own environment names.
+  if (record === true) record = env[(stand.graphql_env || [])[0]];
+  if (!record && record !== undefined) throw new Error('`--record` found no backend: give its URL');
   const server = await serveFixtures({ dir: fixtures, port: 0, record });
   const endpoint = `http://127.0.0.1:${server.address().port}/graphql`;
-  const env = { ...process.env, ...envFile(stand.env_file && path.join(root, stand.env_file)), ...(stand.env || {}) };
   // Recorded answers stand in for the backend when there are any; a screen without them is shown by the
   // backend the project's own environment names.
   const recorded = fs.existsSync(fixtures) && fs.readdirSync(fixtures).some((name) => name.endsWith('.json'));
   if (recorded || record) for (const name of stand.graphql_env || []) env[name] = endpoint;
-  else if (stand.graphql) for (const name of stand.graphql_env || []) env[name] = stand.graphql;
   log(`starting the stand: ${stand.command.join(' ')}`);
   const child = spawn(stand.command[0], stand.command.slice(1), { cwd: root, env, detached: true, stdio: 'ignore' });
   const stop = async () => {

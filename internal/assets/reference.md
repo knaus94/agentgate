@@ -88,11 +88,11 @@ once per repository, in `.agentgate.json`:
 {"design": {"screens": "apps/web/testing/design",
             "stand": {"command": ["yarn", "dev"], "ready": "http://localhost:4200",
                       "env_file": ".env.local", "graphql_env": ["VITE_GRAPHQL_URL"],
-                      "graphql": "https://dev.example.com/graphql", "cookies": [{"name": "session", "value": "…"}]}}}
+                      "cookies": [{"name": "session", "value": "…"}]}}}
 ```
 
-`graphql_env` are the variables that point the front end at its backend: they get the screen's recorded
-answers when it has `fixtures/`, otherwise `graphql`.
+The front end starts with `env_file` as it always does. `graphql_env` are the variables that point it at its
+backend: when a screen has recorded answers in `fixtures/`, they are pointed at those instead.
 
 A staged plan has no top-level `streams`: it lists `requirements` and `stages`, and every requirement is
 covered by a stage. Each stage has `name`, `goal`, `covers`, `streams`, and optionally `acceptance`, `checks`

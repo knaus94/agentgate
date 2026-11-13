@@ -2,14 +2,19 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.9.6
+
+- `design.stand.graphql` is gone: the front end starts with its own environment file, which already names the
+  backend, and `--record` without an address records from that backend.
+
 ## 0.9.5
 
 - **A design is a link.** `design [{figma, url, root, stream}]` in a plan is enough: at launch the design is
   pulled into a screen directory and the page is measured. `agentgate layout new <screen> <figma-url> --url
   --root` does the same by hand.
 - **The stand is described in `.agentgate.json`,** under `design.stand`, not in a file beside the screens.
-  `graphql` names the backend a screen without recorded answers is shown by, and `--record` without an address
-  records from it.
+  A screen without recorded answers is shown by the backend the project's environment names, and `--record`
+  without an address records from it.
 
 ## 0.9.4
 
