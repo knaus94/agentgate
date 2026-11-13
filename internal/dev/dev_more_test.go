@@ -594,7 +594,7 @@ func TestRouteAndPreviewStartNothing(t *testing.T) {
 	routed, err := Route(f.cfg, plan)
 	must(t, err)
 	raw, _ := json.Marshal(routed)
-	for _, want := range []string{`"mode":"heavy"`, `"api":"opus:high"`, `"web":"astra:high"`, `[["api"],["web"]]`, `"read_only":true`, "opus:high", `"scout":"sol:medium"`} {
+	for _, want := range []string{`"mode":"heavy"`, `"api":"opus:high"`, `"web":"astra:high"`, `[["api"],["web"]]`, `"read_only":true`, "opus:high", `"scout":"none: the accepted design"`} {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("route lacks %s: %s", want, raw)
 		}
@@ -683,6 +683,9 @@ func TestDoctorReportsWhatIsMissing(t *testing.T) {
 
 func TestScoutGathersContextOnceForEveryWorker(t *testing.T) {
 	f := newFixture(t)
+	heavy := f.cfg.Modes["heavy"]
+	heavy.Scout = "sol:medium" // off by default where architects design; a repository may turn it on
+	f.cfg.Modes["heavy"] = heavy
 	seen := map[string]bool{}
 	f.model = func(kind string, packet map[string]any, call provider.Call) (string, error) {
 		if pack, _ := packet["context_pack"].(string); pack != "" {
@@ -701,13 +704,16 @@ func TestScoutGathersContextOnceForEveryWorker(t *testing.T) {
 	}
 	plan := f.plan("-h change the contract")
 	receipt := f.do("architecture", func() (any, error) { return Architecture(f.cfg, plan) })
+	if f.count("scout") != 0 || seen["architecture"] {
+		t.Fatal("architects read the code themselves: no scout runs for them")
+	}
 	plan.Architecture = &Accepted{ID: receipt["id"].(string), Acceptance: "accepted"}
 	f.launch(plan)
 	f.review()
 	if f.count("scout") != 1 {
-		t.Fatalf("the design pass and the writers share one scouting run, ran %d", f.count("scout"))
+		t.Fatalf("the writers and the reviewers share one scouting run, ran %d", f.count("scout"))
 	}
-	for _, kind := range []string{"architecture", "writer", "review"} {
+	for _, kind := range []string{"writer", "review"} {
 		if !seen[kind] {
 			t.Errorf("the %s did not receive the context pack", kind)
 		}

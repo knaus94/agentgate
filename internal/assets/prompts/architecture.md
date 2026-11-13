@@ -6,10 +6,6 @@ Return JSON matching the supplied schema.
 Read the packet, the applicable repository instructions (AGENTS.md / CLAUDE.md), the listed files and the closest
 existing implementation of the same kind. Expand beyond the packet only for a concrete unresolved dependency.
 
-`context_pack`, when present, is a map of this area prepared by a scout: the files that matter, who calls them,
-the invariants and the conventions. Start from it instead of exploring from scratch. It can be wrong or
-incomplete: verify what you rely on, and read further only where the task needs it.
-
 ## Round: design
 
 Another architect designs the same change independently and in parallel; you will not see its work.
@@ -27,6 +23,8 @@ transaction and concurrency protections.
 ## Round: critique
 
 `design_under_review` is the other architect's design. Look for what would make it fail in this repository.
+You may be continuing the session in which you designed the same change: you know this code, so check the
+other design against it, not against your own. A difference from your design is not a defect.
 
 - `blockers`: only evidenced architectural defects: a broken invariant, a missed caller, a race, a contract that
   cannot be implemented as described, an unjustified abstraction that costs maintenance. Each needs a stable

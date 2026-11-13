@@ -35,6 +35,7 @@ type ArchLane struct {
 	Round   string       `json:"round"` // design, critique or revision
 	Route   config.Route `json:"route"`
 	Session string       `json:"session"`
+	Dir     string       `json:"dir,omitempty"` // where the session lives, so a later round can continue it
 	Report  archReport   `json:"report"`
 }
 
@@ -50,7 +51,6 @@ type Receipt struct {
 	Design        *uiDesign               `json:"design,omitempty"`
 	Route         *config.Route           `json:"route,omitempty"`
 	Revision      int                     `json:"revision,omitempty"`
-	ScoutNote     string                  `json:"scout_note,omitempty"`
 	Dir           string                  `json:"dir"`
 }
 
@@ -99,7 +99,8 @@ var critiqueSchema = object(map[string]any{"summary": text, "agreements": text,
 	"blockers": list(object(map[string]any{"id": text, "evidence": text, "remedy": text}))})
 
 // Architecture runs the mode's design passes. Independent designs run in parallel on different pools;
-// in ultra each architect then looks for blockers in the other's design.
+// in ultra each architect then looks for blockers in the other's design. A critique and a revision continue
+// the session of the architect that already read the code, instead of paying for that reading again.
 func Architecture(cfg *config.Config, plan *Plan) (any, error) {
 	resolved, err := Resolve(cfg, plan)
 	if err != nil {
@@ -121,16 +122,11 @@ func Architecture(cfg *config.Config, plan *Plan) (any, error) {
 	receipt := &Receipt{ID: newID(), Kind: "architecture", Fingerprint: resolved.fingerprint(), Mode: resolved.Mode}
 	receipt.Dir = filepath.Join(designsDir(), receipt.ID)
 	subs := &substitutions{}
-	pack, note := scout(resolved, subs)
-	if note == "cancelled" {
-		return nil, ops.Checkpoint()
-	}
-	packet := map[string]any{"brief": plan.Brief, "files": plan.Files(), "streams": plan.allStreams(), "context": plan.Context, "ui": ui,
-		"context_pack": pack}
+	packet := map[string]any{"brief": plan.Brief, "files": plan.Files(), "streams": plan.allStreams(), "context": plan.Context, "ui": ui}
 	if plan.staged() {
 		packet["requirements"], packet["stages"] = plan.Requirements, plan.Stages
 	}
-	run := func(round, name string, route config.Route, extra map[string]any, schema any) (ArchLane, error) {
+	run := func(round, name string, route config.Route, extra map[string]any, schema any, from *ArchLane) (ArchLane, error) {
 		body := map[string]any{"round": round}
 		for key, value := range packet {
 			body[key] = value
@@ -150,12 +146,29 @@ func Architecture(cfg *config.Config, plan *Plan) (any, error) {
 		}
 		tools, toolDirs, toolNote := workerTools(cfg, "architect")
 		prompt := assets.Prompt("architecture") + "\nYour round: " + round + ". Read the packet at " + filepath.Join(dir, "packet.json") + ".\n" + toolNote
-		result, used, err := subs.invoke(cfg, provider.Call{Route: route, Prompt: prompt, Dir: dir, Schema: schema, Timeout: timeout,
-			ReadDirs: packDirs(pack), MCP: tools, Writable: toolDirs}, nil)
-		if err != nil {
-			return lane, err
+		call := provider.Call{Route: route, Prompt: prompt, Dir: dir, Schema: schema, Timeout: timeout, MCP: tools, Writable: toolDirs, Persist: true}
+		var result provider.Result
+		var used config.Route
+		err := errors.New("no session to continue")
+		if from != nil && from.Session != "" && dirExists(from.Dir) {
+			again := call
+			again.Dir, again.Resume, again.ReadDirs = from.Dir, from.Session, []string{dir}
+			again.Route = from.Route // the model and the account the session belongs to
+			again.Route.Effort, again.Route.SubstitutedFrom = route.Effort, ""
+			again.Prompt = "Your next round: " + round + ". Its rules are in your first instructions. Read the packet at " +
+				filepath.Join(dir, "packet.json") + " and return JSON matching the schema of this turn.\n" + toolNote
+			if result, used, err = subs.invoke(cfg, again, nil); err == nil {
+				dir = from.Dir
+			} else if ops.IsCancelled(err) || errors.Is(err, ops.ErrTimeout) {
+				return lane, err
+			}
 		}
-		lane = ArchLane{Round: round, Route: used, Session: result.Session}
+		if err != nil { // nothing to continue, or the session could not be continued: a fresh architect
+			if result, used, err = subs.invoke(cfg, call, nil); err != nil {
+				return lane, err
+			}
+		}
+		lane = ArchLane{Round: round, Route: used, Session: result.Session, Dir: dir}
 		if err := decode(result.Answer, &lane.Report); err != nil {
 			return lane, err
 		}
@@ -178,7 +191,7 @@ func Architecture(cfg *config.Config, plan *Plan) (any, error) {
 	}
 	designs := make([]ArchLane, len(routes))
 	errs := parallel(len(routes), len(routes), func(index int) (err error) {
-		designs[index], err = run("design", fmt.Sprintf("design-%d", index), routes[index], nil, designSchema)
+		designs[index], err = run("design", fmt.Sprintf("design-%d", index), routes[index], nil, designSchema, nil)
 		return err
 	})
 	if err := firstError(errs); err != nil {
@@ -192,7 +205,7 @@ func Architecture(cfg *config.Config, plan *Plan) (any, error) {
 			critic := routes[index]
 			critic.Effort = config.Lower(critic.Effort) // judging one finished design takes less than producing one
 			critiques[index], err = run("critique", fmt.Sprintf("critique-%d", index), critic,
-				map[string]any{"design_under_review": other}, critiqueSchema)
+				map[string]any{"design_under_review": other}, critiqueSchema, &designs[index])
 			return err
 		})
 		if err := firstError(errs); err != nil {
@@ -200,13 +213,13 @@ func Architecture(cfg *config.Config, plan *Plan) (any, error) {
 		}
 		receipt.Lanes = append(receipt.Lanes, critiques...)
 	}
-	receipt.Substitutions, receipt.ScoutNote = subs.list, note
+	receipt.Substitutions = subs.list
 	return receipt, receipt.save()
 }
 
 // revise lets the first architect address the blockers the lead verified. One round only:
 // what is still open after it is a decision for the lead or the user, not another model pass.
-func revise(resolved *Resolved, receipt *Receipt, run func(string, string, config.Route, map[string]any, any) (ArchLane, error)) (any, error) {
+func revise(resolved *Resolved, receipt *Receipt, run func(string, string, config.Route, map[string]any, any, *ArchLane) (ArchLane, error)) (any, error) {
 	plan := resolved.Plan
 	previous, err := loadReceipt(plan.Revise, "architecture")
 	if err != nil {
@@ -231,7 +244,11 @@ func revise(resolved *Resolved, receipt *Receipt, run func(string, string, confi
 		return nil, errors.New("revise_blockers lists the blockers the lead verified against the code")
 	}
 	primary := resolved.Config.MustRoute(resolved.ModeConfig().Architecture[0])
-	lane, err := run("revision", "revision", primary, map[string]any{"prior": previous.Lanes, "verified_blockers": chosen}, designSchema)
+	var designed *ArchLane
+	if len(previous.Lanes) > 0 && previous.Lanes[0].Round == "design" {
+		designed = &previous.Lanes[0]
+	}
+	lane, err := run("revision", "revision", primary, map[string]any{"prior": previous.Lanes, "verified_blockers": chosen}, designSchema, designed)
 	if err != nil {
 		return nil, err
 	}

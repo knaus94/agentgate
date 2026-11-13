@@ -42,8 +42,8 @@ and the tool computes the mode:
 | ultra | a named risk that is irreversible, or a severe risk in complex work | two designs + cross-critique | three axes |
 
 Each mode also fixes the model and reasoning effort of every role; `agentgate modes` prints the table.
-Effort is a budget. Above light, a cheap scout maps the code once and every worker starts from that pack, so
-do not ask workers to explore. Base efforts are deliberately moderate; more is earned: a correction that
+Effort is a budget. Workers start from what is already known — in medium a cheap scout's map of the code, in
+heavy and ultra the design you accepted — so do not ask them to explore. Base efforts are deliberately moderate; more is earned: a correction that
 stalls is raised one step automatically, and you may raise one genuinely hard stream with `effort` or pass
 `escalate` to `fix`. Do not raise effort because a task feels important — that is what the mode is for.
 
@@ -84,9 +84,9 @@ apply to it; `finish` accepts the stage and opens the next one — `launch` agai
 
 ## 3. Design (heavy, ultra)
 
-Accept any UI contract first (section 7), then `agentgate architecture --file plan.json`. A scout maps the
-code once, then two architects design independently; in ultra each also looks for blockers in the other's
-design. You decide: pick the design to build on (`base`, a model alias) and write `acceptance` — your
+Accept any UI contract first (section 7), then `agentgate architecture --file plan.json`. Two architects
+read the code and design independently; in ultra each then looks for blockers in the other's design, in its
+own session. You decide: pick the design to build on (`base`, a model alias) and write `acceptance` — your
 amendments, including what you take from the other design. Writers and reviewers receive that one design as
 amended by your acceptance, never both, so the acceptance must be complete enough to follow. Check every
 blocker against the code and answer each in `blockers` (how it is resolved, or why it is wrong). One optional

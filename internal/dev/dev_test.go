@@ -506,6 +506,15 @@ func TestUltraRequiresAnAnswerForEveryBlocker(t *testing.T) {
 	if f.count("architecture") != 4 {
 		t.Fatalf("ultra runs two designs and two critiques, ran %d", f.count("architecture"))
 	}
+	sessions := map[string]string{}
+	for _, call := range f.calls[:2] {
+		sessions[call.Dir] = call.Route.Alias
+	}
+	for _, call := range f.calls[2:] {
+		if call.Resume == "" || sessions[call.Dir] != call.Route.Alias || call.Route.Effort != "high" {
+			t.Fatalf("a critique continues the session of the architect that read the code, one step lower: %+v", call.Route)
+		}
+	}
 	plan.Architecture = &Accepted{ID: receipt["id"].(string), Acceptance: "accepted"}
 	f.fails("launch", "blocker", func() (any, error) { return Launch(f.cfg, plan) })
 	plan.Architecture.Blockers = map[string]string{"fable/race": "resolved by the lock", "astra/race": "same root cause"}

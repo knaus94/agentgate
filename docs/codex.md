@@ -52,7 +52,7 @@ instead of failing somewhere deep.
 
 | | light | medium | heavy | ultra |
 |---|---|---|---|---|
-| Context | the lead's own | scout `terra:medium` | scout `terra:medium` | scout `terra:high` |
+| Context | the lead's own | scout `terra:medium` | the accepted design | the accepted design |
 | Architect | the lead | the lead | `astra:high` ∥ `sol:xhigh` | `astra:max` ∥ `sol:max`, then cross-critique |
 | Writers | `sol:medium` | `astra:medium` | `astra:high` | `astra:high` |
 | Review: architecture + simplicity | the lead | `sol:high` | `sol:xhigh` | `sol:xhigh` |

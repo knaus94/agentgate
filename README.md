@@ -16,7 +16,7 @@ the task while a review, a check or a blocking finding is outstanding.
 ```
 /dev [-l|-m|-h|-x] <task>
    │
-   ├─ scout      a cheap model maps the code once; every later worker starts from that map
+   ├─ scout      medium: a cheap model maps the code once for the writers and the reviewers
    ├─ design     heavy, ultra: two independent designs in parallel; the lead accepts one
    ├─ write      one sandboxed writer per stream, wave by wave; writers run the declared checks themselves
    ├─ check      the declared checks run first — reviewers are never paid to read code that fails them
@@ -48,7 +48,7 @@ undone, uncertainty — and the mode follows from a fixed rule table. A flag alw
 | | light `-l` | medium `-m` | heavy `-h` | ultra `-x` |
 |---|---|---|---|---|
 | Chosen when | trivial, ≤3 files, no risk | ordinary work | a named risk, or complex and uncertain | an irreversible risk, or a severe risk in complex work |
-| Context | the lead's own | scout `sol:medium` | scout `sol:medium` | scout `sol:high` |
+| Context | the lead's own | scout `sol:medium` | the accepted design | the accepted design |
 | Architect | the lead | the lead | `fable:high` ∥ `astra:high` | `fable:xhigh` ∥ `astra:xhigh`, then cross-critique |
 | Backend writer | `sol:medium` | `opus:medium` | `opus:high` | `opus:xhigh` |
 | Frontend writer | `sonnet:medium` | `opus:medium` | `astra:high` | `astra:xhigh` |
@@ -61,8 +61,9 @@ undone, uncertainty — and the mode follows from a fixed rule table. A flag alw
 Each cell is `model:effort`. Two rules run through the table:
 
 - **The strongest model the mode can afford creates; the other frontier models verify.**
-- **Effort is spent where it pays.** A cheap scout reads the repository once, so the expensive models reason
-  instead of exploring. Medium runs every model at the level its vendor ships as default, heavy one step
+- **Effort is spent where it pays.** A later round continues the session that already read the code — a
+  critique and a revision the architect's, a correction the writer's, a recheck the reviewer's — instead of
+  reading it again. Medium runs every model at the level its vendor ships as default, heavy one step
   above, ultra two. `max` is never a default: it is reached only when a correction stalls or the lead raises
   one hard stream. A recheck after a fix runs one step lower and only on the lanes with something to verify.
 

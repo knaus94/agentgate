@@ -73,7 +73,7 @@
       "escalate_to": "high"
     },
     "heavy": {
-      "scout": "terra:medium",
+      "scout": "",
       "architecture": [
         "astra:high",
         "sol:xhigh"
@@ -104,7 +104,7 @@
       "escalate_to": "max"
     },
     "ultra": {
-      "scout": "terra:high",
+      "scout": "",
       "architecture": [
         "astra:max",
         "sol:max"

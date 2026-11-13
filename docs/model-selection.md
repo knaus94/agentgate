@@ -104,7 +104,7 @@ reads, and a review spends far fewer output tokens than writing.
 
 **6. Light stays cheap, and Sol reads for everyone.** Sol is 5–10× cheaper per task and the fastest; for an
 exact change of a few lines that is the right trade, and the lead reads the diff itself. Front-end in light
-goes to Sonnet. The same qualities make Sol the scout in every other mode.
+goes to Sonnet. The same qualities make Sol the scout in medium.
 
 **7. The security lane runs on Astra.** Claude models route or decline some security-flavoured requests through
 safety classifiers; a review lane that can be declined is not a dependable gate.
@@ -113,7 +113,7 @@ safety classifiers; a review lane that can be declined is not a dependable gate.
 
 | | light | medium | heavy | ultra |
 |---|---|---|---|---|
-| Context | the lead's own | scout `sol:medium` | scout `sol:medium` | scout `sol:high` |
+| Context | the lead's own | scout `sol:medium` | the accepted design | the accepted design |
 | Architect | the lead | the lead | `fable:high` ∥ `astra:high` | `fable:xhigh` ∥ `astra:xhigh`, then cross-critique |
 | Backend writer | `sol:medium` | `opus:medium` | `opus:high` | `opus:xhigh` |
 | Frontend writer | `sonnet:medium` | `opus:medium` | `astra:high` | `astra:xhigh` |
@@ -144,7 +144,10 @@ Codex, with the parallel design and review phases split across them.
   demonstrably stalled, which is the "measurement shows headroom" condition Anthropic sets for it.
 - **Reading is cheap work.** Anthropic's own guidance is to move reading-heavy sub-tasks to a cheaper worker.
   The scout runs on Sol — the cheapest and fastest of the five, with the largest default context — and a
-  recheck, which reads only a delta, runs one step below the review.
+  recheck, which reads only a delta, runs one step below the review. A map does not save an expensive worker
+  its own reading, though. In our run of one design pass with the scout's map and without it, Fable opened 36
+  files both times and took 324 seconds with the map against 304 without; Astra took 204 against 153. So
+  architects get no map, and heavy and ultra, where the accepted design plays that part, have no scout.
 
 ## What the data does not show
 

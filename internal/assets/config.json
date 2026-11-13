@@ -112,7 +112,7 @@
       "escalate_to": "high"
     },
     "heavy": {
-      "scout": "sol:medium",
+      "scout": "",
       "architecture": [
         "fable:high",
         "astra:high"
@@ -146,7 +146,7 @@
       "escalate_to": "xhigh"
     },
     "ultra": {
-      "scout": "sol:high",
+      "scout": "",
       "architecture": [
         "fable:xhigh",
         "astra:xhigh"

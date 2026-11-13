@@ -2,10 +2,8 @@ package dev
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/knaus94/agentgate/internal/assets"
@@ -27,8 +25,9 @@ type packCaller struct {
 	Note   string `json:"note"`
 }
 
-// contextPack is the map of the code a task touches, gathered once by a cheap model and handed to every
-// later worker, so the expensive ones spend their effort on reasoning instead of on reading.
+// contextPack is the map of the code a task touches, gathered once by a cheap model and handed to the
+// writers and the reviewers. Architects do not get one: they read the code themselves whatever they are
+// handed, and in the modes that have them the accepted design is the map.
 type contextPack struct {
 	Summary     string       `json:"summary"`
 	Files       []packFile   `json:"files"`
@@ -47,96 +46,14 @@ var scoutSchema = object(map[string]any{"summary": text,
 const scoutTimeout = 600
 
 // scout returns the path of the task's context pack, gathering it on first use. The pack is keyed by the
-// contract, so the design pass and the writers of the same task share one. A mode without a scout route
-// returns "". A scout that fails is reported and skipped: a cheap convenience never blocks the task.
-//
-// A staged plan is mapped stage by stage, in parallel, and the maps are joined: one scout does not get through
-// the whole of a large specification in its time, and the first stage later finds its own map already made.
+// contract, so a task launched again finds it made. A mode without a scout route returns "". A scout that
+// fails is reported and skipped: a cheap convenience never blocks the task.
 func scout(resolved *Resolved, subs *substitutions) (string, string) {
-	plan := resolved.Plan
-	if resolved.ModeConfig().Scout == "" || !plan.staged() {
-		return scoutPlan(resolved, plan, subs)
-	}
-	packs, notes := make([]*contextPack, len(plan.Stages)), make([]string, len(plan.Stages))
-	parallel(len(plan.Stages), resolved.Config.MaxParallel, func(index int) error {
-		path, note := scoutPlan(resolved, plan.stageView(index, nil), subs)
-		if raw, err := os.ReadFile(path); path != "" && (err != nil || json.Unmarshal(raw, &packs[index]) != nil) {
-			packs[index], note = nil, "the context pack could not be read"
-		}
-		notes[index] = note
-		return nil
-	})
-	if slices.Contains(notes, "cancelled") {
-		return "", "cancelled"
-	}
-	joined, note := joinPacks(plan.Stages, packs, notes)
-	if joined == nil {
-		return "", note
-	}
-	// Named by what it holds, so a gate keeps reading the pack it was given.
-	path := filepath.Join(checkoutDir(""), "scout", digest(joined)[:32], "pack.json")
-	if err := writePacket(path, joined); err != nil {
-		return "", err.Error()
-	}
-	return path, note
-}
-
-// joinPacks makes one pack of the stages' maps. A stage whose scout failed is named in the note and in the
-// pack's unknowns, and the rest is still used.
-func joinPacks(stages []Stage, packs []*contextPack, notes []string) (*contextPack, string) {
-	out := &contextPack{}
-	var summaries, failed []string
-	at := map[string]int{}
-	add := func(to *[]string, lines []string) {
-		for _, line := range lines {
-			if !slices.Contains(*to, line) {
-				*to = append(*to, line)
-			}
-		}
-	}
-	for index, pack := range packs {
-		if pack == nil {
-			failed = append(failed, fmt.Sprintf("stage %s: %s", stages[index].Name, notes[index]))
-			continue
-		}
-		if out.Route.Alias == "" {
-			out.Route = pack.Route
-		}
-		summaries = append(summaries, stages[index].Name+": "+pack.Summary)
-		for _, file := range pack.Files {
-			if seen, ok := at[file.Path]; ok {
-				add(&out.Files[seen].Symbols, file.Symbols)
-				continue
-			}
-			at[file.Path] = len(out.Files)
-			out.Files = append(out.Files, file)
-		}
-		for _, caller := range pack.Callers {
-			if !slices.Contains(out.Callers, caller) {
-				out.Callers = append(out.Callers, caller)
-			}
-		}
-		add(&out.Invariants, pack.Invariants)
-		add(&out.Conventions, pack.Conventions)
-		add(&out.Unknowns, pack.Unknowns)
-	}
-	note := strings.Join(failed, "; ")
-	if len(summaries) == 0 {
-		return nil, note
-	}
-	out.Summary = strings.Join(summaries, "\n")
-	for _, line := range failed {
-		out.Unknowns = append(out.Unknowns, "not mapped — "+line)
-	}
-	return out, note
-}
-
-// scoutPlan maps one plan, or one stage seen as a plan.
-func scoutPlan(resolved *Resolved, plan *Plan, subs *substitutions) (string, string) {
 	spec := resolved.ModeConfig().Scout
 	if spec == "" {
 		return "", ""
 	}
+	plan := resolved.Plan
 	key := digest(map[string]any{"brief": plan.Brief, "files": plan.Files(), "context": plan.Context, "route": spec})
 	dir := filepath.Join(checkoutDir(""), "scout", key[:32]) // shared by the sessions of a checkout, like designs
 	path := filepath.Join(dir, "pack.json")

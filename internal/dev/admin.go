@@ -57,6 +57,9 @@ func modeTable(cfg *config.Config, name string) map[string]any {
 	scout := mode.Scout
 	if scout == "" {
 		scout = "the lead's own context"
+		if len(mode.Architecture) > 0 {
+			scout = "none: the accepted design"
+		}
 	}
 	return map[string]any{"scout": scout, "design": design, "backend": mode.Backend, "frontend": mode.Frontend, "review": review,
 		"blocking": mode.Blocking, "escalate_to": mode.EscalateTo}

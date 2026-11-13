@@ -51,8 +51,9 @@ installed. `worker_mcp` hands chosen roles chosen tools all the same.
 | `refresh` | a command run in the checkout once per operation, before the server's first use, to bring its index up to date |
 | `writable` | directories of the checkout the server has to write (a cache); read-only workers get them writable |
 
-The default role is the scout alone: it maps the code once, and what it learns reaches every other worker
-through the context pack. Give a tool to reviewers when "who else calls this" is the question they keep asking;
+The default role is the scout alone: it maps the code once, and what it learns reaches the writers and the
+reviewers through the context pack. Heavy and ultra have no scout by default, so name `architect` for a tool
+the design pass should have. Give a tool to reviewers when "who else calls this" is the question they keep asking;
 give writers a tool only when they cannot work without it.
 
 Two things to know. The sandbox is read-only for everyone but writers, so a server that builds its index on

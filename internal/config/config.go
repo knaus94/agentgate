@@ -78,7 +78,7 @@ type WorkerMCP struct {
 var Roles = []string{"scout", "architect", "writer", "reviewer", "consultant", "designer"}
 
 // RolesOrDefault is who gets the server: the scout alone unless the configuration says otherwise, because
-// what the scout learns reaches every other worker through the context pack.
+// what the scout learns reaches the writers and the reviewers through the context pack.
 func (w WorkerMCP) RolesOrDefault() []string {
 	if len(w.Roles) == 0 {
 		return []string{"scout"}

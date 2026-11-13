@@ -2,6 +2,18 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.9.2
+
+- **Architects read the code themselves.** A design pass no longer waits for a scout or receives its map: in a
+  measured pass the architects opened the same files with the map and without it, and the map only cost the
+  wait. The stage-by-stage scouting of 0.9.1 goes with it.
+- **Heavy and ultra have no scout by default.** There the design the lead accepted is what writers and
+  reviewers start from. Medium keeps its scout. `agentgate config set modes.heavy.scout sol:medium` brings one
+  back for the writers and the reviewers of a mode.
+- **A critique and a revision continue the architect's session.** The critic in ultra and the reviser used to
+  start as new processes and read the code again. They now continue the session that designed; when it cannot
+  be continued, a fresh architect is started as before.
+
 ## 0.9.1
 
 - **A staged plan is scouted stage by stage.** The architecture pass of a staged plan now runs one scout per

@@ -7,7 +7,7 @@
 | Role | Who | Can do |
 |---|---|---|
 | Lead | your Claude Code or Codex session | everything a normal session can: your MCP servers, plugins and skills stay available |
-| Scout | a fresh, cheap model process | read the repository once, return a context pack |
+| Scout | a fresh, cheap model process | medium: read the repository once, return a context pack for the writers and the reviewers |
 | Architect | a fresh model process | read the repository, return a design |
 | Writer | a fresh model process, one per stream | edit the files of its stream |
 | Reviewer | a fresh model process | read the diff, return findings |
@@ -22,8 +22,8 @@ Every stage exists because skipping it costs more than running it.
 | # | Stage | Who | Why it is there |
 |---|---|---|---|
 | 1 | Brief | the lead | Someone has to decide what is being built; this is the only stage that talks to the user |
-| 2 | Scout | one cheap model, once; a staged plan gets one per stage, in parallel | Otherwise every worker explores the repository by itself, at its own effort. Skipped in light |
-| 3 | Design | two top models, independently | Heavy and ultra only. Two designs take the time of one and show where the real decision is. The lead accepts one |
+| 2 | Scout | one cheap model, once | Medium only: nobody designs there, so writers and reviewers start from its map. Architects read the code themselves, and in heavy and ultra the accepted design is the map |
+| 3 | Design | two top models, independently | Heavy and ultra only. Two designs take the time of one and show where the real decision is. The lead accepts one. A critique (ultra) and a revision continue the architect's own session: the code is already read |
 | 4 | Write | one writer per stream | Writers run the declared checks themselves, so the first thing the gate sees is code its author already tested |
 | 5 | Check | the declared commands | Runs before any reviewer. Seconds, against minutes and quota: code that fails its checks is not reviewed |
 | 6 | Review | models that did not write the code | The independent judgement. Two vendors in every mode above light |
@@ -145,7 +145,7 @@ disk and nothing depends on a daemon staying alive.
 
 | Channel | From → to | Mechanism |
 |---|---|---|
-| Context pack | scout → everyone | one JSON map of the area: files and their roles, callers, invariants, conventions. Gathered once per contract by a cheap model and named in every later packet |
+| Context pack | scout → writers, reviewers | one JSON map of the area: files and their roles, callers, invariants, conventions. Gathered once per contract by a cheap model, in the modes that have a scout, and named in every later packet |
 | Assignment | lead → writer | one JSON packet: brief, the stream's files, context, accepted design. Files are named, never copied |
 | Report | writer → lead | fixed schema: status, summary, blockers, deviations, handoff |
 | Handoff | writer → writer | the contract a stream actually implemented, delivered in the assignment of the streams that come `after` it |
@@ -171,7 +171,6 @@ Each model alias belongs to a *pool* — the subscription or quota it draws from
 are routed to different pools by the mode table, so they do not compete for one limit:
 
 ```
-heavy scout      sol:medium (pool codex), once
 heavy design     fable:high (pool fable)   ∥  astra:high (pool codex)
 heavy writers    opus:high  (pool claude), one per stream
 heavy review     fable:high (pool fable)   ∥  astra:high (pool codex)

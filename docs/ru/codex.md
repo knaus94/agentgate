@@ -52,7 +52,7 @@ prefix_rule(pattern=["agentgate"], decision="allow")
 
 | | light | medium | heavy | ultra |
 |---|---|---|---|---|
-| Контекст | собственный у лида | разведчик `terra:medium` | разведчик `terra:medium` | разведчик `terra:high` |
+| Контекст | собственный у лида | разведчик `terra:medium` | принятый дизайн | принятый дизайн |
 | Архитектор | лид | лид | `astra:high` ∥ `sol:xhigh` | `astra:max` ∥ `sol:max`, затем перекрёстная критика |
 | Писатели | `sol:medium` | `astra:medium` | `astra:high` | `astra:high` |
 | Ревью: архитектура + простота | лид | `sol:high` | `sol:xhigh` | `sol:xhigh` |

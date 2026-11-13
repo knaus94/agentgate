@@ -38,7 +38,7 @@ not a risk; it is ordinary work, and ordinary work is medium.
 
 | | light | medium | heavy | ultra |
 |---|---|---|---|---|
-| Context pack | the lead's own context | scout `sol:medium` | scout `sol:medium` | scout `sol:high` |
+| Context pack | the lead's own context | scout `sol:medium` | none: the accepted design | none: the accepted design |
 | Architects | the lead | the lead | `fable:high` ∥ `astra:high`, independent, in parallel | `fable:xhigh` ∥ `astra:xhigh`, then each critiques the other at `high` |
 | Blocker round | — | — | optional, once | optional, once |
 | Backend writer | `sol:medium` | `opus:medium` | `opus:high` | `opus:xhigh` |
@@ -57,11 +57,13 @@ models verify.** [Why these models](model-selection.md) shows the data.
 
 Reasoning effort is the main cost dial, and usage limits are finite. Four rules keep it where it pays.
 
-**1. A scout reads so the others do not have to.** Without it, every worker explores the repository on its
-own — in ultra that would be two architects, the writers and four reviewers, each at high effort. The scout is
-one cheap, fast process that maps the area once: which files matter and why, who calls them, the invariants,
-the conventions. Every later worker starts from that map and verifies what it relies on. The pack is keyed by
-the contract, so the design pass and the writers share one.
+**1. Code is read once, and a later round continues that reading.** An expensive model opens the files itself
+whatever map it is handed: in a measured design pass the architects read the same files with a scout's map and
+without one, and the map only made them wait. So architects get none. In heavy and ultra the design the lead
+accepted — made by the strongest models after reading the code — is what writers and reviewers start from. In
+medium nobody designs, so one cheap, fast scout maps the area once for the writers and the reviewers: which
+files matter and why, who calls them, the invariants, the conventions. And no worker starts over: a critique
+and a revision continue the architect's own session, a correction the writer's, a recheck the reviewer's.
 
 **2. The base effort follows the vendors' own defaults.** Medium runs each model at the level its vendor ships
 as default. Heavy is one step above, ultra two. Effort goes to design and correctness review first — they
