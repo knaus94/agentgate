@@ -205,6 +205,15 @@ func run(args arguments) (any, int, error) {
 			return nil, 0, err
 		}
 		request, err := dev.ParseRequest(text)
+		if err == nil && strings.Contains(text, "figma.com/") {
+			// The lead meets the link here first: it is told at once what the link is for.
+			out := map[string]any{}
+			raw, _ := json.Marshal(request)
+			_ = json.Unmarshal(raw, &out)
+			out["design"] = "The request holds a Figma link. Do not open it and do not ask for a Figma plugin or access: " +
+				"`agentgate figma frames <link>` lists its frames, and `agentgate guide`, section 7 \"From a Figma design\", says how the link goes into the plan."
+			return out, 0, nil
+		}
 		return request, 0, err
 	}
 

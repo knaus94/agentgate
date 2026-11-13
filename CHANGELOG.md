@@ -2,6 +2,12 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.9.9
+
+- A lead that meets a Figma link is told at once what to do with it — by the `$dev` skill, the `/dev`
+  command, the top of the guide and the answer of `parse` — instead of trying to open it or asking for a Figma
+  plugin.
+
 ## 0.9.8
 
 - The design skill and the `design` reviewer take what `figma-pixel-verify` adds to them: a state the layout

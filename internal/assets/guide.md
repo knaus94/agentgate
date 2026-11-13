@@ -13,6 +13,9 @@ command line. Check the exit code before reading output. One operation runs at a
 
 Parse the request with `agentgate parse --file -`. For `status`, `stop` and `help`, run that command and stop.
 
+A Figma link in the request: go to "From a Figma design" in section 7 before anything else. You do not open
+the link, look for a Figma plugin or ask the user for access — `agentgate figma frames <link>` answers.
+
 Read the repository instructions, the relevant module docs and an analogous implementation. Discover facts
 yourself; ask the user only for material product, data, security or authorization decisions, in their language,
 with a recommendation, all at once. `--grill` forces clarification, `--no-grill` skips optional questions but
