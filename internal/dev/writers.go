@@ -97,6 +97,9 @@ func Launch(cfg *config.Config, plan *Plan) (any, error) {
 		if err := gate.baselineChecks(); err != nil {
 			return nil, err
 		}
+		if err := gate.designBaselines(); err != nil {
+			return nil, err
+		}
 	case gate.Epic != nil && !plan.staged(), gate.Epic == nil && plan.staged():
 		return nil, errors.New("a task keeps its shape: one that started in stages continues in stages, and one that did not, does not")
 	case gate.Phase == "staged":
@@ -112,6 +115,9 @@ func Launch(cfg *config.Config, plan *Plan) (any, error) {
 			return nil, err
 		}
 		if err := gate.baselineChecks(); err != nil {
+			return nil, err
+		}
+		if err := gate.designBaselines(); err != nil {
 			return nil, err
 		}
 	case gate.Phase == "implementing":
@@ -279,8 +285,8 @@ func (g *Gate) assignment(stream Stream) map[string]any {
 	packet := map[string]any{"task": g.Request.Task, "brief": g.Plan.Brief, "stream": stream, "other_streams": others,
 		"context": g.Context, "checks": g.Plan.Checks, "ui": ui, "architecture": architectureFor(g.Plan),
 		"handoffs": handoffs, "board": g.board(), "your_board_note": filepath.Join(g.board(), stream.Name+".md"),
-		"context_pack": g.ContextPack,
-		"checks_note":  "You may run these exact commands to verify your stream. The lead's run is the one that counts."}
+		"context_pack": g.ContextPack, "design": g.designFor(stream.Name),
+		"checks_note": "You may run these exact commands to verify your stream. The lead's run is the one that counts."}
 	if g.Plan.Update != "" {
 		packet["update"] = g.Plan.Update
 	}
@@ -331,6 +337,11 @@ func (g *Gate) runWriter(resolved *Resolved, stream Stream, record *Writer, answ
 		return fail(err)
 	}
 	prompt := assets.Prompt("writer") + "\nRead your assignment at " + path + ".\n"
+	if g.designFor(stream.Name) != nil {
+		if skill, err := designSkill(); err == nil {
+			prompt += "\nYour stream implements a design; `design` in the assignment names its package.\n" + skill
+		}
+	}
 	if answer != "" {
 		prompt = "The coordinator answers your blockers:\n" + answer + "\n\nContinue the same assignment (refreshed at " + path +
 			") and return the same JSON schema.\n"

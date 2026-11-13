@@ -19,6 +19,13 @@ to find what the change could break instead of exploring from scratch; verify wh
 - `architecture`: the change respects the repository's real boundaries and the accepted design; no costly
   duplication or unjustified abstraction; nothing simpler would do the same.
 - `simplicity`: the change holds nothing the task does not need. See the next section.
+- `design`: the page looks like the design. `design` in the packet names, per screen, the brief, the picture
+  of the design, the picture of the page as the last layout check saw it, a picture of where their pixels
+  differ, that check's report and the file of exceptions. The check already compared positions, sizes, fonts,
+  colours and radii: do not repeat it. Look at the two pictures side by side for what numbers do not carry —
+  a wrong or missing icon, a gradient, a shadow, a border drawn the wrong way, clipped or overlapping text,
+  a state the brief shows and the page does not. Then read the exceptions: an entry that excuses a difference
+  the product does not need ("did not fit", "close enough") is a finding. Cite the layer's handle from the brief.
 - `security`: trust boundaries, authorization, injection, secrets, data exposure and integrity under abuse.
 
 ## Simplicity

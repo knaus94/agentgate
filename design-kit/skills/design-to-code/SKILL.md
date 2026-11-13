@@ -1,6 +1,6 @@
 ---
 name: design-to-code
-description: Implement a screen or a section from a design package written by `figma pull`, and prove the result with `check`. Use when a task names a design package, a Figma frame, "по макету", "сверстать", or asks to match a mock-up.
+description: Implement a screen or a section from a design package written by `agentgate figma pull`, and prove the result with `check`. Use when a task names a design package, a Figma frame, "по макету", "сверстать", or asks to match a mock-up.
 ---
 
 # Design to code
@@ -13,7 +13,7 @@ A design package is a directory: `brief.md`, `frame.png`, `assets/`, `manifest.j
 1. Read `brief.md` once and look at `frame.png` once. That is the whole design.
 2. `⟨Name: variant⟩` is a component instance. Find the project's component of that name and use it with the
    matching props. Build one only when the project has none; then ask for its inside:
-   `figma node <package> <handle>`. Ask for one layer at a time, not for the tree.
+   `agentgate figma node <package> <handle>`. Ask for one layer at a time, not for the tree.
 3. A value with a token in parentheses — `#1E1F23 (neutral/800)`, `gap 8 (spacing/8)` — is written with the
    project's token of that name, not as a literal. A value without a token is a literal.
 4. Layout is the rule in the brief, not coordinates: `row gap 16 pad 32`, `w:fill`. Positions are printed only
@@ -25,7 +25,7 @@ A design package is a directory: `brief.md`, `frame.png`, `assets/`, `manifest.j
 
 ## Proving
 
-Run the check the task declares, of the form `check <package> --url <page> --root <css>`. It prints at most
+Run the check the task declares, of the form `agentgate layout <package> --url <page> --root <css>`. It prints at most
 twenty lines, one per difference, most important first:
 
     3 ‹84b1› left-payment-method-panel → div.panel: off by x +8 y 0

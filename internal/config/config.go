@@ -25,7 +25,7 @@ var Efforts = []string{"low", "medium", "high", "xhigh", "max"}
 var Severities = []string{"P0", "P1", "P2", "P3"}
 
 // Axes a review lane may cover.
-var Axes = []string{"correctness", "architecture", "simplicity", "security"}
+var Axes = []string{"correctness", "architecture", "simplicity", "security", "design"}
 
 type Model struct {
 	Provider string `json:"provider"`

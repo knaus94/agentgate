@@ -188,7 +188,7 @@ export function summary(result, pixels, pictures, limit = 20) {
   const kinds = {};
   for (const issue of result.issues) kinds[issue.kind] = (kinds[issue.kind] || 0) + 1;
   const counts = Object.entries(kinds).map(([kind, count]) => `${count} ${kind}`).join(', ');
-  const lines = [`design check: ${result.issues.length ? 'FAIL' : 'PASS'} — ${result.issues.length ? `${result.issues.length} differences (${counts})` : 'no differences'}` +
+  const lines = [`design check: ${result.issues.length ? 'FAIL' : 'PASS'} — ${result.issues.length ? `${result.issues.length} ${result.known === undefined ? '' : 'new '}differences (${counts})` : result.known === undefined ? 'no differences' : 'no new differences'}` +
     ` · compared ${result.compared} of ${result.total} layers` + (pixels === undefined ? '' : ` · ${(pixels * 100).toFixed(1)}% of pixels differ`)];
   result.issues.slice(0, limit).forEach((issue, index) => {
     lines.push(`${String(index + 1).padStart(2)} ‹${issue.ref}› ${issue.layer}${issue.element ? ` → ${issue.element}` : ''}: ${issue.text}`);
@@ -198,6 +198,7 @@ export function summary(result, pixels, pictures, limit = 20) {
   if (result.skipped.unpainted) notes.push(`${result.skipped.unpainted} layers paint nothing and are judged through their children`);
   if (result.skipped.ignored) notes.push(`${result.skipped.ignored} ignored by the map`);
   if (result.extra) notes.push(`${result.extra} texts on the page are not in the design`);
+  if (result.known) notes.push(`${result.known} differences were there before the task and are not listed`);
   if (notes.length) lines.push(`not compared: ${notes.join('; ')}`);
   if (pictures) lines.push(`pictures: ${pictures.marked} (numbered as above), ${pictures.diff}`);
   return lines.join('\n') + '\n';

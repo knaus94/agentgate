@@ -158,6 +158,33 @@ Browser verification is opt-in and off unless the user asks for it. When on, rec
 scenarios}` (usually 1–5 rows) and pass `visual {url, origins}` to `review`; only loopback stands are reachable.
 Starting a stand needs the user's approval of the exact commands.
 
+### From a Figma design
+
+You prepare; tools measure; workers read one short brief. Never open Figma for a worker and never paste design
+data into a brief.
+
+1. `agentgate figma frames <figma-url>` lists the frames of the page. A screen is usually several — one per
+   state and per width: decide which the task covers and say which it does not. `agentgate figma login` signs
+   in once, in a window; nobody passes cookies or tokens.
+2. `agentgate figma pull <figma-url> --node <id> --out <dir>`, once per frame. Pull the node the task changes,
+   not the screen around it. The command prints what the brief costs a reader in tokens: above about three
+   thousand, pull a narrower node or split the work into streams with a package each.
+3. Read `brief.md` yourself. What it cannot tell is yours to write in the plan's brief: what each control does,
+   the states the design does not draw and which existing screen each follows, the widths between the drawn
+   ones, and where the product deliberately differs from the mock-up.
+4. What the product shows differently goes into a map, each entry with its reason:
+   `{"ignore": {"<handle>": "why"}, "dynamic": ["<handle>"]}`. The map is yours; a writer may not edit it. A
+   map that ignores most of a design leaves little checked: tell the user.
+5. Put `design [{package, url, root, stream, map}]` into the plan and `ui {summary, criteria, preserve}` naming
+   the package. That is all: the brief and the rules for it go to that stream alone, and the layout check is
+   declared for you. The stand must be up before `launch`: the page is measured before anyone writes, and only
+   what the task makes worse blocks it.
+
+After the writers, `review` runs the layout check first; a new difference fails it like any check and goes
+back with `fix`. When it passes, the first reviewer also judges `design`: it is shown the design next to the
+page and looks for what numbers do not carry — a wrong icon, a lost gradient — and reads your map for excuses.
+Browser verification by a model stays for behaviour scenarios.
+
 ## 8. Isolated tasks (`-w`)
 
 With `-w` in the request (or `worktree.default` in the configuration) the task works in its own git worktree on

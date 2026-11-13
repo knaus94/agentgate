@@ -71,10 +71,17 @@ after every accepted stage until the user says to go on.
   ],
   "ui": {"summary": "Show a truncation note", "criteria": ["Shown only when total > shown"], "preserve": ["Columns, navigation"]},
   "visual": {"enabled": false, "reason": "User chose code-based verification"},
+  "design": [{"package": "apps/web/testing/design/checkout/package", "url": "http://localhost:4200/checkout",
+              "root": "main .checkout", "stream": "web", "map": "apps/web/testing/design/checkout/map.json"}],
   "architecture": {"id": "<receipt id>", "base": "fable", "acceptance": "Your amendments to that design",
                    "blockers": {"astra/b1": "Resolved by ..."}}
 }
 ```
+
+`design` is for a stream that implements a Figma design: `package` is a directory written by
+`agentgate figma pull`, `url` the page of a local stand that shows the result, `root` the element that
+implements the pulled node, `map` the file of what the product shows differently (optional, as are
+`storage_state`, `locale`, `viewport`). The layout check is declared for you.
 
 A staged plan has no top-level `streams`: it lists `requirements` and `stages`, and every requirement is
 covered by a stage. Each stage has `name`, `goal`, `covers`, `streams`, and optionally `acceptance`, `checks`

@@ -2,6 +2,20 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.9.3
+
+- **A stream can implement a Figma design, and the gate can tell whether it did.** `design [{package, url,
+  root, stream, map}]` in a plan hands the design brief to that stream alone, measures the page before the
+  work, declares the layout check and blocks only what the task made worse. A design pulled again makes earlier
+  reviews stale. See `docs/design.md`.
+- **`agentgate figma`** signs in once in a browser window and pulls a node as a compact package: a brief of
+  about two thousand tokens for a page section, a picture and the icons. View access is enough.
+- **`agentgate layout`** compares a page with a package without a model: position, size, radius, font, colour
+  and what is absent, at most twenty lines. **`agentgate fixtures`** shows a screen in a recorded state with
+  nothing behind it.
+- **A `design` review axis.** The first reviewer is shown the design next to the page and looks for what
+  numbers do not carry, and reads the file of exceptions for excuses.
+
 ## 0.9.2
 
 - **Architects read the code themselves.** A design pass no longer waits for a scout or receives its map: in a

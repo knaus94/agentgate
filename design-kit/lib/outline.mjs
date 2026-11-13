@@ -323,7 +323,7 @@ export function brief(spec, source, dir) {
     'One line per layer. Sizes are CSS pixels; `fill` and `hug` are auto-layout sizing; a child of a row, column or grid has no',
     'position because the layout gives it one. A name in parentheses is the design token bound to the value. `⟨…⟩` marks a',
     'component instance: use the project\'s component, the line lists only what this use shows. A handle like `‹a3f1›` names a layer:',
-    `\`figma node ${dir} a3f1\` prints everything about it and its inside. Do not read the files under \`data/\`: they are for tools.`, ''];
+    `\`agentgate figma node ${dir} a3f1\` prints everything about it and its inside. Do not read the files under \`data/\`: they are for tools.`, ''];
   const tail = [];
   if (styles.size) {
     tail.push('', 'Text styles:');

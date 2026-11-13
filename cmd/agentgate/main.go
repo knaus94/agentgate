@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 
+	designkit "github.com/knaus94/agentgate/design-kit"
 	"github.com/knaus94/agentgate/internal/accounts"
 	"github.com/knaus94/agentgate/internal/assets"
 	"github.com/knaus94/agentgate/internal/config"
@@ -41,6 +42,9 @@ Setup
                                   link moves .agentgate into a synced folder
     watch [--all] [--once]          interactive panel: tasks, stages and timings, workers, checks, findings,
                                   and what each worker is doing; --all shows every checkout
+  figma login|status|frames|pull|node   a Figma design as a compact package for workers
+  layout <package> --url <page>         does the page look as the package says
+  fixtures <dir> [--record <url>]       a GraphQL endpoint answering from files, for a screen in a chosen state
   status | stop | prune | version
 
 For the lead (used by /dev)
@@ -496,7 +500,32 @@ func selfUpdate(checkOnly bool) (any, int, error) {
 	return map[string]any{"updated_from": update.Version, "to": tag, "binary": path, "install": strings.TrimSpace(string(refreshed))}, 0, nil
 }
 
+// tools are the design tools: Node programs that own their arguments and their output.
+var tools = map[string]string{"figma": "figma.mjs", "layout": "check.mjs", "fixtures": "graphql-fixtures.mjs"}
+
+func runTool(script string, args []string) int {
+	dir, err := designkit.Dir()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "agentgate: "+err.Error())
+		return 1
+	}
+	cmd := exec.Command("node", append([]string{filepath.Join(dir, "bin", script)}, args...)...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if err := cmd.Run(); err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			return exit.ExitCode()
+		}
+		fmt.Fprintln(os.Stderr, "agentgate: the design tools need Node: "+err.Error())
+		return 1
+	}
+	return 0
+}
+
 func main() {
+	if len(os.Args) > 1 && tools[os.Args[1]] != "" {
+		os.Exit(runTool(tools[os.Args[1]], os.Args[2:]))
+	}
 	args, err := parseArgs(os.Args[1:])
 	if err == nil {
 		var value any

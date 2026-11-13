@@ -17,8 +17,10 @@ const usage = `usage:
         [--tolerance 2]         pixels a position or a size may be off by
         [--max-pixel-diff 0.1]  fail when more than this share of pixels differs (reported either way)
         [--out <dir>]           also write report.json, marked.png, diff.png and actual.png
+        [--write-baseline <f>]  record the differences the page has now, and exit 0
+        [--baseline <f>]        fail only for differences that are not in that record
 
-exit: 0 the page matches, 1 it differs, 2 nothing could be compared`;
+exit: 0 the page matches (or is no worse than the baseline), 1 it differs, 2 nothing could be compared`;
 
 const fail = (message, code = 2) => {
   console.error(`check: ${message}`);
@@ -68,7 +70,25 @@ try {
   const seen = await page.evaluate(readPage, flags.root || '');
   if (seen.error) fail(`${seen.error} at ${page.url()}`);
   const result = compare(spec, seen, map, limits);
+  if (result.compared === 0 && flags['write-baseline']) {
+    // Nothing is built yet: every difference the finished screen has will be a new one.
+    fs.writeFileSync(flags['write-baseline'], JSON.stringify({ known: [] }) + '\n');
+    console.log(`design baseline: the page shows nothing of “${spec.frame.name}” yet`);
+    process.exit(0);
+  }
   if (result.compared === 0) fail(`nothing on ${page.url()} corresponds to the design: is --root the element that implements “${spec.frame.name}”?`);
+  // A difference is known by the layer and what kind it is; how large it is may still change.
+  const keyOf = (issue) => `${issue.ref}|${issue.kind}`;
+  if (flags['write-baseline']) {
+    fs.writeFileSync(flags['write-baseline'], JSON.stringify({ known: result.issues.map(keyOf) }) + '\n');
+    console.log(`design baseline: ${result.issues.length} differences recorded`);
+    process.exit(0);
+  }
+  if (flags.baseline) {
+    const known = new Set(JSON.parse(fs.readFileSync(flags.baseline, 'utf8')).known);
+    result.known = result.issues.filter((issue) => known.has(keyOf(issue))).length;
+    result.issues = result.issues.filter((issue) => !known.has(keyOf(issue)));
+  }
 
   const shot = flags.root ? await page.locator(flags.root).first().screenshot() : await page.screenshot({ fullPage: true });
   const blank = await context.newPage();
@@ -79,16 +99,21 @@ try {
 
   let written;
   if (flags.out) {
-    fs.mkdirSync(flags.out, { recursive: true });
-    const save = (name, url) => fs.writeFileSync(path.join(flags.out, name), Buffer.from(url.split(',')[1], 'base64'));
-    save('marked.png', pictures.marked);
-    save('diff.png', pictures.diff);
-    fs.writeFileSync(path.join(flags.out, 'actual.png'), shot);
-    fs.writeFileSync(path.join(flags.out, 'report.json'), JSON.stringify({ url: page.url(), package: manifest.digest, pixels: pictures.ratio, ...result }, null, 1));
-    written = { marked: path.join(flags.out, 'marked.png'), diff: path.join(flags.out, 'diff.png') };
+    // A worker runs the same command in a sandbox where this directory is read-only: the pictures are the gate's.
+    try {
+      fs.mkdirSync(flags.out, { recursive: true });
+      const save = (name, url) => fs.writeFileSync(path.join(flags.out, name), Buffer.from(url.split(',')[1], 'base64'));
+      save('marked.png', pictures.marked);
+      save('diff.png', pictures.diff);
+      fs.writeFileSync(path.join(flags.out, 'actual.png'), shot);
+      fs.writeFileSync(path.join(flags.out, 'report.json'), JSON.stringify({ url: page.url(), package: manifest.digest, pixels: pictures.ratio, ...result }, null, 1));
+      written = { marked: path.join(flags.out, 'marked.png'), diff: path.join(flags.out, 'diff.png') };
+    } catch {
+      written = undefined;
+    }
   }
   const text = summary(result, pictures.ratio, written);
-  if (flags.out) fs.writeFileSync(path.join(flags.out, 'report.md'), text);
+  if (written) fs.writeFileSync(path.join(flags.out, 'report.md'), text);
   process.stdout.write(text);
   const tooDifferent = flags['max-pixel-diff'] !== undefined && pictures.ratio > Number(flags['max-pixel-diff']);
   if (tooDifferent) console.log(`more than ${flags['max-pixel-diff']} of the pixels differ`);

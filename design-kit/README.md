@@ -10,6 +10,8 @@ the work allows: what can be computed is computed, and a model reads only short 
     check <dir> --url <page> --root <css>    compare a page with a package; exit 1 when it differs
     graphql-fixtures <dir> [--record <url>]  a GraphQL endpoint that answers from files: a screen in a chosen state
 
+agentgate ships these as `agentgate figma`, `agentgate layout` and `agentgate fixtures`.
+
 Needs Node 20+ and `playwright-core` with a Chromium (the browser tooling of agentgate is enough).
 
 ## The package

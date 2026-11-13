@@ -88,6 +88,7 @@ type Plan struct {
 	Checks           []Check       `json:"checks,omitempty"`
 	UI               *UI           `json:"ui,omitempty"`
 	Visual           *Visual       `json:"visual,omitempty"`
+	Design           []DesignRef   `json:"design,omitempty"` // design packages streams implement
 	Architecture     *Accepted     `json:"architecture,omitempty"`
 	Update           string        `json:"update,omitempty"`   // what changed, for a continuation of an unfinished task
 	BaseRef          string        `json:"base_ref,omitempty"` // review and clean: the commit the diff starts from
@@ -266,6 +267,9 @@ func Resolve(cfg *config.Config, plan *Plan) (*Resolved, error) {
 		if _, err := timeoutSeconds(timeout); err != nil {
 			return nil, err
 		}
+	}
+	if err := resolved.validateDesign(); err != nil {
+		return nil, err
 	}
 	if err := validateChecks(plan.Checks); err != nil {
 		return nil, err

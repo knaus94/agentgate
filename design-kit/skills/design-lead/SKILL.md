@@ -10,9 +10,9 @@ data into a brief: point at the package.
 
 ## Before the plan
 
-1. `figma frames <figma-url>` lists the frames of the page. A screen is usually several: one per state
+1. `agentgate figma frames <figma-url>` lists the frames of the page. A screen is usually several: one per state
    (empty, filled, error) and per width. Decide which the task covers and say which it does not.
-2. `figma pull <figma-url> --node <id> --out <dir>` once per frame. Pull the node the task changes, not the
+2. `agentgate figma pull <figma-url> --node <id> --out <dir>` once per frame. Pull the node the task changes, not the
    screen around it: the header and the footer of an app shell are half of a frame and none of the task. The
    command prints what the brief costs a reader in tokens; above about three thousand, pull a narrower node or
    split the work into streams with a package each.
@@ -27,13 +27,13 @@ data into a brief: point at the package.
 
 ## In the plan
 
-- `context`: the package's `brief.md` and the worker skill. Nothing from `data/`.
+- `design`: `[{package, url, root, stream, map}]`. The brief and the worker's rules go to that stream alone,
+  the layout check is declared for you, and the page is measured before the work: only what the task makes
+  worse blocks it. Nothing from `data/` goes anywhere.
 - `ui`: a local contract `{summary, criteria, preserve}` that names the package; no design pass is needed when
   the design exists.
-- `checks`: the `check` command with `inputs` covering the package and the changed files, so its receipt goes
-  stale when either changes. State the number of differences the screen has now: the task must not raise it.
-- The stand is running before `launch`, started by you with the user's approval of the commands. A check that
-  cannot open the page fails for everyone.
+- The stand is running before `launch`, started by you with the user's approval of the commands. A page that
+  cannot be opened stops the launch.
 - Browser verification by a model is for behaviour scenarios only. Layout is the check's job.
 
 ## After the writers

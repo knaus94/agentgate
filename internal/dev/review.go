@@ -66,8 +66,13 @@ func evidence(dir string, from, to Snapshot, files []string) ([]Change, error) {
 }
 
 func (g *Gate) contract() string {
-	return digest(map[string]any{"brief": g.Plan.Brief, "files": g.Files, "context": g.Context, "streams": g.Plan.Streams,
-		"ui": g.Plan.UI, "checks": g.Plan.Checks, "mode": g.Mode})
+	parts := map[string]any{"brief": g.Plan.Brief, "files": g.Files, "context": g.Context, "streams": g.Plan.Streams,
+		"ui": g.Plan.UI, "checks": g.Plan.Checks, "mode": g.Mode}
+	// A design that was pulled again is another design, also when it lies at the same path.
+	if designs := g.designDigests(); designs != nil {
+		parts["design"] = designs
+	}
+	return digest(parts)
 }
 
 // Findings returns every finding ever reported for the task, latest version of each.
@@ -205,6 +210,10 @@ func (g *Gate) lanes(cfg *config.Config, subs *substitutions) ([]laneSpec, func(
 			out = append(out, laneSpec{Axes: lane.Axes, Scope: scope.name, Files: scope.files, Route: route})
 		}
 	}
+	// The design is judged by eye by a model that did not write the code: the first lane takes it along.
+	if len(g.Plan.Design) > 0 && len(out) > 0 {
+		out[0].Axes = append(slices.Clone(out[0].Axes), "design")
+	}
 	return out, skip, nil
 }
 
@@ -296,6 +305,9 @@ func ReviewTask(cfg *config.Config, gate *Gate, input ReviewInput) (any, error) 
 		"context_pack": gate.ContextPack}
 	if ui, _ := loadUI(gate.Plan); ui != nil {
 		packet["ui"] = ui
+	}
+	if designs, _ := gate.designReview(); designs != nil {
+		packet["design"] = designs
 	}
 	if len(gate.Reviews) > 0 {
 		previous := Snapshot{}
@@ -520,8 +532,9 @@ func (g *Gate) runLane(cfg *config.Config, spec laneSpec, index int, dir string,
 			"resolve or keep every finding listed there, report new defects of the correction, and return the same JSON schema.\n"
 	}
 	tools, toolDirs, toolNote := workerTools(cfg, "reviewer")
+	_, designDirs := g.designReview()
 	result, used, err := subs.invoke(cfg, provider.Call{Route: route, Prompt: prompt + toolNote, Dir: lane.Dir, Schema: reviewSchema, MCP: tools, Writable: toolDirs,
-		Timeout: timeout, Persist: true, Resume: lane.Session, ReadDirs: append([]string{dir, filepath.Join(g.dir(), "checks")}, packDirs(g.ContextPack)...)}, skip)
+		Timeout: timeout, Persist: true, Resume: lane.Session, ReadDirs: append(append([]string{dir, filepath.Join(g.dir(), "checks")}, packDirs(g.ContextPack)...), designDirs...)}, skip)
 	if err != nil {
 		return lane, err
 	}
