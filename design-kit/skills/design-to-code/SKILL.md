@@ -18,12 +18,35 @@ A design package is a directory: `brief.md`, `frame.png`, `assets/`, `manifest.j
    project's token of that name, not as a literal. A value without a token is a literal.
 4. Layout is the rule in the brief, not coordinates: `row gap 16 pad 32`, `w:fill`. Positions are printed only
    for layers the design places absolutely.
-5. Icons and pictures come from `assets/`, unless the project already has the same icon.
+5. Icons and pictures come from `assets/`, unless the project already has the same icon. Add no icon package
+   and draw no placeholder.
 6. The brief shows one state with sample data. Words and numbers that come from data stay data. States the
    brief does not show (loading, empty, error, disabled) follow the project's existing screens; say in
    `deviations` which ones you added and from where.
 
+7. When a project token and the design disagree by a pixel or a shade, the token wins: consistency with the
+   product matters more than the mock-up's exact number. Say so in `deviations`. A larger gap is a question.
+8. No inline styles, except a value that is computed at run time.
+
+## What the picture does not show
+
+A mock-up is one still frame. These are yours to get right, and no number in the check covers them:
+
+- Elements by meaning: `<button>` for an action, `<a>` for navigation, never a `<div>` with a click handler;
+  headings in order; a `<label>` or `aria-label` on every control, `aria-label` on an icon-only button,
+  `alt` on a picture and `aria-hidden` on a decorative icon.
+- Focus: every interactive element shows `:focus-visible`; never remove an outline without a replacement.
+- States: hover, active, focus and disabled. Take them from the component's variants in the brief when it
+  lists them, otherwise from the project's same control; do not invent a look.
+- Content that is not the mock-up's: a long name, an empty list, a large number. Text truncates or wraps where
+  the design gives it one line, and a flex child that truncates needs `min-width: 0`.
+- Pictures carry `width` and `height`, so the page does not jump while they load.
+- Motion: name the properties in a transition, never `transition: all`.
+
 ## Proving
+
+Check as you go, a section at a time, not once at the end.
+
 
 Run the check the task declares, of the form `agentgate layout <package> --url <page> --root <css>`. It prints at most
 twenty lines, one per difference, most important first:

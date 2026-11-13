@@ -2,6 +2,14 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.9.7
+
+- **The design skill covers what a mock-up does not show:** elements by meaning, focus, the states of a
+  control, content that is longer than the mock-up's, pictures with dimensions. The reviewer of the `design`
+  axis looks for the same in the code. The rules are the part of Vercel's Web Interface Guidelines that
+  concerns building a screen, and of Figma's `implement-design` skill without its MCP steps.
+- The design tools of an earlier build are removed from disk when a new build writes its own.
+
 ## 0.9.6
 
 - `design.stand.graphql` is gone: the front end starts with its own environment file, which already names the

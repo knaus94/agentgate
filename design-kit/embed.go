@@ -44,6 +44,14 @@ func Dir() (string, error) {
 			return "", err
 		}
 	}
+	// Each build writes its own copy; the copies of earlier builds are of no use to anyone.
+	if siblings, err := os.ReadDir(filepath.Dir(dir)); err == nil {
+		for _, sibling := range siblings {
+			if sibling.Name() != filepath.Base(dir) {
+				_ = os.RemoveAll(filepath.Join(filepath.Dir(dir), sibling.Name()))
+			}
+		}
+	}
 	return dir, os.WriteFile(filepath.Join(dir, ".complete"), nil, 0o644)
 }
 

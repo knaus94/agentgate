@@ -24,7 +24,9 @@ to find what the change could break instead of exploring from scratch; verify wh
   differ, that check's report and the file of exceptions. The check already compared positions, sizes, fonts,
   colours and radii: do not repeat it. Look at the two pictures side by side for what numbers do not carry —
   a wrong or missing icon, a gradient, a shadow, a border drawn the wrong way, clipped or overlapping text,
-  a state the brief shows and the page does not. Then read the exceptions: an entry that excuses a difference
+  a state the brief shows and the page does not. In the code of the screen, what no picture shows: an action
+  that is not a `<button>`, a control without a label, a removed focus outline, text that cannot grow. Then
+  read the exceptions: an entry that excuses a difference
   the product does not need ("did not fit", "close enough") is a finding. Cite the layer's handle from the brief.
 - `security`: trust boundaries, authorization, injection, secrets, data exposure and integrity under abuse.
 

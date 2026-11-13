@@ -37,6 +37,14 @@ absent. Run it as a declared check of the task; the stand it opens is the projec
 
 A map file names what must not be judged: `{"ignore": {"<handle>": "why"}, "dynamic": ["<handle>"]}`.
 
+## Where the rules come from
+
+The worker's skill is short on purpose: it is in the context of every writer. Its rules for what a picture
+does not show — semantics, focus, states, long content — are the part of Vercel's Web Interface Guidelines that
+concerns building a screen; the rules on reusing components, tokens over literal values and assets come from
+Figma's own `implement-design` skill, without its MCP steps. The check's ideas: comparing properties with
+tolerances from `asdesigned`, finding elements by their text from the Design2Code metric.
+
 ## The Figma session
 
 There is no token and no cookie file. `figma login` opens a window; the session stays in a browser profile
