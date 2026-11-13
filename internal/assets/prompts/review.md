@@ -25,7 +25,9 @@ to find what the change could break instead of exploring from scratch; verify wh
   colours and radii: do not repeat it. Look at the two pictures side by side for what numbers do not carry —
   a wrong or missing icon, a gradient, a shadow, a border drawn the wrong way, clipped or overlapping text,
   a state the brief shows and the page does not. In the code of the screen, what no picture shows: an action
-  that is not a `<button>`, a control without a label, a removed focus outline, text that cannot grow. Then
+  that is not a `<button>`, a control without a label, a removed focus outline, text that cannot grow, a literal
+  colour or size where the brief names a token (it matches today by luck), a hover or disabled state styled
+  from nothing. The layout check saw the screen at rest only. Then
   read the exceptions: an entry that excuses a difference
   the product does not need ("did not fit", "close enough") is a finding. Cite the layer's handle from the brief.
 - `security`: trust boundaries, authorization, injection, secrets, data exposure and integrity under abuse.

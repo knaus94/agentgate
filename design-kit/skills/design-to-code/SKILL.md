@@ -19,7 +19,8 @@ A design package is a directory: `brief.md`, `frame.png`, `assets/`, `manifest.j
 4. Layout is the rule in the brief, not coordinates: `row gap 16 pad 32`, `w:fill`. Positions are printed only
    for layers the design places absolutely.
 5. Icons and pictures come from `assets/`, unless the project already has the same icon. Add no icon package
-   and draw no placeholder.
+   and draw no placeholder. An icon whose colour follows its text or its state is inline SVG with
+   `currentColor`, not an `<img>`: an image cannot be recoloured.
 6. The brief shows one state with sample data. Words and numbers that come from data stay data. States the
    brief does not show (loading, empty, error, disabled) follow the project's existing screens; say in
    `deviations` which ones you added and from where.
@@ -27,6 +28,8 @@ A design package is a directory: `brief.md`, `frame.png`, `assets/`, `manifest.j
 7. When a project token and the design disagree by a pixel or a shade, the token wins: consistency with the
    product matters more than the mock-up's exact number. Say so in `deviations`. A larger gap is a question.
 8. No inline styles, except a value that is computed at run time.
+9. A section fills the width it is given. The page that places it sets its maximum width and outer padding;
+   the section does not carry them.
 
 ## What the picture does not show
 
@@ -45,7 +48,8 @@ A mock-up is one still frame. These are yours to get right, and no number in the
 
 ## Proving
 
-Check as you go, a section at a time, not once at the end.
+Check as you go, a section at a time, not once at the end. Measure again after every fix; if eight rounds
+have not cleared a difference, stop and report it rather than keep adjusting.
 
 
 Run the check the task declares, of the form `agentgate layout <package> --url <page> --root <css>`. It prints at most
@@ -65,5 +69,8 @@ twenty lines, one per difference, most important first:
 
 Before you report, look at `frame.png` and at the page once, side by side: the check judges numbers, and a
 wrong icon or a missing gradient has none.
+
+The check measures the screen at rest. A hover, a pressed or a disabled look it has not seen is not proven by
+its PASS: say in your report which states you built and what each was taken from.
 
 Do not change the package, its map file or the tolerances to make the check pass.

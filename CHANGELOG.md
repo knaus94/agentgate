@@ -2,6 +2,12 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.9.8
+
+- The design skill and the `design` reviewer take what `figma-pixel-verify` adds to them: a state the layout
+  check did not see is not proven by its PASS, a literal that matches a token by luck is a finding, the fix
+  loop is bounded, and an icon that follows its text's colour is inline SVG.
+
 ## 0.9.7
 
 - **The design skill covers what a mock-up does not show:** elements by meaning, focus, the states of a

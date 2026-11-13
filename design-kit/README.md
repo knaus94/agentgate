@@ -42,7 +42,8 @@ A map file names what must not be judged: `{"ignore": {"<handle>": "why"}, "dyna
 The worker's skill is short on purpose: it is in the context of every writer. Its rules for what a picture
 does not show — semantics, focus, states, long content — are the part of Vercel's Web Interface Guidelines that
 concerns building a screen; the rules on reusing components, tokens over literal values and assets come from
-Figma's own `implement-design` skill, without its MCP steps. The check's ideas: comparing properties with
+Figma's own `implement-design` skill, without its MCP steps; the rules about states the check did not see,
+literals that match a token by luck and a bounded fix loop from `figma-pixel-verify`. The check's ideas: comparing properties with
 tolerances from `asdesigned`, finding elements by their text from the Design2Code metric.
 
 ## The Figma session
