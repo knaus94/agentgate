@@ -175,12 +175,13 @@ data into a brief.
 4. What the product shows differently goes into a map, each entry with its reason:
    `{"ignore": {"<handle>": "why"}, "dynamic": ["<handle>"]}`. The map is yours; a writer may not edit it. A
    map that ignores most of a design leaves little checked: tell the user.
-5. Keep it as a screen: a directory with `package/`, `screen.json` (`url`, `root`), and `map.json`; the
-   project's `stand.json` beside the screens says once how its front end starts. `agentgate layout <screen>`
-   then starts the stand, compares and stops it — run it once to see what the screen differs in today.
-6. Put `design [{screen, stream}]` into the plan and `ui {summary, criteria, preserve}` naming the screen. That
-   is all: the brief and the rules for it go to that stream alone, the stand is started when it is needed, the
-   page is measured before anyone writes, and only what the task makes worse blocks it.
+5. Put `design [{figma, url, root, name, stream}]` into the plan and `ui {summary, criteria, preserve}`. That is
+   all the user or you do: at `launch` the design is pulled into a screen directory, the front end is started
+   and stopped by the tool, the page is measured before anyone writes, and only what the task makes worse
+   blocks it. A screen that exists is `design [{screen, stream}]`; `agentgate layout <screen>` checks it by hand.
+6. Once per repository, when `.agentgate.json` has no `design.stand`, write it: the command that starts the
+   front end, the address it answers at, and the variables that point it at its backend (`reference`). Find
+   them in the repository; do not ask the user for what the code says.
 
 After the writers, `review` runs the layout check first; a new difference fails it like any check and goes
 back with `fix`. When it passes, the first reviewer also judges `design`: it is shown the design next to the

@@ -27,13 +27,15 @@ data into a brief: point at the package.
 
 ## In the plan
 
-- `design`: `[{screen, stream}]`, a screen being a directory with `package/`, `screen.json` and `map.json`.
+- `design`: `[{figma, url, root, stream}]` — the link, the page and its element; the screen directory is made
+  at launch. An existing screen is `[{screen, stream}]`.
   The brief and the worker's rules go to that stream alone, the stand is started and stopped for the check, and
   the page is measured before the work: only what the task makes worse blocks it. Nothing from `data/` goes
   anywhere.
 - `ui`: a local contract `{summary, criteria, preserve}` that names the package; no design pass is needed when
   the design exists.
-- The project's `stand.json` says how its front end starts. A page that cannot be opened stops the launch.
+- `design.stand` in the project's `.agentgate.json` says how its front end starts; write it once when it is
+  missing. A page that cannot be opened stops the launch.
 - Browser verification by a model is for behaviour scenarios only. Layout is the check's job.
 
 ## After the writers

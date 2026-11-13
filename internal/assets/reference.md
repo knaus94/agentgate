@@ -71,17 +71,28 @@ after every accepted stage until the user says to go on.
   ],
   "ui": {"summary": "Show a truncation note", "criteria": ["Shown only when total > shown"], "preserve": ["Columns, navigation"]},
   "visual": {"enabled": false, "reason": "User chose code-based verification"},
-  "design": [{"screen": "apps/web/testing/design/checkout", "stream": "web"}],
+  "design": [{"figma": "https://www.figma.com/design/<key>/<file>?node-id=12-345", "url": "/checkout",
+              "root": "main .checkout", "name": "checkout", "stream": "web"}],
   "architecture": {"id": "<receipt id>", "base": "fable", "acceptance": "Your amendments to that design",
                    "blockers": {"astra/b1": "Resolved by ..."}}
 }
 ```
 
-`design` is for a stream that implements a Figma design. `screen` is a directory holding `screen.json`
-(`url`, `root`, optionally `locale`, `viewport`, `cookies`), `package/` written by `agentgate figma pull`,
-optionally `fixtures/` and `map.json`; next to the screens lies `stand.json`, which says once how the project's
-front end starts (`command`, `ready`, `env_file`, `graphql_env`). The stand is started and stopped for you and
-the layout check is declared for you. Without a screen, give `package`, `url` and `root` and keep the stand up.
+`design` is for a stream that implements a Figma design. Give the link to the frame (`figma`), the page that
+shows it (`url`, a path) and the element that implements it (`root`): at launch the design is pulled into a
+screen directory, the front end is started, the page is measured, and the layout check is declared. A screen
+that exists already is named instead: `{"screen": "<dir>", "stream": …}`. How the front end starts is said
+once per repository, in `.agentgate.json`:
+
+```json
+{"design": {"screens": "apps/web/testing/design",
+            "stand": {"command": ["yarn", "dev"], "ready": "http://localhost:4200",
+                      "env_file": ".env.local", "graphql_env": ["VITE_GRAPHQL_URL"],
+                      "graphql": "https://dev.example.com/graphql", "cookies": [{"name": "session", "value": "…"}]}}}
+```
+
+`graphql_env` are the variables that point the front end at its backend: they get the screen's recorded
+answers when it has `fixtures/`, otherwise `graphql`.
 
 A staged plan has no top-level `streams`: it lists `requirements` and `stages`, and every requirement is
 covered by a stage. Each stage has `name`, `goal`, `covers`, `streams`, and optionally `acceptance`, `checks`

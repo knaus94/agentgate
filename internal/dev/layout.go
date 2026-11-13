@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -19,6 +20,8 @@ import (
 // hands the brief to that stream alone, measures the page before the work and after it, blocks what got worse,
 // and shows a reviewer the design next to the result.
 type DesignRef struct {
+	Figma        string `json:"figma,omitempty"`         // a link to the frame: the screen is made from it at launch when it is not there yet
+	Name         string `json:"name,omitempty"`          // with figma: the screen's directory name; default: the node id
 	Screen       string `json:"screen,omitempty"`        // a screen directory: screen.json, package/, fixtures/ and map.json. It needs nothing else here
 	Package      string `json:"package,omitempty"`       // without a screen: a directory written by `agentgate figma pull`
 	URL          string `json:"url,omitempty"`           // without a screen: the page that shows the result, on a local stand
@@ -30,7 +33,9 @@ type DesignRef struct {
 	Viewport     string `json:"viewport,omitempty"`
 }
 
-const layoutTimeout = 180
+const layoutTimeout = 300
+
+var figmaNode = regexp.MustCompile(`node-id=(\d+)(?:-|:|%3A)(\d+)`)
 
 // layoutCommand is the binary that runs the layout check: this one. Tests replace it.
 var layoutCommand = func() string {
@@ -99,8 +104,30 @@ func (r *Resolved) validateDesign() error {
 	plan := r.Plan
 	for index := range plan.Design {
 		design := &plan.Design[index]
+		if design.Figma != "" && design.Screen == "" {
+			name := design.Name
+			if name == "" {
+				if match := figmaNode.FindStringSubmatch(design.Figma); match != nil {
+					name = match[1] + "-" + match[2]
+				}
+			}
+			if name == "" || design.URL == "" || design.Root == "" {
+				return errors.New("a design given by its figma link needs the link to a frame (node-id), `url` — the page that will show it — and `root`")
+			}
+			screens := r.Config.Design.Screens
+			if screens == "" {
+				screens = filepath.Join(".agentgate", "design")
+			}
+			design.Screen = filepath.Join(screens, strings.Trim(strings.Map(func(char rune) rune {
+				if char == '-' || char == '_' || (char >= '0' && char <= '9') || (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') {
+					return char
+				}
+				return '-'
+			}, name), "-"))
+		}
+		made := design.Screen != "" && fileExists(filepath.Join(design.Screen, "screen.json"))
 		if design.Screen != "" {
-			if _, err := os.Stat(filepath.Join(design.Screen, "screen.json")); err != nil {
+			if !made && design.Figma == "" {
 				return fmt.Errorf("design %q is not a screen: screen.json is missing", design.Screen)
 			}
 			design.Package = filepath.Join(design.Screen, "package")
@@ -108,7 +135,7 @@ func (r *Resolved) validateDesign() error {
 				design.Map = exceptions
 			}
 		}
-		if _, err := os.Stat(filepath.Join(design.Package, "data", "spec.json")); err != nil {
+		if _, err := os.Stat(filepath.Join(design.Package, "data", "spec.json")); err != nil && (made || design.Figma == "") {
 			return fmt.Errorf("design %q is not a package written by `agentgate figma pull`", design.Package)
 		}
 		if design.Stream == "" && len(plan.Streams) == 1 {
@@ -144,6 +171,19 @@ func (g *Gate) designBaselines() error {
 	for _, design := range g.Plan.Design {
 		if err := os.MkdirAll(design.dir(), 0o700); err != nil {
 			return err
+		}
+		// A design named by its link becomes a screen here, once: the lead pulls nothing by hand.
+		if design.Figma != "" && !fileExists(filepath.Join(design.Screen, "screen.json")) {
+			argv := []string{layoutCommand(), "layout", "new", design.Screen, design.Figma, "--url", design.URL, "--root", design.Root}
+			if design.Locale != "" {
+				argv = append(argv, "--locale", design.Locale)
+			}
+			var out bytes.Buffer
+			cmd := exec.Command(argv[0], argv[1:]...)
+			cmd.Stdout, cmd.Stderr = &out, &out
+			if err := ops.Run(cmd, seconds(layoutTimeout)); err != nil {
+				return fmt.Errorf("the design %s could not be pulled: %s", design.Figma, lastLine(strings.TrimSpace(out.String())))
+			}
 		}
 		argv := design.argv("--write-baseline", filepath.Join(design.dir(), "baseline.json"))
 		var out bytes.Buffer

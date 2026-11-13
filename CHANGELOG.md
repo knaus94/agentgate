@@ -2,6 +2,15 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.9.5
+
+- **A design is a link.** `design [{figma, url, root, stream}]` in a plan is enough: at launch the design is
+  pulled into a screen directory and the page is measured. `agentgate layout new <screen> <figma-url> --url
+  --root` does the same by hand.
+- **The stand is described in `.agentgate.json`,** under `design.stand`, not in a file beside the screens.
+  `graphql` names the backend a screen without recorded answers is shown by, and `--record` without an address
+  records from it.
+
 ## 0.9.4
 
 - **A screen is one argument.** `agentgate layout <screen>` starts the project's front end with the screen's

@@ -12,7 +12,7 @@ by tools; a model reads short results.
 | Sign in | you, once | `agentgate figma login` opens a browser window. The session stays in a profile under `~/.local/share/agentgate/private`, which no worker sees. No token and no cookie file |
 | Choose | the lead | `agentgate figma frames <url>` lists the frames of a page |
 | Pull | the lead | `agentgate figma pull <url> --node <id> --out <dir>` writes a design package |
-| Plan | the lead | `design [{screen, stream}]` in the plan |
+| Plan | the lead | `design [{figma, url, root, stream}]` in the plan: the design is pulled at launch |
 | Measure | the gate | before anyone writes, the page is compared with the package: what differs already is not the task's |
 | Write | the stream's writer | reads the brief, about two thousand tokens for a page section, and runs the layout check itself |
 | Check | the gate | the layout check again, as a declared check. A new difference blocks the review |
@@ -48,7 +48,7 @@ judges a layer against its matched parent: a panel that moved is one finding, no
 A screen is a directory, and a project describes its front end once:
 
 ```
-<screens>/stand.json           how the front end starts, once per project
+.agentgate.json                design.stand: how the front end starts, once per project
 <screens>/<screen>/screen.json where the screen is: url, root, and optionally locale, viewport, cookies
 <screens>/<screen>/package/    the design, written by `agentgate figma pull`
 <screens>/<screen>/fixtures/   recorded GraphQL answers: the state the screen is shown in

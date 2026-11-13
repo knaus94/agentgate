@@ -121,6 +121,14 @@ type Config struct {
 	Worktree          Worktree             `json:"worktree"`
 	Staging           Staging              `json:"staging"`
 	Modes             map[string]Mode      `json:"modes"`
+	Design            Design               `json:"design"`
+}
+
+// Design says, once for a repository, where its design screens are kept and how its front end is started to
+// show one. The stand is read by the layout check itself.
+type Design struct {
+	Screens string          `json:"screens"` // directory of the screens; default .agentgate/design
+	Stand   json.RawMessage `json:"stand"`   // {command, ready, env_file, env, graphql_env, cookies}
 }
 
 // Route is one resolved model invocation.

@@ -8,14 +8,22 @@ import { serveFixtures } from './fixtures.mjs';
 
 const json = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
 
-// <screens>/stand.json describes the project, <screens>/<screen>/screen.json the screen.
+// The project's file says how its front end starts; <screen>/screen.json says where the screen is.
+export function projectDesign(from) {
+  const file = path.join(repository(from), '.agentgate.json');
+  const design = fs.existsSync(file) ? json(file).design : null;
+  if (!design || !design.stand) {
+    throw new Error(`${file} does not say how the front end starts: add "design": {"stand": {"command": […], "ready": "http://localhost:<port>"}}`);
+  }
+  return design;
+}
+
 export function readScreen(dir) {
   const screenFile = path.join(dir, 'screen.json');
   if (!fs.existsSync(screenFile)) return null;
-  const standFile = path.join(path.dirname(path.resolve(dir)), 'stand.json');
-  if (!fs.existsSync(standFile)) throw new Error(`${standFile} is missing: it says how the project's front end starts`);
-  const stand = json(standFile);
+  const stand = projectDesign(dir).stand;
   const screen = json(screenFile);
+  screen.cookies ??= stand.cookies;
   const url = new URL(screen.url, stand.ready).href;
   const host = new URL(url).hostname;
   return { stand, screen, url, package: path.join(dir, 'package'), fixtures: path.join(dir, 'fixtures'),
@@ -25,6 +33,9 @@ export function readScreen(dir) {
 
 function repository(from) {
   for (let dir = path.resolve(from); dir !== path.dirname(dir); dir = path.dirname(dir)) {
+    if (fs.existsSync(path.join(dir, '.git'))) return dir;
+  }
+  for (let dir = process.cwd(); dir !== path.dirname(dir); dir = path.dirname(dir)) {
     if (fs.existsSync(path.join(dir, '.git'))) return dir;
   }
   return process.cwd();
@@ -78,10 +89,17 @@ export async function ensureStand(dir, { record, keep, log = () => {} } = {}) {
   const { stand, fixtures } = readScreen(dir);
   if (await answers(stand.ready)) return async () => {};
   const root = repository(dir);
+  // `--record` by itself records from the backend the project names.
+  if (record === true) record = stand.graphql;
+  if (record === true) throw new Error('`--record` needs a gateway: give its URL, or name it as design.stand.graphql in .agentgate.json');
   const server = await serveFixtures({ dir: fixtures, port: 0, record });
   const endpoint = `http://127.0.0.1:${server.address().port}/graphql`;
   const env = { ...process.env, ...envFile(stand.env_file && path.join(root, stand.env_file)), ...(stand.env || {}) };
-  for (const name of stand.graphql_env || []) env[name] = endpoint;
+  // Recorded answers stand in for the backend when there are any; a screen without them is shown by the
+  // backend the project's own environment names.
+  const recorded = fs.existsSync(fixtures) && fs.readdirSync(fixtures).some((name) => name.endsWith('.json'));
+  if (recorded || record) for (const name of stand.graphql_env || []) env[name] = endpoint;
+  else if (stand.graphql) for (const name of stand.graphql_env || []) env[name] = stand.graphql;
   log(`starting the stand: ${stand.command.join(' ')}`);
   const child = spawn(stand.command[0], stand.command.slice(1), { cwd: root, env, detached: true, stdio: 'ignore' });
   const stop = async () => {

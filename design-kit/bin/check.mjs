@@ -8,9 +8,11 @@ import { diffImages, readPage, still } from '../lib/page-read.mjs';
 import { ensureStand, readScreen } from '../lib/stand.mjs';
 
 const usage = `usage:
+  layout new <screen> <figma-url> --url <path> --root <css> [--locale ru-RU]
+                                                 make a screen: pull the design and write where it is shown
   layout <screen>                                compare a screen with its design: starts the stand when it is not running
         [--keep]                 leave the stand running afterwards
-        [--record <gateway>]     start the stand against a real gateway and keep its answers as the screen's fixtures
+        [--record [<gateway>]]   show the screen through a real backend and keep its answers as the screen's fixtures
   layout <package> --url <page> [--root <css>]   compare any page with a design package written by \`figma pull\`
         --root <css>            the element that implements the pulled node (default: the whole document)
         [--storage-state <f>]   a browser session for the stand, as Playwright saves it
@@ -36,8 +38,25 @@ const rest = [];
 for (let index = 2; index < process.argv.length; index++) {
   const value = process.argv[index];
   if (value === '--keep') flags.keep = true;
+  else if (value === '--record' && !/^https?:/.test(process.argv[index + 1] || '')) flags.record = true;
   else if (value.startsWith('--')) flags[value.slice(2)] = process.argv[++index];
   else rest.push(value);
+}
+if (rest[0] === 'new') {
+  // A screen is made in one go: the design and where it is shown.
+  const [, target, figma] = rest;
+  if (!target || !figma || !flags.url || !flags.root) fail(usage);
+  fs.mkdirSync(target, { recursive: true });
+  const { execFileSync } = await import('node:child_process');
+  try {
+    execFileSync(process.execPath, [new URL('./figma.mjs', import.meta.url).pathname, 'pull', figma, '--out', path.join(target, 'package')], { stdio: ['ignore', 'ignore', 'inherit'] });
+  } catch {
+    process.exit(1);
+  }
+  fs.writeFileSync(path.join(target, 'screen.json'), JSON.stringify({ url: flags.url, root: flags.root, locale: flags.locale, viewport: flags.viewport }, null, 2) + '\n');
+  const brief = fs.readFileSync(path.join(target, 'package', 'brief.md'), 'utf8');
+  console.log(JSON.stringify({ screen: target, brief: path.join(target, 'package', 'brief.md'), brief_tokens_about: Math.round(Buffer.byteLength(brief) / 3.2) }, null, 2));
+  process.exit(0);
 }
 let dir = rest[0];
 if (!dir) fail(usage);
