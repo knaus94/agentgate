@@ -20,6 +20,7 @@ const usage = `usage:
         [--wait <css>]          an element that must be there before anything is measured
         [--locale ru-RU]        the language the page is opened in
         [--viewport 1920x1080]  default: the size of the screen the node was drawn in
+        [--device mobile]      mobile/touch Chromium (also for tablets); default desktop, even at narrow widths
         [--map <file>]          {"ignore": {"<handle>": "why"}, "dynamic": ["<handle>"], "select": {"<handle>": "tag.class"}}
         [--tolerance 2]         pixels a position or a size may be off by
         [--max-pixel-diff 0.1]  fail when more than this share of pixels differs (reported either way)
@@ -60,7 +61,7 @@ async function main() {
     }
     // A screen somebody described already keeps its description: only the design was missing.
     if (!fs.existsSync(path.join(target, 'screen.json'))) {
-      fs.writeFileSync(path.join(target, 'screen.json'), JSON.stringify({ url: flags.url, root: flags.root, locale: flags.locale, viewport: flags.viewport }, null, 2) + '\n');
+      fs.writeFileSync(path.join(target, 'screen.json'), JSON.stringify({ url: flags.url, root: flags.root, locale: flags.locale, viewport: flags.viewport, device: flags.device }, null, 2) + '\n');
     }
     const brief = fs.readFileSync(path.join(target, 'package', 'brief.md'), 'utf8');
     console.log(JSON.stringify({ screen: target, brief: path.join(target, 'package', 'brief.md'), brief_tokens_about: Math.round(Buffer.byteLength(brief) / 3.2) }, null, 2));
@@ -81,9 +82,12 @@ async function main() {
     flags.root ??= screen.screen.root;
     flags.locale ??= screen.screen.locale;
     flags.viewport ??= screen.screen.viewport;
+    flags.device ??= screen.screen.device;
     flags.map ??= screen.map;
   }
   if (!flags.url) fail(usage);
+  const device = flags.device || 'desktop';
+  if (!['desktop', 'mobile'].includes(device)) fail('device must be desktop or mobile');
 
   const read = (name) => {
     try {
@@ -98,11 +102,16 @@ async function main() {
   for (const [handle, why] of Object.entries(map.ignore || {})) {
     if (!String(why).trim()) fail(`the map ignores ${handle} without saying why`);
   }
+  for (const [handle, selector] of Object.entries(map.select || {})) {
+    if (!spec.nodes.some((node) => node.ref === handle) || typeof selector !== 'string' || !selector.trim()) {
+      fail(`map.select needs a known layer handle and a CSS selector: ${handle}`);
+    }
+  }
   const limits = { ...defaults };
   if (flags.tolerance) limits.position = limits.size = Number(flags.tolerance);
   const [width, height] = (flags.viewport || `${manifest.screen?.width || spec.frame.width}x${Math.min(manifest.screen?.height || 1080, 1200)}`).split('x').map(Number);
   const contract = crypto.createHash('sha256').update(JSON.stringify({ package: manifest.digest,
-    url: flags.url, root: flags.root || '', viewport: [width, height], locale: flags.locale, map, limits })).digest('hex');
+    url: flags.url, root: flags.root || '', viewport: [width, height], device, locale: flags.locale, map, limits })).digest('hex');
 
   let stopStand = async () => {};
   if (screen) {
@@ -113,6 +122,7 @@ async function main() {
   try {
     browser = await openBrowser();
     const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1, reducedMotion: 'reduce',
+      isMobile: device === 'mobile', hasTouch: device === 'mobile',
       locale: flags.locale, storageState: flags['storage-state'] || screen?.storageState });
     const page = await context.newPage();
     await page.goto(flags.url, { waitUntil: 'load', timeout: 60000 }).catch((error) => fail(`the page did not open: ${String(error).split('\n')[0]}`));
@@ -122,14 +132,18 @@ async function main() {
     await page.evaluate(() => document.fonts.ready);
     await page.waitForTimeout(400);
 
-    const seen = await page.evaluate(readPage, flags.root || '');
-    if (seen.error && flags['write-baseline']) {
+    const seen = await page.evaluate(readPage, { root: flags.root || '', select: map.select });
+    if (seen.missingRoot && flags['write-baseline']) {
       // The page or its root is not there before the work: it is what the task builds.
       fs.writeFileSync(flags['write-baseline'], JSON.stringify({ contract, known: [] }) + '\n');
       console.log(`design baseline: ${page.url()} does not show “${spec.frame.name}” yet`);
       return;
     }
     if (seen.error) fail(`${seen.error} at ${page.url()}`);
+    const measurement = { device, viewport: { width, height }, documentWidth: seen.documentWidth,
+      horizontalOverflow: seen.horizontalOverflow, root: { selector: flags.root || 'html', ...seen.root } };
+    const measurementLine = `measurement: ${device} ${width}x${height}; document width ${measurement.documentWidth}; root ${measurement.root.selector} ${seen.root.width}x${seen.root.height}; padding ${seen.root.padding.join('/')}; horizontal overflow ${measurement.horizontalOverflow}`;
+    console.log(measurementLine);
     const result = compare(spec, seen, map, limits);
     if (result.compared === 0 && flags['write-baseline']) {
       // Nothing is built yet: every difference the finished screen has will be a new one.
@@ -171,12 +185,13 @@ async function main() {
       save('marked.png', pictures.marked);
       save('diff.png', pictures.diff);
       fs.writeFileSync(path.join(flags.out, 'actual.png'), shot);
-      fs.writeFileSync(path.join(flags.out, 'report.json'), JSON.stringify({ url: page.url(), package: manifest.digest, pixels: pictures.ratio, ...result }, null, 1));
+      fs.writeFileSync(path.join(flags.out, 'report.json'), JSON.stringify({ url: page.url(), package: manifest.digest, measurement, pixels: pictures.ratio, ...result }, null, 1));
       written = { marked: path.join(flags.out, 'marked.png'), diff: path.join(flags.out, 'diff.png') };
     }
-    const text = summary(result, pictures.ratio, written);
+    const resultSummary = summary(result, pictures.ratio, written);
+    const text = measurementLine + '\n' + resultSummary;
     if (written) fs.writeFileSync(path.join(flags.out, 'report.md'), text);
-    process.stdout.write(text);
+    process.stdout.write(resultSummary);
     const tooDifferent = flags['max-pixel-diff'] !== undefined && pictures.ratio > Number(flags['max-pixel-diff']);
     if (tooDifferent) console.log(`more than ${flags['max-pixel-diff']} of the pixels differ`);
     code = result.issues.length || tooDifferent ? 1 : 0;

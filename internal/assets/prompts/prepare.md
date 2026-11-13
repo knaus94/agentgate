@@ -17,12 +17,36 @@ Plan shape (omit optional fields you do not need):
 
     {"request":"original request","brief":"scope, non-goals, behavior, invariants",
      "assessment":{"size":"ordinary","risks":[],"uncertainty":"low","evidence":"inspected locations"},
-     "requirements":[{"id":"R1","text":"observable outcome","method":"code|check|browser"}],
+     "requirements":[{"id":"R1","text":"observable outcome","method":"check"}],
      "streams":[{"name":"web","domain":"frontend","files":["path/to/file"],"brief":"implementation task","after":[]}],
      "context":["analogous implementation","relevant docs"],
-     "checks":[{"argv":["exact","existing","command"],"kind":"test|typecheck|lint|build|runtime"}],
+     "checks":[{"argv":["exact","existing","command"],"kind":"test"}],
      "ui":{"summary":"accepted design and behavior","criteria":["acceptance"],"preserve":["existing behavior"]},
-     "design":[{"figma":"link to the selected content node","name":"screen-name","url":"/local/page","root":"selector","stream":"web"}]}
+     "design":[{"figma":"link to the selected content node","name":"screen-name","url":"/local/page","root":"selector","viewport":"390x844","device":"mobile","stream":"web"}]}
+
+Assessment size is trivial/ordinary/complex; uncertainty is low/material (not high). Risks are only
+authorization, security, money, data-integrity, concurrency, migration, public-contract; layout uncertainty
+belongs in evidence, not an invented risk. Evidence methods are code/check/browser; browser means an opted-in
+model behavior scenario (`visual.enabled: true`), while automated rendered layout is check evidence.
+
+## Responsive measurement
+
+- Viewport and device are separate. For a phone/tablet reference use device mobile and its intended CSS
+  viewport; a narrow desktop context still has desktop scrollbar gutters and no touch. Tablets use mobile
+  with their own viewport. Keep desktop for desktop references, including narrow desktop windows.
+- Pair equivalent border boxes, including padding. A 390px Figma Content frame with 12px side padding matches
+  a 390px content wrapper with that padding, not its 366px child. `main.app-container` is a valid root when it
+  corresponds to that content frame; preserving the shell does not forbid measuring its content wrapper.
+  Do not stretch content, change shell CSS, change viewport to compensate for gutters, or loosen tolerances.
+- Use host-provided design_context and the report's measurement line: device, viewport, document width,
+  root size/padding. The last observation may predate the current code and is for diagnosis, not acceptance.
+- Baseline absence means a strict comparison, not a missing prerequisite. Never claim that a host baseline
+  is missing because a worker cannot read a state path; never create one from implemented code to get a pass.
+- For overlapping images/icons use map.select with a real, unique CSS selector inside the root. Explicit
+  selection identifies a layer; it does not exempt position, size or styling from comparison. Report the
+  proposed mapping for approval; do not edit a map, broad ignore list or private state yourself.
+- A technical BLOCKED result needs a concrete summary and setup prerequisites; questions may be empty when
+  no product decision is missing. Return that result instead of inventing a plan or asking the lead to parse data.
 
 - Discover the actual architecture, analogous code, assets, API contracts and narrow checks. Include every
   file the stream needs, including adjacent styles and localization. A writer may not edit outside that list.

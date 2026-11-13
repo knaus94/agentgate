@@ -2,6 +2,21 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.11.0
+
+- Phone and tablet comparisons have an explicit `device: mobile` mode, separate from CSS viewport size.
+  Reports include document/root dimensions, padding and overflow, so a desktop scrollbar gutter is not
+  mistaken for a mobile layout defect. The device mode is part of the baseline/review contract.
+- `map.select` resolves unique native CSS selectors; explicit matches still report wrong geometry. Separate
+  artwork layers no longer automatically reuse the same element. Ambiguous selectors fail as setup errors.
+- Preparation returns technical BLOCKED reports even without product questions. Active measurement repairs
+  reuse selected designs, receive host observation/baseline facts and do not reopen Figma unless requested.
+  Prompts document matching padded content wrappers and the distinction between layout and behavior evidence.
+- An explicitly resumed, idle correction can be replanned without clearing its original snapshot or findings.
+- Rendered `no_reuse` checks run on every review, even on unchanged source; a changed screenshot invalidates
+  the visual review instead of reusing an earlier observation.
+- Regression scenarios cover 390px phones, 768px tablets, classic desktop gutters, padded roots and artwork mappings.
+
 ## 0.10.0
 
 - **Preparation belongs to a worker.** `prepare` collects a bounded design catalogue and delegates repository

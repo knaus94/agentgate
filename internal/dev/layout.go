@@ -32,6 +32,7 @@ type DesignRef struct {
 	StorageState string `json:"storage_state,omitempty"` // a browser session of the stand
 	Locale       string `json:"locale,omitempty"`
 	Viewport     string `json:"viewport,omitempty"`
+	Device       string `json:"device,omitempty"` // desktop (default) or mobile; tablets use mobile with their viewport
 }
 
 const layoutTimeout = 300
@@ -57,14 +58,15 @@ func (d DesignRef) digest() string {
 		screen, _ := os.ReadFile(filepath.Join(d.Screen, "screen.json"))
 		exceptions = append(exceptions, screen...)
 	}
-	return digest(map[string]any{"package": manifest.Digest, "map": string(exceptions), "url": d.URL, "root": d.Root, "viewport": d.Viewport})
+	return digest(map[string]any{"package": manifest.Digest, "map": string(exceptions), "url": d.URL, "root": d.Root, "viewport": d.Viewport, "device": d.Device,
+		"render": entry(filepath.Join(d.dir(), "last", "actual.png"))})
 }
 
 // dir is where the measurements of one design in one checkout are kept: what was there before the task, and
 // the pictures of the last check.
 func (d DesignRef) dir() string {
 	return filepath.Join(checkoutDir(""), "layout", digest(map[string]any{"package": d.Package, "figma": d.Figma,
-		"url": d.URL, "root": d.Root, "viewport": d.Viewport, "locale": d.Locale})[:16])
+		"url": d.URL, "root": d.Root, "viewport": d.Viewport, "locale": d.Locale, "device": d.Device})[:16])
 }
 
 func (d DesignRef) argv(extra ...string) []string {
@@ -73,7 +75,7 @@ func (d DesignRef) argv(extra ...string) []string {
 		target = d.Screen
 	}
 	out := []string{layoutCommand(), "layout", target}
-	for flag, value := range map[string]string{"--url": d.URL, "--root": d.Root, "--map": d.Map, "--storage-state": d.StorageState, "--locale": d.Locale, "--viewport": d.Viewport} {
+	for flag, value := range map[string]string{"--url": d.URL, "--root": d.Root, "--map": d.Map, "--storage-state": d.StorageState, "--locale": d.Locale, "--viewport": d.Viewport, "--device": d.Device} {
 		if value != "" {
 			out = append(out, flag, value)
 		}
@@ -150,6 +152,9 @@ func (r *Resolved) validateDesign() error {
 	plan.Checks = slices.DeleteFunc(slices.Clone(plan.Checks), generatedDesignCheck)
 	for index := range plan.Design {
 		design := &plan.Design[index]
+		if design.Device != "" && design.Device != "desktop" && design.Device != "mobile" {
+			return fmt.Errorf("design device is desktop or mobile: %q", design.Device)
+		}
 		if design.Figma != "" && design.Screen == "" {
 			name := design.Name
 			if name == "" {
@@ -230,6 +235,12 @@ func (g *Gate) prepareDesigns(measureBefore bool) error {
 			if design.Locale != "" {
 				argv = append(argv, "--locale", design.Locale)
 			}
+			if design.Device != "" {
+				argv = append(argv, "--device", design.Device)
+			}
+			if design.Viewport != "" {
+				argv = append(argv, "--viewport", design.Viewport)
+			}
 			var out bytes.Buffer
 			cmd := exec.Command(argv[0], argv[1:]...)
 			cmd.Stdout, cmd.Stderr = &out, &out
@@ -299,6 +310,58 @@ func (g *Gate) designDigests() []string {
 	var out []string
 	for _, design := range g.Plan.Design {
 		out = append(out, design.digest())
+	}
+	return out
+}
+
+// designContext gives preparation the host's observations. A worker must not infer host readiness from
+// filesystem paths it cannot see, or mistake an intentionally absent baseline for a missing prerequisite.
+func (g *Gate) designContext() []map[string]any {
+	var out []map[string]any
+	for _, design := range g.Plan.Design {
+		var manifest struct {
+			Frame  json.RawMessage `json:"frame"`
+			Screen json.RawMessage `json:"screen"`
+		}
+		raw, _ := os.ReadFile(filepath.Join(design.Package, "manifest.json"))
+		_ = json.Unmarshal(raw, &manifest)
+		var screen struct{ Root, Viewport, Device string }
+		if design.Screen != "" {
+			raw, _ := os.ReadFile(filepath.Join(design.Screen, "screen.json"))
+			_ = json.Unmarshal(raw, &screen)
+		}
+		if design.Root != "" {
+			screen.Root = design.Root
+		}
+		if design.Viewport != "" {
+			screen.Viewport = design.Viewport
+		}
+		if design.Device != "" {
+			screen.Device = design.Device
+		}
+		if screen.Device == "" {
+			screen.Device = "desktop"
+		}
+		before := filepath.Join(design.dir(), "baseline.json")
+		last := filepath.Join(design.dir(), "last", "report.md")
+		// The last recorded command may use an older output directory after an upgrade or replan.
+		for index := len(g.Checks) - 1; index >= 0; index-- {
+			argv := g.Checks[index].Argv
+			if len(argv) < 3 || argv[1] != "layout" || (argv[2] != design.Screen && argv[2] != design.Package) {
+				continue
+			}
+			for i := 3; i+1 < len(argv); i += 2 {
+				if argv[i] == "--out" {
+					last = filepath.Join(argv[i+1], "report.md")
+				}
+			}
+			break
+		}
+		report, _ := os.ReadFile(last)
+		out = append(out, map[string]any{"design": design, "frame": manifest.Frame, "screen": manifest.Screen,
+			"effective":               map[string]string{"root": screen.Root, "viewport": screen.Viewport, "device": screen.Device},
+			"baseline_exists_on_host": fileExists(before), "baseline_policy": "Missing or incompatible baseline means strict comparison; it is not a prerequisite and must not be recreated after implementation.",
+			"last_observation": string(report), "observation_note": "Historical diagnostic evidence, not proof of the current source. The next check records fresh measurements."})
 	}
 	return out
 }

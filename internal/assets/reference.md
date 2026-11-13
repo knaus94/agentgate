@@ -28,7 +28,7 @@ saved with `plan save`). Unknown fields are rejected.
 | `land` | `{how?}` | isolated task only: bring it into the checkout — `apply` (default), `commit`, `branch` or `drop` |
 | `hold` | `{reason, cancelled?}` | park the task |
 | `resume`, `stop`, `status` | — | lifecycle and observation |
-| `prepare` | `{request, name?, context?, notes?}` | read-only worker drafts and saves the plan; no source edits or checks |
+| `prepare` | `{request, name?, context?, notes?, refresh_designs?}` | read-only worker drafts and saves the plan; reuses an active task's selected packages unless refresh_designs is true |
 | `replan` | complete plan with `update` | replace an idle single-pass task contract while preserving its original baseline |
 | `watch [--all] [--once]` | — | the user's interactive panel; `--once` prints it as text |
 
@@ -84,8 +84,15 @@ after every accepted stage until the user says to go on.
 `design` is for a stream that implements a Figma design. Give the link to the frame (`figma`), the page that
 shows it (`url`, a path) and the element that implements it (`root`): at launch the design is pulled into a
 screen directory, the front end is started, the page is measured, and the layout check is declared. A screen
-that exists already is named instead: `{"screen": "<dir>", "stream": …}`. How the front end starts is said
-once per repository, in `.agentgate.json`:
+that exists already is named instead: `{"screen": "<dir>", "stream": …}`.
+
+For a phone/tablet add `device: "mobile"` and `viewport: "390x844"` (or the tablet's size). Default device is
+desktop regardless of width. Pair the exported frame with an equivalent root including its padding; use
+the report's measurement line to inspect device, viewport, document width and root dimensions. An existing
+content wrapper is a valid root when it corresponds to the exported content frame. `map.select` accepts
+unique CSS selectors and does not exempt a selected element from geometry or styling checks.
+
+How the front end starts is said once per repository, in `.agentgate.json`:
 
 ```json
 {"design": {"screens": "apps/web/testing/design",

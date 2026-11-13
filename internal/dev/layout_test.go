@@ -79,6 +79,8 @@ func TestLayoutPreparationRecoversAndReplanReplacesManagedChecks(t *testing.T) {
 	legacy.Generated = ""
 	plan.Checks = append(plan.Checks, legacy, Check{Argv: []string{layoutCommand(), "layout", "independent", "--url", "file:///tmp/reference"}})
 	plan.Design[0].Root = "#content"
+	plan.Design[0].Device = "mobile"
+	plan.Design[0].Viewport = "390x844"
 	plan.Update = "Pair the content export with the content root"
 	f.do("replan", func() (any, error) { return Replan(f.cfg, Current(), plan) })
 	gate := Current()
@@ -86,13 +88,28 @@ func TestLayoutPreparationRecoversAndReplanReplacesManagedChecks(t *testing.T) {
 		t.Fatalf("stale generated checks survived replan: %+v", gate.Plan.Checks)
 	}
 	for _, check := range gate.Plan.Checks {
-		if generatedDesignCheck(check) && !slices.Contains(check.Argv, "#content") {
+		if generatedDesignCheck(check) && (!slices.Contains(check.Argv, "#content") || !slices.Contains(check.Argv, "mobile") || !slices.Contains(check.Argv, "390x844")) {
 			t.Fatal("screen overrides were lost")
 		}
+	}
+	facts := gate.designContext()
+	if len(facts) != 1 || facts[0]["baseline_exists_on_host"] != false ||
+		facts[0]["effective"].(map[string]string)["device"] != "mobile" || !strings.Contains(facts[0]["baseline_policy"].(string), "not a prerequisite") {
+		t.Fatalf("preparation lacks the host's measurement facts: %+v", facts)
 	}
 	if strings.Count(fileText(t, filepath.Join(dir, "baselines")), "baseline") != 1 {
 		t.Fatal("replan rebaselined the implemented page")
 	}
+	f.review()
+	callsBefore := strings.Count(fileText(t, filepath.Join(dir, "calls")), "\n")
+	f.review()
+	if strings.Count(fileText(t, filepath.Join(dir, "calls")), "\n") <= callsBefore {
+		t.Fatal("a rendered no_reuse check must run on review even when source is unchanged")
+	}
+	image := filepath.Join(Current().Plan.Design[0].dir(), "last", "actual.png")
+	must(t, os.MkdirAll(filepath.Dir(image), 0o755))
+	write(t, image, "new rendered evidence")
+	f.fails("finish", "task contract changed", func() (any, error) { return Finish(f.cfg, Current(), FinishInput{Summary: "old screenshot review"}) })
 	f.review()
 	f.finish()
 }
@@ -116,4 +133,25 @@ func TestLayoutSetupFailureIsNotSentToAWriter(t *testing.T) {
 	must(t, os.Remove(filepath.Join(dir, "setup")))
 	f.review()
 	f.finish()
+}
+
+func TestPreparationOfAnActiveDesignReusesItsHostContext(t *testing.T) {
+	f := newFixture(t)
+	dir := layoutFixture(t)
+	plan := f.plan("-m implement https://www.figma.com/design/abc/example?node-id=1-2")
+	plan.Design = []DesignRef{screenFixture(t)}
+	f.launch(plan)
+	f.model = func(kind string, packet map[string]any, _ provider.Call) (string, error) {
+		if kind == "prepare" {
+			if packet["design_context"] == nil || packet["design_source"] == nil {
+				t.Fatal("no reusable host context")
+			}
+			return `{"status":"BLOCKED","summary":"one explicit mapping is needed","questions":[],"setup":["Select the existing artwork element"],"plan_json":"","context_pack":{}}`, nil
+		}
+		return "", nil
+	}
+	f.do("prepare", func() (any, error) { return Prepare(f.cfg, PrepareInput{Notes: "repair measurement"}) })
+	if strings.Contains(fileText(t, filepath.Join(dir, "calls")), "figma") {
+		t.Fatal("an active measurement repair reopened Figma")
+	}
 }

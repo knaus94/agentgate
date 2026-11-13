@@ -10,7 +10,7 @@ import (
 // Replan replaces the contract at a stable boundary. It preserves source snapshots, findings and author
 // sessions; it never writes code or captures a new before-image of an implementation already in progress.
 func Replan(cfg *config.Config, gate *Gate, plan *Plan) (any, error) {
-	if !slices.Contains([]string{"implementing", "awaiting-review", "reviewed"}, gate.Phase) {
+	if !slices.Contains([]string{"implementing", "correcting", "awaiting-review", "reviewed"}, gate.Phase) {
 		return nil, errors.New("replan needs an idle active task; explicitly resume a held task first")
 	}
 	if gate.Epic != nil || plan.staged() {

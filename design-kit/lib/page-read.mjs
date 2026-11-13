@@ -1,9 +1,22 @@
 // What is read from the implementation: every visible text and every element that paints something, with its
 // box and computed style. Runs inside the page. Coordinates are relative to the root element.
 
-export function readPage(rootSelector) {
+export function readPage(input) {
+  const rootSelector = typeof input === 'string' ? input : input?.root || '';
+  const select = typeof input === 'object' && input ? input.select || {} : {};
   const root = rootSelector ? document.querySelector(rootSelector) : document.documentElement;
-  if (!root) return { error: `no element matches ${rootSelector}` };
+  if (!root) return { error: `no element matches ${rootSelector}`, missingRoot: true };
+  const selected = new Map();
+  const unresolved = [];
+  for (const [ref, selector] of Object.entries(select)) {
+    let matches;
+    try { matches = [...(root.matches(selector) ? [root] : []), ...root.querySelectorAll(selector)]; }
+    catch { return { error: `map.select ${ref} has an invalid CSS selector: ${selector}` }; }
+    if (matches.length > 1) return { error: `map.select ${ref} matches more than one element: ${selector}` };
+    if (matches.length === 0) { unresolved.push([ref, selector]); continue; }
+    if (!selected.has(matches[0])) selected.set(matches[0], []);
+    selected.get(matches[0]).push(ref);
+  }
   const origin = rootSelector ? root.getBoundingClientRect() : { left: -window.scrollX, top: -window.scrollY };
   const round = (value) => Math.round(value * 100) / 100;
   const box = (rect) => [round(rect.left - origin.left), round(rect.top - origin.top), round(rect.width), round(rect.height)];
@@ -95,8 +108,9 @@ export function readPage(rootSelector) {
     const painted = (background && background.a > 0) || style.backgroundImage !== 'none' || border > 0 || style.boxShadow !== 'none' ||
       media.has(element.tagName.toUpperCase());
     const layout = style.display.includes('flex') || style.display.includes('grid');
-    if (!painted && !layout) continue;
+    if (!painted && !layout && !selected.has(element)) continue;
     boxes.push({ box: box(rect), where: describe(element), painted, tag: element.tagName.toLowerCase(),
+      refs: selected.get(element),
       background: background && background.a > 0 ? background : undefined, image: style.backgroundImage !== 'none' || undefined,
       border: border > 0 ? { width: border, color: rgba(style.borderTopColor) } : undefined,
       radius: [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomRightRadius, style.borderBottomLeftRadius].map((value) => px(value) ?? value),
@@ -105,8 +119,18 @@ export function readPage(rootSelector) {
       direction: layout ? (style.display.includes('grid') ? 'grid' : style.flexDirection.startsWith('column') ? 'column' : 'row') : undefined,
       opacity: parseFloat(style.opacity) < 1 ? parseFloat(style.opacity) : undefined });
   }
+  // Earlier maps used the compact labels from the report rather than real CSS selectors.
+  for (const [ref, selector] of unresolved) {
+    const matches = boxes.filter((box) => box.where === selector);
+    if (matches.length > 1) return { error: `map.select ${ref} matches more than one report label: ${selector}` };
+    if (matches.length === 1) (matches[0].refs ??= []).push(ref);
+  }
   const rootRect = root.getBoundingClientRect();
-  return { texts, boxes, root: { width: round(rootRect.width), height: round(Math.max(rootRect.height, root.scrollHeight || 0)) } };
+  const rootStyle = getComputedStyle(root);
+  return { texts, boxes, documentWidth: document.documentElement.clientWidth,
+    horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    root: { width: round(rootRect.width), height: round(Math.max(rootRect.height, root.scrollHeight || 0)),
+      padding: [rootStyle.paddingTop, rootStyle.paddingRight, rootStyle.paddingBottom, rootStyle.paddingLeft].map((value) => px(value) ?? 0) } };
 }
 
 // Motion makes two runs differ: it is stopped before anything is measured.

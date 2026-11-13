@@ -17,10 +17,11 @@ import (
 )
 
 type PrepareInput struct {
-	Request string   `json:"request"`
-	Name    string   `json:"name,omitempty"`
-	Context []string `json:"context,omitempty"`
-	Notes   string   `json:"notes,omitempty"`
+	Request        string   `json:"request"`
+	Name           string   `json:"name,omitempty"`
+	Context        []string `json:"context,omitempty"`
+	Notes          string   `json:"notes,omitempty"`
+	RefreshDesigns bool     `json:"refresh_designs,omitempty"` // re-read Figma when the selected design itself changed
 }
 
 var prepareSchema = object(map[string]any{
@@ -76,10 +77,16 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 	if gate != nil && gate.active() {
 		packet["current_plan"], packet["phase"], packet["check_failures"] = gate.Plan, gate.Phase, gate.failing()
 		packet["hold_reason"] = gate.HoldReason
+		packet["design_context"] = gate.designContext()
 	}
 	var designs []json.RawMessage
 	seen := map[string]bool{}
-	for _, link := range figmaURL.FindAllString(input.Request, -1) {
+	links := figmaURL.FindAllString(input.Request, -1)
+	if gate != nil && gate.active() && len(gate.Plan.Design) > 0 && input.Request == gate.Plan.Request && !input.RefreshDesigns {
+		links = nil
+		packet["design_source"] = "Reuse the selected packages and design_context for this task. No Figma browser was started; refresh_designs is needed only when the design selection itself must be rediscovered."
+	}
+	for _, link := range links {
 		link = strings.TrimRight(link, ").,;")
 		if seen[link] {
 			continue
@@ -125,9 +132,10 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 		if err := decode(result.Answer, &answer); err != nil {
 			return nil, err
 		}
-		if answer.Status == "BLOCKED" && len(answer.Questions) > 0 {
+		if answer.Status == "BLOCKED" && strings.TrimSpace(answer.Summary) != "" {
 			return map[string]any{"status": "BLOCKED", "summary": answer.Summary, "questions": answer.Questions,
-				"setup": answer.Setup, "route": used, "dir": dir, "next": "Resolve these decisions, then prepare again with notes. No implementation has started."}, nil
+				"setup": answer.Setup, "route": used, "dir": dir, "next": "Resolve only the reported decisions or technical prerequisites, then prepare again with notes. " +
+					"The blocker is recorded here; do not parse private worker files to discover it. No implementation has started."}, nil
 		}
 		plan := &Plan{}
 		decoder := json.NewDecoder(strings.NewReader(answer.PlanJSON))

@@ -67,6 +67,7 @@ export function compare(spec, page, map = {}, limits = defaults) {
     }
     return null;
   };
+  const usedAssets = new Set();
   for (const node of nodes) {
     if (node.text) continue;
     if (!(node.asset || (node.fills || []).length > 0 || node.stroke)) {
@@ -80,14 +81,20 @@ export function compare(spec, page, map = {}, limits = defaults) {
     let best = null;
     let score = 0;
     for (const element of page.boxes) {
-      if (chosen ? element.where !== chosen : !element.painted) continue;
+      if (chosen ? !element.refs?.includes(node.ref) && element.where !== chosen : !element.painted) continue;
+      if (node.asset && usedAssets.has(element)) continue;
+      if (node.asset && !chosen && !element.image && !['img', 'svg', 'canvas', 'video', 'picture'].includes(element.tag)) continue;
+      if (chosen) { best = element; score = 1; break; }
       // A panel that lost or gained content keeps its corner and one of its sides: that is still the panel.
       const pinned = node.layout && Math.min(node.box[2], node.box[3]) >= 100 && Math.abs(element.box[0] - expected[0]) <= 4 && Math.abs(element.box[1] - expected[1]) <= 4 &&
         (Math.abs(element.box[2] - expected[2]) <= 4 || Math.abs(element.box[3] - expected[3]) <= 4);
       const value = Math.max(overlap(expected, element.box), pinned ? limits.match : 0);
       if (value > score) [best, score] = [element, value];
     }
-    if (best && score >= limits.match) found.set(node.id, { element: best, shift: [best.box[0] - node.box[0], best.box[1] - node.box[1]] });
+    if (best && score >= limits.match) {
+      found.set(node.id, { element: best, shift: [best.box[0] - node.box[0], best.box[1] - node.box[1]] });
+      if (node.asset) usedAssets.add(best);
+    }
   }
 
   // 3. A text whose words are not on the page may still be there with live data in it: same place, same size.

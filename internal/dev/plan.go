@@ -330,6 +330,11 @@ func (r *Resolved) decideMode() error {
 
 func (r *Resolved) validateUI() error {
 	plan := r.Plan
+	for _, requirement := range plan.Requirements {
+		if requirement.Method == "browser" && (plan.Visual == nil || !plan.Visual.Enabled) {
+			return fmt.Errorf("requirement %q requests browser-scenario evidence but visual.enabled is false; use method check for rendered layout checks, or explicitly enable behavior scenarios", requirement.ID)
+		}
+	}
 	visible := false
 	for _, file := range plan.Files() {
 		visible = visible || slices.Contains(uiSuffixes, filepath.Ext(file))

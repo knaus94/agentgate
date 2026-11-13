@@ -8,6 +8,27 @@ by tools; a model reads short results.
 
 ## Coordination
 
+For phone and tablet references, declare `device: "mobile"` and the intended CSS `viewport` in each design
+entry (or in `screen.json`). A narrow desktop window is still a desktop: classic scrollbar gutters can
+reduce its document width. Tablet checks use the same mobile mode with their own viewport. This is Chromium
+mobile/touch emulation at one screenshot pixel per CSS pixel, not a physical-device or Safari test.
+
+```json
+{"design": [{"screen": ".agentgate/design/mobile", "root": "main.app-container",
+             "viewport": "390x844", "device": "mobile", "stream": "web"}]}
+```
+
+Match the exported frame's border box, including padding. A 390px content frame with 12px padding matches
+a 390px wrapper, not its 366px child. The wrapper may belong to the existing shell: measuring its content
+region does not require changing shell CSS. Do not add viewport pixels or raise tolerances to offset a gutter.
+Reports include the effective device, viewport, document width, root size/padding and horizontal overflow.
+Use those observations to distinguish a wrong comparison boundary from a real layout defect.
+
+For overlapping artwork, `map.select` maps a layer handle to a unique CSS selector inside the selected root.
+It selects the actual element even if its position is wrong; geometry/style checks still apply. Ambiguous
+selectors are setup errors. The compact element labels used by older maps remain supported when unique.
+
+
 Start with `agentgate prepare --file <JSON with request>`. The tool reads a bounded Figma catalogue and a
 read-only worker selects content nodes, discovers the repository and saves the plan. The lead handles product
 questions and authorization, not exports, CSS inspection or screenshot comparison. Writers receive packages

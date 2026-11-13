@@ -11,6 +11,9 @@ description: Coordinate a Figma implementation through agentgate preparation, wr
 2. Read the returned summary and brief for product scope, missing behavior decisions and resource needs.
    Resolve those decisions with the user and return them in prepare.notes. Approve the exact stand/check
    commands under the repository's policy. A prepared plan is not permission to run its checks.
+   Phone/tablet entries need an explicit mobile device mode and viewport. A technical BLOCKED result with
+   no user questions is still a valid report: use its setup prerequisites, not private worker files. An
+   absent baseline is a strict check, never a prerequisite to reconstruct after implementation.
 3. Launch the saved plan. The gate imports selected content nodes and handles the original measurement;
    writers implement using their packages and existing components. A new page may have no root yet.
 4. Run review. The gate measures and reviewers inspect code and pictures. Forward code failures with `fix`;

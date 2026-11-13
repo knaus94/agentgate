@@ -73,6 +73,18 @@ func TestPreparationKeepsMissingDecisionsAndToolFailuresOutOfTheLead(t *testing.
 	if _, err := os.Stat(filepath.Join(PlansDir, "blocked", "plan.json")); !os.IsNotExist(err) {
 		t.Fatal("a blocked draft was saved as executable")
 	}
+	f.model = func(kind string, _ map[string]any, _ provider.Call) (string, error) {
+		if kind == "prepare" {
+			return `{"status":"BLOCKED","summary":"measurement requires a supported mobile context","questions":[],"setup":["Enable mobile emulation"],"plan_json":"","context_pack":{}}`, nil
+		}
+		return "", nil
+	}
+	result = f.do("prepare", func() (any, error) {
+		return Prepare(f.cfg, PrepareInput{Request: "-m repair measurement", Name: "technical-blocker"})
+	})
+	if result["status"] != "BLOCKED" || f.count("prepare") != 2 {
+		t.Fatal("a technical blocker without product questions must be returned, not retried or hidden in a private result file")
+	}
 	command := filepath.Join(t.TempDir(), "catalogue")
 	write(t, command, "#!/bin/sh\nprintf '%s\\n' 'profile unavailable' >&2\nexit 2\n")
 	must(t, os.Chmod(command, 0o755))
@@ -82,7 +94,7 @@ func TestPreparationKeepsMissingDecisionsAndToolFailuresOutOfTheLead(t *testing.
 	f.fails("prepare", "profile unavailable", func() (any, error) {
 		return Prepare(f.cfg, PrepareInput{Request: "-m build https://www.figma.com/design/abc/example?node-id=1-2"})
 	})
-	if f.count("prepare") != 1 {
+	if f.count("prepare") != 2 {
 		t.Fatal("do not spend a worker when the design catalogue is unavailable")
 	}
 }
@@ -106,4 +118,38 @@ func TestReplanKeepsTheTaskAndRequiresFreshReview(t *testing.T) {
 	f.do("resume", func() (any, error) { return Resume(f.cfg, Current()) })
 	f.review()
 	f.finish()
+}
+
+func TestReplanCanRepairABlockedCorrectionAfterExplicitResume(t *testing.T) {
+	f := newFixture(t)
+	plan := f.plan("-m correct the page")
+	f.launch(plan)
+	f.model = func(kind string, _ map[string]any, _ provider.Call) (string, error) {
+		if kind == "review" {
+			return `{"reports":[{"axis":"correctness","status":"NEEDS_FIX","findings":[` + finding("P1") + `],"checked":["read"],"resolutions":[]}]}`, nil
+		}
+		if kind == "writer" {
+			return `{"status":"BLOCKED","summary":"measurement contract needs correction","blockers":["Which content boundary should be measured?"],"handoff":"","deviations":[]}`, nil
+		}
+		return "", nil
+	}
+	result := f.review()
+	id := result["untriaged"].([]any)[0].(string)
+	f.do("triage", func() (any, error) {
+		return Triage(f.cfg, Current(), TriageInput{Dispositions: []Disposition{{ID: id, Decision: "accepted", Evidence: "confirmed"}}})
+	})
+	f.do("fix", func() (any, error) { return Fix(f.cfg, Current(), FixInput{}) })
+	before := Current()
+	if before.Phase != "held" || before.ResumePhase != "correcting" {
+		t.Fatal("fixture did not reproduce the blocked correction")
+	}
+	plan.Update = "Correct the verification contract, preserving unfinished findings"
+	plan.Checks = append(plan.Checks, Check{Argv: []string{"test", "-s", "a.txt"}})
+	f.fails("replan", "explicitly resume", func() (any, error) { return Replan(f.cfg, Current(), plan) })
+	f.do("resume", func() (any, error) { return Resume(f.cfg, Current()) })
+	f.do("replan", func() (any, error) { return Replan(f.cfg, Current(), plan) })
+	after := Current()
+	if after.ID != before.ID || digest(after.Baseline) != digest(before.Baseline) || len(after.accepted()) != 1 || after.Phase != "awaiting-review" {
+		t.Fatal("measurement repair reset the task or waived an unfinished finding")
+	}
 }

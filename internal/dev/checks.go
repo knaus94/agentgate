@@ -292,7 +292,11 @@ func (g *Gate) failing() []CheckFailure {
 
 // runOutstanding runs every declared check that has no current passing result.
 func (g *Gate) runOutstanding() error {
-	for _, check := range g.outstanding() {
+	for index := range g.Plan.Checks {
+		check := &g.Plan.Checks[index]
+		if !check.NoReuse && passed(g.currentReceipt(check)) {
+			continue
+		}
 		receipt, err := g.runCheck(check)
 		if err != nil {
 			return err
