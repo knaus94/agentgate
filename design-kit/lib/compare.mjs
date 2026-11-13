@@ -4,7 +4,7 @@
 // painted layer by where it lies. Both sides are reduced to the same few numbers and compared with tolerances
 // (the idea of asdesigned): a missing value on one side is not a difference, and a run that compared nothing fails.
 
-export const defaults = { position: 2, size: 2, radius: 1, fontSize: 0.5, lineHeight: 1, letterSpacing: 0.3, colour: 12, match: 0.5 };
+export const defaults = { position: 2, size: 2, radius: 1, fontSize: 0.5, lineHeight: 1, letterSpacing: 0.3, colour: 12, match: 0.5, reach: 300 };
 
 const words = (text) => text.replace(/\s+/g, ' ').trim().toLowerCase();
 const centre = ([x, y, width, height]) => [x + width / 2, y + height / 2];
@@ -49,7 +49,9 @@ export function compare(spec, page, map = {}, limits = defaults) {
     .filter(({ text, index }) => !usedText.has(index) && accept(text))
     .sort((a, b) => Math.hypot(...centre(a.text.box).map((value, axis) => value - at[axis])) - Math.hypot(...centre(b.text.box).map((value, axis) => value - at[axis])))[0];
   for (const node of nodes.filter((value) => value.text)) {
-    const hit = nearest(node, centre(node.box), (text) => words(text.content) === words(node.text.content));
+    // The same words far away are another element: a screen repeats "USDT" in a tile and in a field.
+    const hit = nearest(node, centre(node.box), (text) => words(text.content) === words(node.text.content) &&
+      Math.hypot(centre(text.box)[0] - centre(node.box)[0], centre(text.box)[1] - centre(node.box)[1]) <= limits.reach);
     if (!hit) continue;
     usedText.add(hit.index);
     found.set(node.id, { element: hit.text, shift: textShift(node, hit.text), sameWords: true });
