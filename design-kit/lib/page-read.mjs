@@ -84,7 +84,8 @@ export function readPage(rootSelector) {
 
   const boxes = [];
   const media = new Set(['IMG', 'SVG', 'CANVAS', 'VIDEO', 'INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'PICTURE']);
-  for (const element of root.querySelectorAll('*')) {
+  // The root is a layer of the design like any other.
+  for (const element of [...(rootSelector ? [root] : []), ...root.querySelectorAll('*')]) {
     if (element.closest('svg') && element.tagName.toLowerCase() !== 'svg') continue;
     const rect = element.getBoundingClientRect();
     if (rect.width < 1 || rect.height < 1 || !shown(element)) continue;
