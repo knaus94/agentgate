@@ -42,6 +42,10 @@ for (let index = 2; index < process.argv.length; index++) {
   else if (value.startsWith('--')) flags[value.slice(2)] = process.argv[++index];
   else rest.push(value);
 }
+if (process.argv.includes('--help') || process.argv.includes('-h') || rest[0] === 'help') {
+  console.log(usage);
+  process.exit(0);
+}
 if (rest[0] === 'new') {
   // A screen is made in one go: the design and where it is shown.
   const [, target, figma] = rest;
@@ -145,7 +149,8 @@ try {
     process.exit(0);
   }
   if (flags.baseline) {
-    const known = new Set(JSON.parse(fs.readFileSync(flags.baseline, 'utf8')).known);
+    // No record of the page before the work means nothing about it is known: every difference counts.
+    const known = new Set(fs.existsSync(flags.baseline) ? JSON.parse(fs.readFileSync(flags.baseline, 'utf8')).known : []);
     result.known = result.issues.filter((issue) => known.has(keyOf(issue))).length;
     result.issues = result.issues.filter((issue) => !known.has(keyOf(issue)));
   }

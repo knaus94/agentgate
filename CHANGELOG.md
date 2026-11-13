@@ -2,6 +2,11 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.9.11
+
+- A task continued on a gate that was opened before its design could be measured no longer fails its layout
+  check for a missing record: with no record, every difference counts. `agentgate layout --help` is not an error.
+
 ## 0.9.10
 
 - **A page that does not exist yet can be designed.** Measuring before the work no longer fails when the page
