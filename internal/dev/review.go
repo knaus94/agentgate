@@ -72,6 +72,9 @@ func (g *Gate) contract() string {
 	if designs := g.designDigests(); designs != nil {
 		parts["design"] = designs
 	}
+	if len(g.Plan.Requirements) > 0 {
+		parts["requirements"] = g.Plan.Requirements
+	}
 	return digest(parts)
 }
 
@@ -173,7 +176,7 @@ func (g *Gate) authors() []string {
 	return all
 }
 
-func (g *Gate) lanes(cfg *config.Config, subs *substitutions) ([]laneSpec, func(config.Route) bool, error) {
+func (g *Gate) lanes(cfg *config.Config, subs *substitutions, quality bool) ([]laneSpec, func(config.Route) bool, error) {
 	authors := g.authors()
 	skip := func(route config.Route) bool {
 		return slices.Contains(cfg.ReviewersExcluded, route.Alias) || slices.Contains(authors, route.Model)
@@ -183,7 +186,7 @@ func (g *Gate) lanes(cfg *config.Config, subs *substitutions) ([]laneSpec, func(
 		files []string
 	}
 	scopes := []scope{{"task", g.Files}}
-	if g.Request.ReviewFirst() && len(g.Plan.Streams) > 1 {
+	if g.Request.ReviewFirst() && len(g.Plan.Streams) > 1 && !quality {
 		scopes = nil
 		for _, stream := range g.Plan.Streams {
 			scopes = append(scopes, scope{stream.Name, stream.Files})
@@ -219,8 +222,9 @@ func (g *Gate) lanes(cfg *config.Config, subs *substitutions) ([]laneSpec, func(
 
 // LeadReview is the lead's own reading of the diff, used in light mode instead of a reviewer process.
 type LeadReview struct {
-	Summary  string    `json:"summary"`
-	Findings []Finding `json:"findings"`
+	Summary  string         `json:"summary"`
+	Findings []Finding      `json:"findings"`
+	Quality  *QualityReport `json:"quality,omitempty"`
 }
 
 type ReviewInput struct {
@@ -228,11 +232,12 @@ type ReviewInput struct {
 	LeadReview       *LeadReview  `json:"lead_review,omitempty"`
 	Visual           *VisualInput `json:"visual,omitempty"`
 	SkipChecks       bool         `json:"skip_checks,omitempty"`
-	Finish           *FinishInput `json:"finish,omitempty"` // close the task in the same call when nothing blocks
+	Recheck          bool         `json:"recheck,omitempty"` // reconsider unchanged evidence; does not bypass any gate
+	Finish           *FinishInput `json:"finish,omitempty"`  // close the task in the same call when nothing blocks
 }
 
-// ReviewTask runs the mode's review lanes in parallel on frozen content. Outstanding checks and the
-// opted-in browser pass run alongside, because all of them read the same code.
+// ReviewTask checks the change before starting its reviewers. Browser observations used as acceptance
+// evidence precede their reviewer; otherwise the browser pass can run alongside code review.
 func ReviewTask(cfg *config.Config, gate *Gate, input ReviewInput) (any, error) {
 	if !gate.active() || gate.Phase == "held" {
 		return nil, fmt.Errorf("cannot review a gate that is %s", gate.Phase)
@@ -247,6 +252,9 @@ func ReviewTask(cfg *config.Config, gate *Gate, input ReviewInput) (any, error) 
 	}
 	gate.Conflicts = nil
 	if err := gate.auditScope(); err != nil {
+		return nil, err
+	}
+	if _, err := loadReviewRules(cfg, gate.Files); err != nil {
 		return nil, err
 	}
 	// Checks cost seconds and reviewers cost minutes and quota, so checks go first. Code that fails its own
@@ -266,8 +274,34 @@ func ReviewTask(cfg *config.Config, gate *Gate, input ReviewInput) (any, error) 
 		return nil, err
 	}
 	contract := gate.contract()
+	quality, err := gate.qualityInputs(cfg)
+	if err != nil {
+		return nil, err
+	}
+	// Acceptance claims may cite this browser pass. Collect it before its reviewer reads the evidence.
+	if quality != nil && input.Visual != nil {
+		stage, err := gate.prepareVisual(cfg, *input.Visual, now, content)
+		if err != nil {
+			return nil, err
+		}
+		if err := stage.run(); err != nil {
+			return nil, err
+		}
+		if err := stage.apply(); err != nil {
+			return nil, err
+		}
+		if err := gate.save(); err != nil {
+			return nil, err
+		}
+		quality, err = gate.qualityInputs(cfg)
+		if err != nil {
+			return nil, err
+		}
+		input.Visual = nil
+	}
 	accepted := gate.accepted()
-	if gate.ReviewDigest == content && len(gate.Reviews) > 0 && gate.Reviews[len(gate.Reviews)-1].Contract == contract {
+	if !input.Recheck && input.LeadReview == nil && gate.ReviewDigest == content && len(gate.Reviews) > 0 &&
+		gate.Reviews[len(gate.Reviews)-1].Contract == contract && gate.Reviews[len(gate.Reviews)-1].QualityDigest == quality.fingerprint() {
 		last := gate.Reviews[len(gate.Reviews)-1]
 		pending := false
 		for _, finding := range accepted {
@@ -303,6 +337,7 @@ func ReviewTask(cfg *config.Config, gate *Gate, input ReviewInput) (any, error) 
 		"changes": changes, "slop_signals": gate.Signals, "accepted_findings": accepted, "prior_decisions": gate.decisions(), "checks": gate.Checks,
 		"architecture": architectureFor(gate.Plan), "writer_notes": gate.writerNotes(), "report_p3": false,
 		"context_pack": gate.ContextPack}
+	packet["refresh"] = input.Recheck
 	if ui, _ := loadUI(gate.Plan); ui != nil {
 		packet["ui"] = ui
 	}
@@ -325,7 +360,7 @@ func ReviewTask(cfg *config.Config, gate *Gate, input ReviewInput) (any, error) 
 		return nil, err
 	}
 	subs := &substitutions{}
-	specs, skip, err := gate.lanes(cfg, subs)
+	specs, skip, err := gate.lanes(cfg, subs, quality != nil)
 	if err != nil {
 		return nil, err
 	}
@@ -334,9 +369,9 @@ func ReviewTask(cfg *config.Config, gate *Gate, input ReviewInput) (any, error) 
 	if len(gate.Reviews) > 0 && len(accepted) > 0 {
 		var kept []laneSpec
 		regression := false
-		for _, spec := range specs {
+		for index, spec := range specs {
 			correctness := slices.Contains(spec.Axes, "correctness")
-			if len(gate.relevant(spec, accepted)) > 0 || (correctness && !regression) {
+			if (index == 0 && quality != nil) || len(gate.relevant(spec, accepted)) > 0 || (correctness && !regression) {
 				kept = append(kept, spec)
 				regression = regression || correctness
 			}
@@ -348,8 +383,8 @@ func ReviewTask(cfg *config.Config, gate *Gate, input ReviewInput) (any, error) 
 		if err := gate.save(); err != nil {
 			return nil, err
 		}
-		return map[string]any{"mode": gate.Mode, "evidence": changes, "slop_signals": gate.Signals,
-			"next": "Read these diffs yourself, then call review again with lead_review {summary, findings}. You are the only reviewer: " +
+		return map[string]any{"mode": gate.Mode, "evidence": changes, "slop_signals": gate.Signals, "quality": quality,
+			"next": "Read these diffs yourself, then call review again with lead_review {summary, findings, quality}. Assess every supplied quality criterion. You are the only reviewer: " +
 				"judge every slop_signal, and ask of each added line whether the task needs it (guide, section 5). An empty findings list is a valid result."}, nil
 	}
 	timeout, err := timeoutSeconds(input.ReviewerTimeoutS, gate.Plan.ReviewerTimeoutS, cfg.Modes[gate.Mode].ReviewerTimeoutS)
@@ -365,7 +400,7 @@ func ReviewTask(cfg *config.Config, gate *Gate, input ReviewInput) (any, error) 
 	for _, finding := range gate.Findings() {
 		known[finding.ID] = finding
 	}
-	review := Review{Iteration: gate.Iteration, Digest: content, Contract: contract, Dir: dir}
+	review := Review{Iteration: gate.Iteration, Digest: content, Contract: contract, Dir: dir, QualityDigest: quality.fingerprint()}
 	for _, finding := range accepted {
 		review.Rechecked = append(review.Rechecked, finding.ID)
 	}
@@ -385,7 +420,11 @@ func ReviewTask(cfg *config.Config, gate *Gate, input ReviewInput) (any, error) 
 	jobs := []func() error{}
 	for index, spec := range specs {
 		jobs = append(jobs, func() (err error) {
-			lanes[index], err = gate.runLane(cfg, spec, index, dir, packet, content, contract, accepted, known, seconds(timeout), subs, skip)
+			var assignedQuality *qualityInputs
+			if index == 0 {
+				assignedQuality = quality
+			}
+			lanes[index], err = gate.runLane(cfg, spec, index, dir, packet, content, contract, accepted, known, seconds(timeout), subs, skip, assignedQuality)
 			return err
 		})
 	}
@@ -409,6 +448,12 @@ func ReviewTask(cfg *config.Config, gate *Gate, input ReviewInput) (any, error) 
 		if after, _, _ := gate.contentDigest(); after != content {
 			failure = errors.New("files changed during the review; its evidence is stale")
 		}
+		currentQuality, err := gate.qualityInputs(cfg)
+		if err != nil {
+			failure = err
+		} else if currentQuality.fingerprint() != review.QualityDigest || gate.contract() != contract {
+			failure = errors.New("review criteria or evidence changed during the review; its evidence is stale")
+		}
 	}
 	if failure != nil {
 		gate.Phase = "awaiting-review"
@@ -425,6 +470,12 @@ func ReviewTask(cfg *config.Config, gate *Gate, input ReviewInput) (any, error) 
 			_ = gate.save()
 			return nil, err
 		}
+		if err := gate.validateQuality(input.LeadReview.Quality, quality); err != nil {
+			gate.Phase = "awaiting-review"
+			_ = gate.save()
+			return nil, err
+		}
+		lane.Quality = input.LeadReview.Quality
 		lanes = []LaneRun{lane}
 	}
 	review.Lanes = lanes
@@ -487,22 +538,25 @@ func (g *Gate) relevant(spec laneSpec, accepted []Finding) []Finding {
 }
 
 func (g *Gate) runLane(cfg *config.Config, spec laneSpec, index int, dir string, packet map[string]any, content, contract string,
-	accepted []Finding, known map[string]Finding, timeout time.Duration, subs *substitutions, skip func(config.Route) bool) (LaneRun, error) {
+	accepted []Finding, known map[string]Finding, timeout time.Duration, subs *substitutions, skip func(config.Route) bool, quality *qualityInputs) (LaneRun, error) {
 	relevant := g.relevant(spec, accepted)
 	var recheck []string
 	for _, finding := range relevant {
 		recheck = append(recheck, finding.ID)
 	}
 	key := digest(map[string]any{"content": content, "contract": contract, "axes": spec.Axes, "scope": spec.Scope, "files": spec.Files,
-		"route": spec.Route.String(), "recheck": recheck, "decisions": g.Dispositions})
+		"route": spec.Route.String(), "recheck": recheck, "decisions": g.Dispositions, "quality": quality.fingerprint()})
 	cache := filepath.Join(g.dir(), "review-cache", key+".json")
 	lane := LaneRun{}
-	if raw, err := os.ReadFile(cache); err == nil && json.Unmarshal(raw, &lane) == nil {
+	if raw, err := os.ReadFile(cache); packet["refresh"] != true && err == nil && json.Unmarshal(raw, &lane) == nil {
 		return lane, nil // a finished lane of a partly failed review is kept
 	}
 	scoped := map[string]any{"axes": spec.Axes, "scope": spec.Scope, "scope_files": spec.Files, "recheck": relevant}
 	for name, value := range packet {
 		scoped[name] = value
+	}
+	if quality != nil {
+		scoped["quality"] = quality
 	}
 	for _, name := range []string{"changes", "since_last_review"} {
 		if changes, ok := packet[name].([]Change); ok {
@@ -533,13 +587,24 @@ func (g *Gate) runLane(cfg *config.Config, spec laneSpec, index int, dir string,
 	}
 	tools, toolDirs, toolNote := workerTools(cfg, "reviewer")
 	_, designDirs := g.designReview()
-	result, used, err := subs.invoke(cfg, provider.Call{Route: route, Prompt: prompt + toolNote, Dir: lane.Dir, Schema: reviewSchema, MCP: tools, Writable: toolDirs,
+	if quality != nil && quality.Browser != nil {
+		designDirs = append(designDirs, quality.Browser.Dir)
+	}
+	schema := reviewSchema
+	if quality != nil {
+		schema = object(map[string]any{"reports": reviewSchema["properties"].(map[string]any)["reports"], "quality": qualitySchema})
+		prompt += "\nAlso assess every requirement and rule in quality, using the current evidence. Return quality {requirements, rules}; " +
+			"each requirement needs id, status (verified/partial/missing), reason, evidence [{kind (code/check/browser), ref, detail}]. " +
+			"Each rule needs id, status (pass/block/not_applicable/unavailable), evidence. Reassess all criteria even on a correction.\n"
+	}
+	result, used, err := subs.invoke(cfg, provider.Call{Route: route, Prompt: prompt + toolNote, Dir: lane.Dir, Schema: schema, MCP: tools, Writable: toolDirs,
 		Timeout: timeout, Persist: true, Resume: lane.Session, ReadDirs: append(append([]string{dir, filepath.Join(g.dir(), "checks")}, packDirs(g.ContextPack)...), designDirs...)}, skip)
 	if err != nil {
 		return lane, err
 	}
 	var answer struct {
-		Reports []Report `json:"reports"`
+		Reports []Report       `json:"reports"`
+		Quality *QualityReport `json:"quality"`
 	}
 	if err := decode(result.Answer, &answer); err != nil {
 		return lane, err
@@ -547,6 +612,10 @@ func (g *Gate) runLane(cfg *config.Config, spec laneSpec, index int, dir string,
 	if lane.Reports, err = g.validateReports(answer.Reports, spec.Axes, spec.Files, known); err != nil {
 		return lane, err
 	}
+	if err := g.validateQuality(answer.Quality, quality); err != nil {
+		return lane, err
+	}
+	lane.Quality = answer.Quality
 	lane.Route, lane.Session = used, result.Session
 	if err := ops.Checkpoint(); err != nil {
 		return lane, err

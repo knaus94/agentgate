@@ -60,6 +60,7 @@ after every accepted stage until the user says to go on.
     "evidence": "What you inspected and what remains uncertain"
   },
   "brief": "Requirements, non-goals, invariants, acceptance criteria",
+  "requirements": [{"id": "R1", "text": "Orders preserve their totals", "method": "check"}],
   "streams": [
     {"name": "api", "domain": "backend", "files": ["src/order.ts"], "brief": "optional stream detail"},
     {"name": "web", "domain": "frontend", "files": ["app/Order.tsx"], "after": ["api"], "effort": "high"}
@@ -130,6 +131,12 @@ covered by a stage. Each stage has `name`, `goal`, `covers`, `streams`, and opti
   whether a result is still current; without them any change to the task's files invalidates it.
   `baseline: true` runs the check before writing, and a check that was already failing does not block later.
   `no_reuse: true` for checks that depend on external state.
+  `kind`: `test`, `typecheck`, `lint`, `build`, `measurement`, `runtime` or `command` (default).
+- `requirements`: acceptance criteria for single-pass and staged plans, each `{id, text, method?}`.
+  IDs are unique. `method` optionally requires `code`, `check` or `browser` proof. Every criterion must be
+  verified before completion; a stage assesses only its `covers`, integration assesses the whole plan.
+  A staged requirement already accepted cannot be changed by replanning. Older plans without requirements
+  keep their existing behavior; a task with requirements needs the new structured review before finishing.
 - `architecture.base` is the alias of the design the task follows (default: the first); writers and reviewers
   receive that design as amended by `acceptance`, not both designs.
 - `ui`: exactly one of `{summary, criteria, preserve}`, `{design, acceptance}` or `{skip}`. Required when
@@ -140,13 +147,49 @@ covered by a stage. Each stage has `name`, `goal`, `covers`, `streams`, and opti
 - Timeouts: `writer_timeout_s`, `reviewer_timeout_s`, 120–7200; default is the mode's ceiling, else 1200.
 - Architecture revision: add `revise: "<receipt id>"` and `revise_blockers: ["id"]` to the same plan.
 
+## Quality assessment
+
+The first reviewer receives `quality {requirements, rules, checks, browser}` and returns the object below
+alongside `reports`. In light mode `review` returns the same inputs to the lead; supply the object as
+`lead_review.quality`. Other lanes keep their ordinary report schema. No additional agent is started.
+
+```json
+{
+  "requirements": [{
+    "id": "R1", "status": "verified", "reason": "The recorded test exercises totals preservation",
+    "evidence": [{"kind": "check", "ref": "<id from quality.checks>", "detail": "Test covers old and new totals"}]
+  }],
+  "rules": [{"id": "contracts", "status": "pass", "evidence": "Inspected the changed public entry points"}]
+}
+```
+
+Each requested id appears exactly once. Requirement statuses: `verified`, `partial`, `missing`; every status
+needs a reason. `verified` needs evidence and the requested method when declared. Proof kinds:
+
+- `code`: `ref` is a scoped `file:line`; `detail` explains the inspected behavior.
+- `check`: `ref` is a key in `quality.checks`; a current successful receipt and its log must exist. A
+  preexisting failing check is not successful proof. `kind` on the check describes its verification scope;
+  the reviewer still has to judge whether the command actually proves the criterion.
+- `browser`: `ref` is an observed scenario in the current browser report, with its saved screenshot.
+
+Rule statuses: `pass`, `block`, `not_applicable`, `unavailable`, with a concrete `evidence` explanation.
+Mandatory rules accept only `pass` or justified `not_applicable`. Advisory results remain visible without
+blocking. Missing mandatory instruction files refuse launch/review/finish. Local instruction snapshots are
+included in packets; list supporting documents explicitly, as no network fetching or skill execution is implied.
+
+`status.quality` includes the report, typed check receipts, whether the assessment is current, and remaining
+problems. Freshness covers task content, criteria, applicable rule contents and current proof receipts. A
+browser pass supplied to a review with quality criteria runs first so its observation can be assessed.
+`recheck: true` bypasses review reuse for a new judgement, not any acceptance condition. Actionable defects
+also belong in ordinary findings for triage/fix; missing proof alone calls for evidence or a hold.
+
 ## Other inputs
 
 ```json
 // review
 {"lead_review": {"summary": "What I read and verified", "findings": []},
  "visual": {"url": "http://localhost:4200", "origins": ["http://localhost:4200", "http://localhost:3000"]},
-  "reviewer_timeout_s": 1800, "skip_checks": false,
+  "reviewer_timeout_s": 1800, "skip_checks": false, "recheck": false,
  "finish": {"summary": "Close the task in this call if nothing blocks"}}
 
 // a finding (in lead_review)

@@ -38,6 +38,13 @@ type Lane struct {
 	Route string   `json:"route"`
 }
 
+// ReviewRule adds a repository's review instructions to an existing reviewer, without granting tools.
+type ReviewRule struct {
+	Instructions []string `json:"instructions"`
+	Files        []string `json:"files,omitempty"`
+	Mode         string   `json:"mode,omitempty"` // blocking (default) or advisory
+}
+
 type Mode struct {
 	Scout                string   `json:"scout"`       // cheap route that gathers the context pack once; empty: the lead's context is enough
 	EscalateTo           string   `json:"escalate_to"` // highest effort a stalled correction or a hard stream may be raised to
@@ -102,26 +109,27 @@ type Worktree struct {
 }
 
 type Config struct {
-	Version           int                  `json:"version"`
-	MaxParallel       int                  `json:"max_parallel"`
-	WorkerMemoryMiB   int                  `json:"worker_memory_mib"`
-	RetentionDays     int                  `json:"retention_days"`
-	Models            map[string]Model     `json:"models"`
-	Fallbacks         map[string][]string  `json:"fallbacks"`
-	ReviewersExcluded []string             `json:"reviewers_excluded"`
-	UIDesigner        string               `json:"ui_designer"`
-	VisualReviewer    string               `json:"visual_reviewer"`
-	Consultant        string               `json:"consultant"`
-	PlaywrightMCP     string               `json:"playwright_mcp"`
-	Accounts          []Account            `json:"accounts"`
-	PlansHome         string               `json:"plans_home"` // synced directory that holds the .agentgate of each repository
-	WorkerMCP         map[string]WorkerMCP `json:"worker_mcp"`
-	Profile           string               `json:"profile"` // a named alternative mode table laid under the user's settings, e.g. "codex"
-	Leads             []string             `json:"leads"`   // which CLIs the lead command is installed into: claude, codex
-	Worktree          Worktree             `json:"worktree"`
-	Staging           Staging              `json:"staging"`
-	Modes             map[string]Mode      `json:"modes"`
-	Design            Design               `json:"design"`
+	Version           int                   `json:"version"`
+	MaxParallel       int                   `json:"max_parallel"`
+	WorkerMemoryMiB   int                   `json:"worker_memory_mib"`
+	RetentionDays     int                   `json:"retention_days"`
+	Models            map[string]Model      `json:"models"`
+	Fallbacks         map[string][]string   `json:"fallbacks"`
+	ReviewersExcluded []string              `json:"reviewers_excluded"`
+	UIDesigner        string                `json:"ui_designer"`
+	VisualReviewer    string                `json:"visual_reviewer"`
+	Consultant        string                `json:"consultant"`
+	PlaywrightMCP     string                `json:"playwright_mcp"`
+	Accounts          []Account             `json:"accounts"`
+	PlansHome         string                `json:"plans_home"` // synced directory that holds the .agentgate of each repository
+	WorkerMCP         map[string]WorkerMCP  `json:"worker_mcp"`
+	ReviewRules       map[string]ReviewRule `json:"review_rules,omitempty"`
+	Profile           string                `json:"profile"` // a named alternative mode table laid under the user's settings, e.g. "codex"
+	Leads             []string              `json:"leads"`   // which CLIs the lead command is installed into: claude, codex
+	Worktree          Worktree              `json:"worktree"`
+	Staging           Staging               `json:"staging"`
+	Modes             map[string]Mode       `json:"modes"`
+	Design            Design                `json:"design"`
 }
 
 // Design says, once for a repository, where its design screens are kept and how its front end is started to
@@ -487,6 +495,28 @@ func merge(dst, src map[string]any) {
 }
 
 func (c *Config) validate() error {
+	for name, rule := range c.ReviewRules {
+		if !regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`).MatchString(name) || len(rule.Instructions) == 0 {
+			return fmt.Errorf("review_rules %q needs a lowercase name and instructions [local file paths]", name)
+		}
+		if rule.Mode == "" {
+			rule.Mode = "blocking"
+		}
+		if rule.Mode != "blocking" && rule.Mode != "advisory" {
+			return fmt.Errorf("review_rules %q: mode is blocking or advisory", name)
+		}
+		for _, path := range rule.Instructions {
+			if strings.TrimSpace(path) == "" {
+				return fmt.Errorf("review_rules %q: instruction paths must be nonempty", name)
+			}
+		}
+		for _, pattern := range rule.Files {
+			if pattern == "" || filepath.IsAbs(pattern) || strings.HasPrefix(filepath.Clean(pattern), "..") {
+				return fmt.Errorf("review_rules %q: files are repository-relative globs", name)
+			}
+		}
+		c.ReviewRules[name] = rule
+	}
 	if c.MaxParallel < 1 || c.WorkerMemoryMiB < 1 {
 		return errors.New("config: max_parallel and worker_memory_mib must be positive")
 	}

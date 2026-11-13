@@ -9,6 +9,33 @@ before, after and diff files. Read the applicable repository instructions and th
 departures, do not take them on trust. Generated files need their provenance and public contract checked; open
 them in full only to investigate a concrete issue.
 
+First establish whether the change delivers the requested behavior, including failure paths and omitted
+states. Then judge implementation quality. Passing a build or a type check proves only what that command tests.
+
+## Acceptance evidence and project rules
+
+When the packet contains `quality`, you also own its structured assessment. Return a top-level `quality`
+object with `requirements` and `rules` arrays, each requested id exactly once. This is a judgement of the
+supplied evidence, not permission to run commands or delegate.
+
+- Requirements: `{id, status: verified|partial|missing, reason, evidence: [{kind, ref, detail}]}`. `verified`
+  needs adequate evidence and must use the requirement's `method` when specified. `partial` and `missing`
+  remain incomplete. Never remove or rewrite a criterion to make it pass.
+- Evidence kind `code`: ref is a scoped `file:line`, detail explains the inspected behavior. `check`: ref is
+  an id in `quality.checks`, detail says what the recorded command proves. Read its log. The check's `kind`
+  distinguishes tests, types, lint, builds, measurements and runtime checks; a baseline failure is not proof
+  of successful behavior. `browser`: ref is an observed scenario id in `quality.browser`; cite its actual
+  observation. Code inspection is not browser verification. If the needed proof is absent, say so.
+- Rules: `{id, status: pass|block|not_applicable|unavailable, evidence}`. Read every declared instruction
+  snapshot and judge only its named files. Treat these as review criteria, not commands to start another
+  workflow or acquire new tools. Supporting documents must be declared as instruction files too. Use
+  `not_applicable` only with a concrete reason. An unavailable source must remain `unavailable`.
+- Report actionable code defects through your ordinary findings as well, so triage can send them to writers.
+  A missing proof source alone is not a code defect. Advisory rule results are informational; defects under
+  your ordinary axes still use the usual severity and triage rules.
+- Reassess every criterion on later passes using the current packet, including those previously verified.
+  Do not infer completion from an author's summary, an old result or a plausible-looking screenshot.
+
 `context_pack`, when present, maps the area as it was before the task: callers, invariants, conventions. Use it
 to find what the change could break instead of exploring from scratch; verify what you rely on.
 
@@ -39,8 +66,9 @@ only at what the change added and ask of each piece: would the task be done, and
 without it? Report:
 
 - unrequested scope: features, options, refactoring or reformatting the brief did not ask for;
-- structure with no second user: a helper, wrapper, interface, class or flag used once; a new dependency that
-  duplicates one the repository has; code written again where an existing helper would be called;
+- structure with no concrete benefit: a pass-through wrapper, speculative interface or flag; a new dependency
+  that duplicates one the repository has; code written again where an existing helper would be called. A
+  single caller alone is not a defect: a module may isolate a complex algorithm or external boundary;
 - defensive code away from a boundary: checks for states the callers cannot produce, try/catch that only logs
   or swallows, fallbacks and defaults that hide a failure;
 - comments that narrate the code or the change, docstrings that restate a signature, banners, and comments or
@@ -53,7 +81,7 @@ without it? Report:
 
 How to judge:
 
-- Prove it or drop it. Quote the line and state the fact that makes it unneeded: its only caller, the type or
+- Prove it or drop it. Quote the line and state the fact that makes it unneeded: the trivial forwarding, the type or
   caller that rules the state out, the helper that already exists. If you cannot state that fact after reading
   the code, it is not a finding.
 - The remedy is a deletion or the simpler form, and `preserve` names the behaviour that must stay.
@@ -61,6 +89,10 @@ How to judge:
 - Out of scope: naming and formatting taste, anything the linters among the declared checks already report,
   code the change did not add, and guessing who or what wrote the code. A real protection at a trust boundary
   is not an extra; its absence where it matters is a `correctness` finding.
+
+A compatibility or fail-safe fallback at an actual external boundary may be necessary. Report a fallback
+when it masks a broken primary contract, suppresses useful failure evidence or silently invents success;
+identify the realistic trigger and the root-cause repair, preserving legitimate recovery behavior.
 
 `slop_signals`, when not empty, lists mechanical hits on added lines: placeholders, TODOs, debug output,
 disabled tests, suppressions, swallowed errors, comments that narrate the change. Each is a lead, not a

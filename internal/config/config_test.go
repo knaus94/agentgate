@@ -54,6 +54,36 @@ func TestBuiltInTableIsValidAndComplete(t *testing.T) {
 	}
 }
 
+func TestReviewRulesAreLoadedFromExtensionsAndValidated(t *testing.T) {
+	dir := isolate(t)
+	extensions := filepath.Join(dir, ".agentgate", "extensions")
+	if err := os.MkdirAll(extensions, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(extensions, "quality.json")
+	write := func(body string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(`{"review_rules":{"contracts":{"instructions":["docs/contracts.md"],"files":["src/**"]}}}`)
+	cfg, err := Load()
+	if err != nil || cfg.ReviewRules["contracts"].Mode != "blocking" {
+		t.Fatalf("the extension must declare an enforceable review rule: %v, %v", cfg, err)
+	}
+	for _, invalid := range []string{
+		`{"review_rules":{"contracts":{"instructions":["docs/contracts.md"],"mode":"warn"}}}`,
+		`{"review_rules":{"contracts":{"instructions":[]}}}`,
+		`{"review_rules":{"contracts":{"instructions":["docs/contracts.md"],"files":["../outside/**"]}}}`,
+	} {
+		write(invalid)
+		if _, err := Load(); err == nil {
+			t.Fatalf("invalid policy must not silently disappear: %s", invalid)
+		}
+	}
+}
+
 func TestSetUnsetAndRollback(t *testing.T) {
 	isolate(t)
 	if err := Set("modes.heavy.backend", "sol:xhigh"); err != nil {

@@ -24,6 +24,11 @@ never an approval. Silence is not agreement.
 Write the brief: requirements, non-goals, invariants, acceptance criteria. Split the work into streams with
 disjoint files; use `after` when one stream needs another's contract first.
 
+For substantial work, put acceptance criteria in `requirements [{id, text, method?}]`, including on a
+single-pass plan. Keep them observable and few. `method` can require `code`, `check` or `browser` evidence;
+omit it when the reviewer should choose. Declare only authorized checks, with `kind` when useful (test,
+typecheck, lint, build, measurement, runtime). Criteria do not authorize new tests or browser runs.
+
 Keep the plan in the repository: `agentgate plan save <name> --file -` validates it and writes
 `.agentgate/plans/<name>/plan.json` plus a readable `brief.md`. Give the user the brief path — that is where
 they read and discuss the plan. From then on pass `--plan <name>` instead of `--file`, and save again whenever
@@ -118,6 +123,19 @@ Inspect the actual diff yourself. Then `agentgate review`. It runs in this order
    (`streams` narrows which ones). Reviewers are never paid to read code that fails its own checks.
 2. **Reviewers**, in parallel on different models, only on code that passes. In light mode `review` hands you
    the diffs instead; read them and call it again with `lead_review`.
+
+When the task has requirements or applicable `review_rules`, the first existing reviewer also assesses them
+in `quality`. Light mode gives you the same packet: include `quality` in `lead_review` (reference has the
+schema). First check the requested behavior, then the quality of its implementation. A successful typecheck
+is not evidence that a user flow works. Every criterion needs an honest verdict and a traceable proof source.
+`partial` or `missing` criteria and `block` or `unavailable` mandatory rules prevent completion. Review rules
+come from configuration/extensions; their snapshots guide writers too and grant no extra permissions.
+
+Inspect `quality.problems` and its report. Code defects become ordinary findings for triage/fix; missing
+evidence needs the authorized check or observation, or a hold if it is unavailable. After collecting new
+evidence, review again. `review {recheck: true}` asks for a fresh judgement even if inputs are unchanged; it
+does not override a refusal. Changed instruction files, criteria or proof receipts invalidate the assessment.
+Do not remove a criterion or weaken a rule to get past an incomplete result.
 
 Extras are filtered in three places. Writers are told to add nothing the task does not need. Before any
 reviewer runs, the tool scans the added lines for literal leftovers (placeholders, TODOs, debug output,

@@ -67,6 +67,9 @@ func Launch(cfg *config.Config, plan *Plan) (any, error) {
 	if !resolved.Request.Writes() && !resolved.Request.ReviewFirst() {
 		return nil, fmt.Errorf("%s is read-only; use `agentgate consult`", resolved.Request.Action)
 	}
+	if _, err := loadReviewRules(cfg, plan.Files()); err != nil {
+		return nil, err
+	}
 	if err := requireTools(resolved); err != nil {
 		return nil, err
 	}
@@ -286,7 +289,7 @@ func (g *Gate) assignment(stream Stream) map[string]any {
 		"context": g.Context, "checks": g.Plan.Checks, "ui": ui, "architecture": architectureFor(g.Plan),
 		"handoffs": handoffs, "board": g.board(), "your_board_note": filepath.Join(g.board(), stream.Name+".md"),
 		"context_pack": g.ContextPack, "design": g.designFor(stream.Name),
-		"checks_note": "You may run these exact commands to verify your stream. The lead's run is the one that counts."}
+		"checks_note": "You may run these exact commands to verify your stream. The lead's run is the one that counts.", "requirements": g.Plan.Requirements}
 	if g.Plan.Update != "" {
 		packet["update"] = g.Plan.Update
 	}
@@ -332,6 +335,11 @@ func (g *Gate) runWriter(resolved *Resolved, stream Stream, record *Writer, answ
 	mu.Lock()
 	packet := g.assignment(stream)
 	mu.Unlock()
+	rules, err := loadReviewRules(resolved.Config, stream.Files)
+	if err != nil {
+		return fail(err)
+	}
+	packet["review_rules"] = rules
 	path := filepath.Join(record.Dir, fmt.Sprintf("assignment-%s.json", newID()[:8]))
 	if err := writePacket(path, packet); err != nil {
 		return fail(err)

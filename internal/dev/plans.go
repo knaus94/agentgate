@@ -177,6 +177,9 @@ func renderBrief(name string, resolved *Resolved) string {
 				}
 			}
 			line("- **%s** (%s): %s", requirement.ID, strings.Join(where, ", "), requirement.Text)
+			if requirement.Method != "" {
+				line("  - evidence method: %s", requirement.Method)
+			}
 		}
 		line("\n## Stages\n\nDone and reviewed one after another; a stage starts when the one before it is accepted.\n")
 		for index, stage := range plan.Stages {
@@ -199,6 +202,16 @@ func renderBrief(name string, resolved *Resolved) string {
 			line("After the last stage the whole change gets one more review, for the seams between the stages.\n")
 		}
 	} else {
+		if len(plan.Requirements) > 0 {
+			line("## Requirements\n")
+			for _, requirement := range plan.Requirements {
+				line("- **%s**: %s", requirement.ID, requirement.Text)
+				if requirement.Method != "" {
+					line("  - evidence method: %s", requirement.Method)
+				}
+			}
+			line("")
+		}
 		line("## Streams\n")
 		streams(resolved, plan.Streams, "###")
 	}

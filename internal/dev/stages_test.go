@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -20,7 +21,7 @@ func stagedPlan(request string) *Plan {
 	}
 	return &Plan{Request: request, Brief: "Build the feature in three parts",
 		Assessment:   &Assessment{Size: "ordinary", Evidence: "three isolated fixture files"},
-		Requirements: []Requirement{{"R1", "the base exists"}, {"R2", "the feature works"}, {"R3", "the result is tidy"}},
+		Requirements: []Requirement{{ID: "R1", Text: "the base exists", Method: "code"}, {ID: "R2", Text: "the feature works"}, {ID: "R3", Text: "the result is tidy"}},
 		Stages: []Stage{
 			{Name: "base", Goal: "Lay the base", Acceptance: []string{"a.txt has the base"}, Covers: []string{"R1"}, Streams: stream("base-core", "a.txt")},
 			{Name: "feature", Goal: "Add the feature on the base", Covers: []string{"R2"}, Streams: stream("feature-core", "a.txt", "b.txt")},
@@ -62,6 +63,9 @@ func TestALargeSpecificationIsDoneStageByStage(t *testing.T) {
 		t.Fatalf("only the first stage is written: %v", first["stage"])
 	}
 	f.review()
+	if results := Current().Reviews[0].Lanes[0].Quality.Requirements; len(results) != 1 || results[0].ID != "R1" {
+		t.Fatalf("a stage verifies only the requirements it covers: %+v", results)
+	}
 	accepted := f.finish()
 	gate := Current()
 	if accepted["phase"] != "staged" || len(gate.StageRecords) != 1 || gate.StageIndex != 1 || !strings.Contains(accepted["next"].(string), "Stage 2 of 3, feature") {
@@ -72,6 +76,13 @@ func TestALargeSpecificationIsDoneStageByStage(t *testing.T) {
 	}
 	if len(gate.Reviews) != 0 || len(gate.Writers) != 0 {
 		t.Fatal("the next stage starts with a clean slate")
+	}
+	changed := *plan
+	changed.Requirements = slices.Clone(plan.Requirements)
+	changed.Requirements[0].Text = "a different accepted requirement"
+	changed.Update = "revise the remaining work"
+	if err := gate.replan(&changed); err == nil || !strings.Contains(err.Error(), "accepted stage") {
+		t.Fatalf("accepted requirement evidence cannot be silently repurposed: %v", err)
 	}
 	if hook := StopHook(gate.Cwd, "fixture-session"); hook["decision"] != "block" {
 		t.Fatal("a task between stages is not finished")
@@ -143,7 +154,7 @@ func TestALargeSpecificationIsDoneStageByStage(t *testing.T) {
 	must(t, err)
 	brief, _ := PlanShow("the-feature")
 	for _, want := range []string{"## Requirements", "**R2** (feature): the feature works", "### 2. feature — medium", "#### feature-core — backend",
-		"one more review, for the seams"} {
+		"one more review, for the seams", "evidence method: code"} {
 		if !strings.Contains(brief.(string), want) {
 			t.Errorf("the saved brief lacks %q (%v):\n%s", want, saved, brief)
 		}

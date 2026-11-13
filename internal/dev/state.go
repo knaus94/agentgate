@@ -98,22 +98,24 @@ type Report struct {
 
 // LaneRun is one reviewer process: which axes it judged, over which files, on which model.
 type LaneRun struct {
-	Axes    []string     `json:"axes"`
-	Scope   string       `json:"scope"`
-	Files   []string     `json:"files"`
-	Route   config.Route `json:"route"`
-	Session string       `json:"session"`
-	Dir     string       `json:"dir"`
-	Reports []Report     `json:"reports"`
+	Axes    []string       `json:"axes"`
+	Scope   string         `json:"scope"`
+	Files   []string       `json:"files"`
+	Route   config.Route   `json:"route"`
+	Session string         `json:"session"`
+	Dir     string         `json:"dir"`
+	Reports []Report       `json:"reports"`
+	Quality *QualityReport `json:"quality,omitempty"`
 }
 
 type Review struct {
-	Iteration int       `json:"iteration"`
-	Digest    string    `json:"digest"`
-	Contract  string    `json:"contract"`
-	Lanes     []LaneRun `json:"lanes"`
-	Dir       string    `json:"dir"`
-	Rechecked []string  `json:"rechecked"`
+	Iteration     int       `json:"iteration"`
+	Digest        string    `json:"digest"`
+	Contract      string    `json:"contract"`
+	Lanes         []LaneRun `json:"lanes"`
+	Dir           string    `json:"dir"`
+	Rechecked     []string  `json:"rechecked"`
+	QualityDigest string    `json:"quality_digest,omitempty"`
 }
 
 type Disposition struct {

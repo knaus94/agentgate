@@ -20,6 +20,37 @@ An extension holds ordinary configuration keys. Objects merge into the configura
 their items to the list that is already there, so two extensions can each bring a file for the worktree
 without knowing about each other. `about` is a note for people. An extension cannot define accounts.
 
+## Project review rules
+
+`review_rules` adds local review instructions to the existing review pass. Writers receive the same
+applicable rules; the first reviewer assesses them alongside acceptance criteria. Light mode uses the lead.
+
+```json
+{
+  "about": "Public-contract review for the application",
+  "review_rules": {
+    "contracts": {
+      "instructions": ["docs/review-contracts.md"],
+      "files": ["src/api/**", "src/shared/**"],
+      "mode": "blocking"
+    }
+  }
+}
+```
+
+- `instructions` lists nonempty local files, including a `SKILL.md` if appropriate. Relative paths start at
+  the checkout root; absolute paths and `~/` work too. Declare supporting documents explicitly. Contents are
+  snapshotted into assignments, so reading a skill does not load plugins or run its workflow.
+- `files` selects the declared task scope with repository-relative globs (`*`, `?`, `**`); omitted means
+  every task. A rule outside the scope is not loaded. Prefer versioned instruction files available in worktrees.
+- `mode` is `blocking` by default or `advisory`. A mandatory rule needs `pass` or justified `not_applicable`.
+  Missing mandatory instructions refuse work; unavailable advisory rules are reported and do not block.
+
+Adding, changing or removing an applicable rule requires a fresh review. Instructions grant no new tools,
+tests, servers or permissions. Rules do not add model processes: an existing lane owns their assessment.
+Substantive defects still use ordinary findings and triage; an advisory rule cannot downgrade a defect found
+under a built-in review axis. The JSON result and evidence formats are in `agentgate reference`.
+
 ## Tools for workers
 
 Workers run without your MCP servers and plugins on purpose: a review must not depend on what one machine has

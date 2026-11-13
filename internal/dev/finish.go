@@ -224,6 +224,11 @@ func Finish(cfg *config.Config, gate *Gate, input FinishInput) (any, error) {
 	if gate.Reviews[len(gate.Reviews)-1].Contract != gate.contract() {
 		return nil, errors.New("the task contract changed since the review")
 	}
+	if quality := gate.qualityStatus(cfg); quality != nil {
+		if problems := quality["problems"].([]string); len(problems) > 0 {
+			return nil, fmt.Errorf("quality criteria are not satisfied: %s", strings.Join(problems, "; "))
+		}
+	}
 	if pending := gate.untriaged(); len(pending) > 0 {
 		return nil, fmt.Errorf("triage these findings first: %s", strings.Join(pending, ", "))
 	}
@@ -383,6 +388,9 @@ func (g *Gate) Summary(cfg *config.Config) map[string]any {
 	if len(g.Signals) > 0 {
 		out["slop_signals"] = g.Signals
 	}
+	if quality := g.qualityStatus(cfg); quality != nil {
+		out["quality"] = quality
+	}
 	if g.Epic != nil {
 		out["stages"] = g.stagesSummary()
 		switch {
@@ -438,6 +446,10 @@ func (g *Gate) next(cfg *config.Config, blocked bool) string {
 			return "Blocking findings remain: accept and fix them, or reject them with contrary evidence."
 		case len(g.outstanding()) > 0:
 			return "Run the outstanding checks with `check`."
+		}
+		if quality := g.qualityStatus(cfg); quality != nil && len(quality["problems"].([]string)) > 0 {
+			return "Quality criteria are not satisfied: inspect quality.problems, collect missing evidence or fix accepted findings, then review again. " +
+				"Use review {recheck: true} to reconsider unchanged evidence. Hold when a required proof source is unavailable."
 		}
 		return "Everything required is current: `finish` with a summary."
 	case "complete":

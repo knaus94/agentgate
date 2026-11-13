@@ -21,11 +21,11 @@ import (
 // A stage is run by the ordinary gate: the gate holds the whole plan (Epic) and, as its Plan, a view of the
 // current stage that looks like any single-stage plan.
 
-// Requirement is one thing the specification asks for. Every requirement belongs to a stage, so nothing is
-// dropped on the way from the specification to the work.
+// Requirement is an observable acceptance criterion. In a staged plan, covers assigns it to a stage.
 type Requirement struct {
-	ID   string `json:"id"`
-	Text string `json:"text"`
+	ID     string `json:"id"`
+	Text   string `json:"text"`
+	Method string `json:"method,omitempty"` // code, check or browser; empty lets the reviewer select the proof
 }
 
 // Stage is one part of a staged plan.
@@ -106,6 +106,12 @@ func (p *Plan) stageView(index int, records []StageRecord) *Plan {
 	}
 	view := *p
 	view.Stages, view.View = nil, true
+	view.Requirements = nil
+	for _, requirement := range p.Requirements {
+		if slices.Contains(stage.Covers, requirement.ID) {
+			view.Requirements = append(view.Requirements, requirement)
+		}
+	}
 	view.Brief, view.Streams = brief.String(), slices.Clone(stage.Streams)
 	view.Checks = mergeChecks(p.Checks, stage.Checks)
 	if stage.Assessment != nil {
@@ -394,7 +400,16 @@ func (g *Gate) replan(plan *Plan) error {
 	if len(plan.Stages) < len(g.StageRecords)+1 {
 		return errors.New("the revised plan has fewer stages than are already accepted")
 	}
-	changed := len(plan.Stages) != len(g.Epic.Stages)
+	changed := len(plan.Stages) != len(g.Epic.Stages) || digest(plan.Requirements) != digest(g.Epic.Requirements)
+	for index := range g.StageRecords {
+		for _, id := range g.Epic.Stages[index].Covers {
+			old := slices.IndexFunc(g.Epic.Requirements, func(r Requirement) bool { return r.ID == id })
+			next := slices.IndexFunc(plan.Requirements, func(r Requirement) bool { return r.ID == id })
+			if next < 0 || g.Epic.Requirements[old] != plan.Requirements[next] {
+				return fmt.Errorf("requirement %q belongs to an accepted stage and cannot change", id)
+			}
+		}
+	}
 	for index := range plan.Stages {
 		if index >= len(g.Epic.Stages) {
 			break

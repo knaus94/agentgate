@@ -28,6 +28,7 @@ type Stream struct {
 // Check is an approved verification command. It may be written as a plain argv array.
 type Check struct {
 	Argv     []string `json:"argv"`
+	Kind     string   `json:"kind,omitempty"`   // test, typecheck, lint, build, measurement or runtime; otherwise command
 	Inputs   []string `json:"inputs,omitempty"` // globs whose content decides whether a result is still current
 	TimeoutS int      `json:"timeout_s,omitempty"`
 	Baseline bool     `json:"baseline,omitempty"` // run before writing; a failure that was already there does not block
@@ -78,7 +79,7 @@ type Accepted struct {
 
 type Plan struct {
 	Request          string        `json:"request"`
-	Requirements     []Requirement `json:"requirements,omitempty"` // staged plans: what the specification asks for
+	Requirements     []Requirement `json:"requirements,omitempty"` // independently verified acceptance criteria
 	Stages           []Stage       `json:"stages,omitempty"`       // staged plans: the parts, done and reviewed one after another
 	View             bool          `json:"stage_view,omitempty"`   // set by the tool: a stage of a staged plan, seen as a plan of its own
 	Assessment       *Assessment   `json:"assessment,omitempty"`
@@ -224,6 +225,9 @@ func Resolve(cfg *config.Config, plan *Plan) (*Resolved, error) {
 	resolved := &Resolved{Plan: plan, Request: request, Mode: request.Mode, Config: cfg}
 	if strings.TrimSpace(plan.Brief) == "" {
 		return nil, errors.New("brief is required: the accepted requirements, invariants and acceptance criteria")
+	}
+	if err := validateRequirements(plan.Requirements); err != nil {
+		return nil, err
 	}
 	if plan.staged() {
 		return resolveStaged(cfg, plan, request)
@@ -382,6 +386,9 @@ func validateScenarios(scenarios []Scenario) error {
 func validateChecks(checks []Check) error {
 	seen := map[string]bool{}
 	for _, check := range checks {
+		if check.Kind != "" && !slices.Contains([]string{"test", "typecheck", "lint", "build", "measurement", "runtime", "command"}, check.Kind) {
+			return fmt.Errorf("unknown check kind %q", check.Kind)
+		}
 		key := strings.Join(check.Argv, "\x00")
 		if len(check.Argv) == 0 || seen[key] {
 			return errors.New("checks need a nonempty, unique argv")

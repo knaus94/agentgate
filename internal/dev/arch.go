@@ -89,7 +89,11 @@ func (r *Resolved) fingerprint() string {
 		}
 		return digest(map[string]any{"brief": r.Plan.Brief, "requirements": r.Plan.Requirements, "stages": names, "ui": r.Plan.UI, "mode": r.Mode})
 	}
-	return digest(map[string]any{"brief": r.Plan.Brief, "files": r.Plan.Files(), "ui": r.Plan.UI, "mode": r.Mode})
+	parts := map[string]any{"brief": r.Plan.Brief, "files": r.Plan.Files(), "ui": r.Plan.UI, "mode": r.Mode}
+	if len(r.Plan.Requirements) > 0 {
+		parts["requirements"] = r.Plan.Requirements
+	}
+	return digest(parts)
 }
 
 var designSchema = object(map[string]any{"summary": text, "design": text, "open_questions": list(text),
@@ -122,7 +126,7 @@ func Architecture(cfg *config.Config, plan *Plan) (any, error) {
 	receipt := &Receipt{ID: newID(), Kind: "architecture", Fingerprint: resolved.fingerprint(), Mode: resolved.Mode}
 	receipt.Dir = filepath.Join(designsDir(), receipt.ID)
 	subs := &substitutions{}
-	packet := map[string]any{"brief": plan.Brief, "files": plan.Files(), "streams": plan.allStreams(), "context": plan.Context, "ui": ui}
+	packet := map[string]any{"brief": plan.Brief, "requirements": plan.Requirements, "files": plan.Files(), "streams": plan.allStreams(), "context": plan.Context, "ui": ui}
 	if plan.staged() {
 		packet["requirements"], packet["stages"] = plan.Requirements, plan.Stages
 	}

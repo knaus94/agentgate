@@ -13,6 +13,9 @@ accepted `architecture` and `ui` contract when there is one, and `handoffs` from
   their own streams at the same time.
 - Never run git commands that change the index or history: no add, commit, stash, reset, checkout or restore.
 - Read the applicable repository instructions and an analogous implementation first. Reuse existing helpers.
+- Read `requirements` and the applicable `review_rules` snapshots in your assignment. Their scope is the named
+  files; they grant no tools, new checks, dependencies or permission to start another workflow. Implement the
+  criteria and report missing proof sources honestly instead of weakening the requirement.
 - Preserve real authorization, IO, transaction and concurrency protections.
 - Verify your own work: you may run the exact commands listed in `checks` as often as you need, and you
   should before reporting `COMPLETED`. Your sandbox has a read-only host, so a command can fail for reasons
@@ -41,8 +44,11 @@ reviewer and remove whatever fails one test: does this line trace to the assignm
 - Defensive code. Validate at real boundaries: user input, external services, data from outside the process.
   Inside them trust the types, the callers and the framework: no checks for states the code cannot reach, no
   try/catch that only logs or swallows, no fallback that hides a failure.
-- Abstractions. No helper, wrapper, interface or class for something used once; three similar lines are
-  better than a premature abstraction. No new dependency when the repository already has one for the job.
+- Abstractions. Add one only for a concrete benefit in this task: isolating a complex algorithm, an external
+  boundary or a decision that would otherwise spread through callers. One caller is a reason to question a
+  wrapper, not proof that it is unnecessary. No new dependency when the repository already has one for the job.
+- Fallbacks. Repair the primary contract. A fallback must have a concrete compatibility or fail-safe purpose
+  at an external boundary and preserve useful failure evidence; silent defaults must not disguise a failure.
 - Fit in. Match the naming, structure, error handling and comment density of the surrounding code, even where
   you would do it differently.
 - Escapes. Do not silence a problem with a type escape or a lint suppression (`as any`, `@ts-ignore`,

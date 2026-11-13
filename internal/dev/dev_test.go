@@ -114,6 +114,7 @@ func (f *fixture) run(call provider.Call) (provider.Result, error) {
 func (f *fixture) fitAxes(answer string, packet map[string]any) string {
 	var scripted struct {
 		Reports []map[string]any `json:"reports"`
+		Quality *QualityReport   `json:"quality"`
 	}
 	if json.Unmarshal([]byte(answer), &scripted) != nil {
 		return answer
@@ -133,7 +134,10 @@ func (f *fixture) fitAxes(answer string, packet map[string]any) string {
 			mine = append(mine, map[string]any{"axis": axis, "status": "PASS", "findings": []any{}, "checked": []string{"read the diff"}, "resolutions": []any{}})
 		}
 	}
-	raw, _ := json.Marshal(map[string]any{"reports": mine})
+	if scripted.Quality == nil {
+		scripted.Quality = fixtureQuality(packet)
+	}
+	raw, _ := json.Marshal(map[string]any{"reports": mine, "quality": scripted.Quality})
 	return string(raw)
 }
 
@@ -200,8 +204,54 @@ func (f *fixture) defaultAnswer(kind string, packet map[string]any) string {
 		reports = append(reports, map[string]any{"axis": axis, "status": "PASS", "findings": []any{}, "checked": []string{"read the diff"},
 			"resolutions": append([]map[string]any{}, resolutions...)})
 	}
-	raw, _ := json.Marshal(map[string]any{"reports": reports})
+	raw, _ := json.Marshal(map[string]any{"reports": reports, "quality": fixtureQuality(packet)})
 	return string(raw)
+}
+
+func fixtureQuality(packet map[string]any) *QualityReport {
+	if packet["quality"] == nil {
+		return nil
+	}
+	raw, _ := json.Marshal(packet["quality"])
+	var input qualityInputs
+	_ = json.Unmarshal(raw, &input)
+	report := &QualityReport{Requirements: []RequirementResult{}, Rules: []RuleResult{}}
+	for _, requirement := range input.Requirements {
+		proof := Proof{Kind: "code", Ref: packet["scope_files"].([]any)[0].(string) + ":1", Detail: "inspected the fixture change"}
+		switch requirement.Method {
+		case "check":
+			proof.Kind, proof.Ref = "check", ""
+			for id, check := range input.Checks {
+				if check.Receipt.ReturnCode == 0 {
+					proof.Ref = id
+					break
+				}
+			}
+		case "browser":
+			proof.Kind, proof.Ref = "browser", ""
+			if input.Browser != nil {
+				for _, row := range input.Browser.Coverage {
+					if row.Observed {
+						proof.Ref = row.ScenarioID
+						break
+					}
+				}
+			}
+		}
+		result := RequirementResult{ID: requirement.ID, Status: "verified", Reason: "fixture evidence", Evidence: []Proof{proof}}
+		if proof.Ref == "" {
+			result.Status, result.Reason, result.Evidence = "missing", "no proof source", nil
+		}
+		report.Requirements = append(report.Requirements, result)
+	}
+	for _, rule := range input.Rules {
+		result := RuleResult{ID: rule.ID, Status: "pass", Evidence: "read the rule and the fixture change"}
+		if rule.Unavailable != "" {
+			result.Status, result.Evidence = "unavailable", rule.Unavailable
+		}
+		report.Rules = append(report.Rules, result)
+	}
+	return report
 }
 
 func (f *fixture) count(kind string) int {
