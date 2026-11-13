@@ -2,6 +2,14 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.9.1
+
+- **A staged plan is scouted stage by stage.** The architecture pass of a staged plan now runs one scout per
+  stage, in parallel, and joins their maps into one context pack. One scout did not get through a large
+  specification in its ten minutes and left the architects without a map. The first stage then finds its own
+  map already made. A stage whose scout fails is named in `scout_note` and in the pack's unknowns; the rest is
+  still used. Plans without stages are scouted as before.
+
 ## 0.9.0
 
 - **Stages.** A large specification is split into stages, each written, checked, reviewed and accepted before

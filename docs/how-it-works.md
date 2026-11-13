@@ -22,7 +22,7 @@ Every stage exists because skipping it costs more than running it.
 | # | Stage | Who | Why it is there |
 |---|---|---|---|
 | 1 | Brief | the lead | Someone has to decide what is being built; this is the only stage that talks to the user |
-| 2 | Scout | one cheap model, once | Otherwise every worker explores the repository by itself, at its own effort. Skipped in light |
+| 2 | Scout | one cheap model, once; a staged plan gets one per stage, in parallel | Otherwise every worker explores the repository by itself, at its own effort. Skipped in light |
 | 3 | Design | two top models, independently | Heavy and ultra only. Two designs take the time of one and show where the real decision is. The lead accepts one |
 | 4 | Write | one writer per stream | Writers run the declared checks themselves, so the first thing the gate sees is code its author already tested |
 | 5 | Check | the declared commands | Runs before any reviewer. Seconds, against minutes and quota: code that fails its checks is not reviewed |
