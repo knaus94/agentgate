@@ -1,0 +1,27 @@
+node --test --test-concurrency=1 design-kit/tests/core.test.mjs
+✔ all design commands show help without touching files or starting a process (141.176782ms)
+✔ design argument errors are rejected before side effects (190.27583ms)
+✔ GraphQL names cannot read or overwrite files outside the fixture directory (34.188242ms)
+✔ fixtures make missing data, malformed input and untrusted origins visible (13.171063ms)
+✔ fixture identity is stable across variable key order and each recording replays exactly (9.023812ms)
+✔ upstream HTTP errors never become valid recordings (1.88331ms)
+✔ failed and concurrent exports preserve the last complete design package (0.685578ms)
+✔ export setup failures release their own lock and descriptor (0.799521ms)
+✔ cleanup cannot adopt an arbitrary or recycled child PID (0.170999ms)
+✔ exported inventories detect tampering instead of accepting stale design evidence (2.318552ms)
+✔ Figma URLs and transport selection are explicit (0.488932ms)
+✔ Figma REST pins renders to one version and never sends tokens to the image host (1.516948ms)
+✔ Figma rate limits are explicit and do not trigger a fallback or retry loop (0.330897ms)
+✔ a removed solid background is a measured difference (0.64921ms)
+✔ an unhealthy existing stand is reported and never replaced (5.174555ms)
+✔ owned stands are stopped, including a child that ignores SIGTERM (1397.713694ms)
+✔ recorded fixture subprocess follows the owned stand lifecycle (269.5984ms)
+✔ a nonexistent stand executable fails promptly and restores signal listeners (157.074355ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2299.210255

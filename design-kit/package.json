@@ -2,7 +2,9 @@
   "name": "agentgate-design-tests",
   "private": true,
   "scripts": {
-    "test": "node --test --test-concurrency=1 tests/*.test.mjs"
+    "test": "node --test --test-concurrency=1 tests/*.test.mjs",
+    "test:unit": "node --test --test-concurrency=1 tests/core.test.mjs",
+    "test:browser": "node --test --test-concurrency=1 tests/workflow.test.mjs"
   },
   "devDependencies": {
     "playwright-core": "1.65.1"

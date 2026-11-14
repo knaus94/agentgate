@@ -32,7 +32,7 @@ type Check struct {
 	Kind      string   `json:"kind,omitempty"`      // test, typecheck, lint, build, measurement or runtime; otherwise command
 	Inputs    []string `json:"inputs,omitempty"`    // globs whose content decides whether a result is still current
 	TimeoutS  int      `json:"timeout_s,omitempty"`
-	Baseline  bool     `json:"baseline,omitempty"` // run before writing; a failure that was already there does not block
+	Baseline  bool     `json:"baseline,omitempty"` // run before writing to record existing failures; failures still block
 	NoReuse   bool     `json:"no_reuse,omitempty"` // depends on external state: always rerun
 }
 
@@ -170,12 +170,15 @@ func cleanPaths(values []string) ([]string, error) {
 	for _, value := range values {
 		clean := filepath.ToSlash(filepath.Clean(value))
 		parts := strings.Split(clean, "/")
-		if value == "" || filepath.IsAbs(value) || slices.Contains(parts, "..") || slices.Contains(parts, ".git") || clean == "." {
+		if value == "" || strings.ContainsRune(value, '\x00') || filepath.IsAbs(value) || slices.Contains(parts, "..") || slices.Contains(parts, ".git") || clean == "." {
 			return nil, fmt.Errorf("scope must contain repository-relative file paths: %q", value)
 		}
 		for current := clean; current != "."; current = filepath.ToSlash(filepath.Dir(current)) {
 			info, err := os.Lstat(current)
-			if err == nil && (info.Mode()&os.ModeSymlink != 0 || (current == clean && info.IsDir())) {
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				return nil, fmt.Errorf("inspect scope %q: %w", value, err)
+			}
+			if err == nil && (info.Mode()&os.ModeSymlink != 0 || (current == clean && !info.Mode().IsRegular())) {
 				return nil, fmt.Errorf("scope must name regular files, not directories or symlinks: %q", value)
 			}
 		}
@@ -242,8 +245,8 @@ func Resolve(cfg *config.Config, plan *Plan) (*Resolved, error) {
 	names, owner := map[string]bool{}, map[string]string{}
 	for index := range plan.Streams {
 		stream := &plan.Streams[index]
-		if stream.Name == "" || names[stream.Name] {
-			return nil, fmt.Errorf("stream names must be unique and nonempty: %q", stream.Name)
+		if !safeName.MatchString(stream.Name) || names[stream.Name] {
+			return nil, fmt.Errorf("stream names must be unique path-safe identifiers (letters, digits, dot, dash or underscore, starting with a letter or digit): %q", stream.Name)
 		}
 		names[stream.Name] = true
 		if stream.Domain != "backend" && stream.Domain != "frontend" {
@@ -399,14 +402,17 @@ func validateChecks(checks []Check) error {
 			return fmt.Errorf("unknown check kind %q", check.Kind)
 		}
 		key := strings.Join(check.Argv, "\x00")
-		if len(check.Argv) == 0 || seen[key] {
+		if len(check.Argv) == 0 || strings.TrimSpace(check.Argv[0]) == "" || slices.ContainsFunc(check.Argv, func(arg string) bool { return strings.ContainsRune(arg, '\x00') }) || seen[key] {
 			return errors.New("checks need a nonempty, unique argv")
 		}
 		seen[key] = true
 		for _, pattern := range check.Inputs {
 			parts := strings.Split(filepath.ToSlash(pattern), "/")
-			if pattern == "" || filepath.IsAbs(pattern) || slices.Contains(parts, "..") || slices.Contains(parts, ".git") {
+			if pattern == "" || strings.ContainsRune(pattern, '\x00') || filepath.IsAbs(pattern) || slices.Contains(parts, "..") || slices.Contains(parts, ".git") {
 				return fmt.Errorf("check inputs are repository-relative globs outside .git: %q", pattern)
+			}
+			if _, err := compileGlob(pattern); err != nil {
+				return fmt.Errorf("invalid check input %q: %w", pattern, err)
 			}
 		}
 		if check.TimeoutS < 0 {

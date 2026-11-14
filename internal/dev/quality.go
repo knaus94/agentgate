@@ -94,9 +94,17 @@ func loadReviewRules(cfg *config.Config, files []string) ([]reviewRule, error) {
 		if rule.Mode == "" {
 			rule.Mode = "blocking"
 		}
+		var patterns []*fileGlob
+		for _, pattern := range spec.Files {
+			compiled, err := compileGlob(filepath.ToSlash(filepath.Clean(pattern)))
+			if err != nil {
+				return nil, fmt.Errorf("review rule %s has an invalid file glob %q: %w", name, pattern, err)
+			}
+			patterns = append(patterns, compiled)
+		}
 		for _, file := range files {
-			if len(spec.Files) == 0 || slices.ContainsFunc(spec.Files, func(pattern string) bool {
-				return globRegexp(filepath.ToSlash(filepath.Clean(pattern))).MatchString(filepath.ToSlash(file))
+			if len(patterns) == 0 || slices.ContainsFunc(patterns, func(pattern *fileGlob) bool {
+				return pattern.MatchString(filepath.ToSlash(file))
 			}) {
 				rule.Files = append(rule.Files, file)
 			}
@@ -180,12 +188,13 @@ func (g *Gate) qualityInputs(cfg *config.Config) (*qualityInputs, error) {
 		return nil, nil
 	}
 	input := &qualityInputs{Requirements: g.Plan.Requirements, Rules: rules, Checks: map[string]qualityCheck{}}
+	current := g.currentReceipts()
 	for _, check := range g.Plan.Checks {
 		kind := check.Kind
 		if kind == "" {
 			kind = "command"
 		}
-		if receipt := g.currentReceipt(&check); receipt != nil {
+		if receipt := current[checkID(check.Argv)]; receipt != nil {
 			copy := *receipt
 			copy.Reused = false // reusing the same evidence does not change its meaning
 			input.Checks[checkID(check.Argv)] = qualityCheck{Kind: kind, Receipt: &copy}

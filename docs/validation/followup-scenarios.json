@@ -1,0 +1,90 @@
+{
+  "date": "2026-11-14",
+  "readonly_configuration": {
+    "scenario_count": 6,
+    "result": "PASS",
+    "writes_state": false
+  },
+  "stale_architecture": {
+    "continue": "refused",
+    "launch": "refused",
+    "answer": "refused (Go regression)",
+    "source_preserved": true
+  },
+  "corrupt_peer_claim": {
+    "overlapping_launch": "refused",
+    "source_preserved": true
+  },
+  "heavy_staged_fixture": {
+    "stages": 2,
+    "integration_review": true,
+    "phase": "complete",
+    "providers": "scripted CLI processes with real Bubblewrap"
+  },
+  "communication_fixture": {
+    "after_handoff": true,
+    "blocked_answer_same_session": true,
+    "upstream_rerun": false,
+    "fix_owner_only": true,
+    "fix_same_session": true,
+    "recheck_same_finding_and_delta": true,
+    "phase": "complete",
+    "model_calls": 0
+  },
+  "live_codex_smoke": {
+    "task": "single-file normalization",
+    "scout": "gpt-6.1-terra",
+    "writer": "gpt-6-astra",
+    "reviewer": "gpt-6.1-sol",
+    "check": "4 assertions",
+    "local_skill_rule": "pass",
+    "phase": "complete"
+  },
+  "live_figma_browser": {
+    "catalogue": "PASS",
+    "export": "PASS",
+    "layers": 73,
+    "assets": 12,
+    "frame_pixels": [
+      1360,
+      655
+    ],
+    "context_pixels": [
+      1920,
+      1098
+    ],
+    "inventory_files": 18,
+    "go_route_validation": "PASS",
+    "private_profile_copy_removed": true
+  },
+  "live_staged_backend": {
+    "language": "Go stdlib",
+    "stages": [
+      "query",
+      "listing",
+      "http"
+    ],
+    "phase": "complete",
+    "live_calls": 8,
+    "routing": {
+      "profile": "codex",
+      "max_parallel": 1,
+      "scout": "disabled for specified fixture",
+      "review": "one combined independent Sol lane"
+    },
+    "handoffs_in_later_assignments": true,
+    "integration_review": true,
+    "requirements": {
+      "R1": "verified",
+      "R2": "verified",
+      "R3": "verified"
+    },
+    "check_returncodes": [
+      0,
+      0,
+      0
+    ],
+    "evidence_gap": "partial -> finish refused -> scratch verifier corrected -> declared check passed -> fresh review verified",
+    "removed_worker_credential_copies": 7
+  }
+}

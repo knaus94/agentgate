@@ -1,6 +1,9 @@
 package dev
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -59,8 +62,7 @@ func TestLegacyDesignContextRefreshDoesNotRebaselineImplementedCode(t *testing.T
 	gate := Current()
 	design := &gate.Plan.Design[0]
 	design.Figma = "https://www.figma.com/design/fixture/example?node-id=1-1"
-	manifest := filepath.Join(design.Package, "manifest.json")
-	write(t, manifest, `{"source":{"key":"fixture","node":"1:1"},"frame":{"id":"1:1"},"screen":{"width":400,"height":300}}`)
+	sealDesignFixture(t, design.Package, map[string]any{"source": map[string]any{"key": "fixture", "node": "1:1"}, "frame": map[string]any{"id": "1:1"}, "screen": map[string]any{"width": 400, "height": 300}})
 	if design.imported() {
 		t.Fatal("a legacy crop without screen context was considered sufficient evidence")
 	}
@@ -69,8 +71,8 @@ func TestLegacyDesignContextRefreshDoesNotRebaselineImplementedCode(t *testing.T
 		strings.Count(fileText(t, filepath.Join(dir, "baselines")), "baseline") != 1 {
 		t.Fatal("refresh must import context without capturing the implemented page as its baseline")
 	}
-	write(t, manifest, `{"source":{"key":"fixture","node":"1:1"},"frame":{"id":"1:1"},"screen":{"id":"2:1"}}`)
 	write(t, filepath.Join(design.Package, "context.png"), "parent picture")
+	sealDesignFixture(t, design.Package, map[string]any{"source": map[string]any{"key": "fixture", "node": "1:1"}, "frame": map[string]any{"id": "1:1"}, "screen": map[string]any{"id": "2:1"}})
 	if !design.imported() {
 		t.Fatal("a complete contextual package would be imported again on every review")
 	}
@@ -113,10 +115,39 @@ func screenFixture(t *testing.T) DesignRef {
 	must(t, os.MkdirAll(filepath.Join(dir, "package", "data"), 0o755))
 	write(t, filepath.Join(dir, "screen.json"), `{"url":"/page","root":"#old"}`)
 	write(t, filepath.Join(dir, "package", "data", "spec.json"), `{}`)
-	write(t, filepath.Join(dir, "package", "manifest.json"), `{"digest":"fixture","frame":{"id":"1:1"},"screen":{"id":"1:1"}}`)
+	write(t, filepath.Join(dir, "package", "data", "nodes.json"), `{}`)
 	write(t, filepath.Join(dir, "package", "frame.png"), "fixture picture")
 	write(t, filepath.Join(dir, "package", "brief.md"), "The screen and its shell")
+	sealDesignFixture(t, filepath.Join(dir, "package"), map[string]any{"frame": map[string]any{"id": "1:1"}, "screen": map[string]any{"id": "1:1"}})
 	return DesignRef{Screen: dir, Root: "#page", URL: "/page", Stream: "core"}
+}
+
+func sealDesignFixture(t *testing.T, dir string, metadata map[string]any) {
+	t.Helper()
+	files := map[string]string{}
+	must(t, filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() || filepath.Base(path) == "manifest.json" {
+			return nil
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256(raw)
+		name, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		files[filepath.ToSlash(name)] = hex.EncodeToString(sum[:])
+		return nil
+	}))
+	metadata["files"], metadata["digest"] = files, packageContentDigest(files)
+	raw, err := json.Marshal(metadata)
+	must(t, err)
+	write(t, filepath.Join(dir, "manifest.json"), string(raw))
 }
 
 func TestLayoutPreparationRecoversAndReplanReplacesManagedChecks(t *testing.T) {
@@ -229,5 +260,20 @@ func TestPreparationOfAnActiveDesignReusesItsHostContext(t *testing.T) {
 	f.do("prepare", func() (any, error) { return Prepare(f.cfg, PrepareInput{Notes: "repair measurement"}) })
 	if strings.Contains(fileText(t, filepath.Join(dir, "calls")), "figma") {
 		t.Fatal("an active measurement repair reopened Figma")
+	}
+}
+
+func TestMalformedDesignURLIsAnErrorNotAPanic(t *testing.T) {
+	f := newFixture(t)
+	layoutFixture(t)
+	design := screenFixture(t)
+	design.Screen = ""
+	for _, target := range []string{"http", "https:", "http:/broken", "http://", "httpx://localhost", "https://user:password@localhost/", "http://example.com/"} {
+		plan := f.plan("-m implement the page")
+		design.URL = target
+		plan.Design = []DesignRef{design}
+		if _, err := Route(f.cfg, plan); err == nil {
+			t.Errorf("malformed/nonlocal URL accepted: %s", target)
+		}
 	}
 }

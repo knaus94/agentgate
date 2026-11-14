@@ -62,9 +62,12 @@ func designsDir() string { return filepath.Join(checkoutDir(""), "designs") }
 
 // loadReceipt reads a receipt of this checkout.
 func loadReceipt(id, kind string) (*Receipt, error) {
+	if !receiptID.MatchString(id) {
+		return nil, fmt.Errorf("unknown %s receipt for this checkout: %q", kind, id)
+	}
 	raw, err := os.ReadFile(filepath.Join(designsDir(), id, "receipt.json"))
 	receipt := &Receipt{}
-	if !receiptID.MatchString(id) || err != nil || json.Unmarshal(raw, receipt) != nil || receipt.Kind != kind {
+	if err != nil || json.Unmarshal(raw, receipt) != nil || receipt.Kind != kind || receipt.ID != id || kind == "ui" && receipt.Design == nil {
 		return nil, fmt.Errorf("unknown %s receipt for this checkout: %q", kind, id)
 	}
 	return receipt, nil
@@ -136,6 +139,10 @@ func Architecture(cfg *config.Config, plan *Plan) (any, error) {
 		return map[string]any{"mode": resolved.Mode, "decision": resolved.Decision,
 			"next": "This mode has no architecture pass: the brief is the design. Launch directly."}, nil
 	}
+	limit, err := resolved.Parallelism()
+	if err != nil {
+		return nil, err
+	}
 	ui, err := loadUI(plan)
 	if err != nil {
 		return nil, err
@@ -197,6 +204,9 @@ func Architecture(cfg *config.Config, plan *Plan) (any, error) {
 				return lane, err
 			}
 		}
+		if result.Dir != "" {
+			dir = result.Dir
+		}
 		lane = ArchLane{Round: round, Route: used, Session: result.Session, Dir: dir}
 		if err := decode(result.Answer, &lane.Report); err != nil {
 			return lane, err
@@ -219,17 +229,24 @@ func Architecture(cfg *config.Config, plan *Plan) (any, error) {
 		routes[index] = cfg.MustRoute(spec)
 	}
 	designs := make([]ArchLane, len(routes))
-	errs := parallel(len(routes), len(routes), func(index int) (err error) {
+	errs := parallel(len(routes), limit, func(index int) (err error) {
 		designs[index], err = run("design", fmt.Sprintf("design-%d", index), routes[index], nil, designSchema, nil)
 		return err
 	})
 	if err := firstError(errs); err != nil {
 		return nil, fmt.Errorf("architecture incomplete (finished passes are kept; run it again): %w", err)
 	}
+	models := map[string]bool{}
+	for _, lane := range designs {
+		if lane.Route.Model == "" || models[lane.Route.Model] {
+			return nil, errors.New("architecture routes resolved to the same model; configure independent models before accepting the design")
+		}
+		models[lane.Route.Model] = true
+	}
 	receipt.Lanes = designs
 	if mode.Critique {
 		critiques := make([]ArchLane, len(routes))
-		errs := parallel(len(routes), len(routes), func(index int) (err error) {
+		errs := parallel(len(routes), limit, func(index int) (err error) {
 			other := designs[len(routes)-1-index].Report
 			critic := routes[index]
 			critic.Effort = config.Lower(critic.Effort) // judging one finished design takes less than producing one

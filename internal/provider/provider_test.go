@@ -22,7 +22,10 @@ env > "$lane/env.txt"
 cat > "$lane/stdin.txt"
 (echo probe > "$PWD/probe.txt") 2>/dev/null && echo yes > "$lane/wrote-checkout" || echo no > "$lane/wrote-checkout"
 (echo probe > "$HOME/.agentgate-probe") 2>/dev/null && echo yes > "$lane/wrote-home" || echo no > "$lane/wrote-home"
-[ -f "$PWD/refresh-token" ] && echo refreshed >> "$CODEX_HOME/auth.json"
+if [ -f "$PWD/refresh-token" ]; then
+  sed 's/"refreshed":false/"refreshed":true/' "$CODEX_HOME/auth.json" > "$CODEX_HOME/auth.json.new"
+  mv "$CODEX_HOME/auth.json.new" "$CODEX_HOME/auth.json"
+fi
 if [ -f "$PWD/limit-codex" ]; then echo "You've hit your usage limit. Try again later." >&2; exit 1; fi
 out=""; prev=""
 for arg in "$@"; do [ "$prev" = "-o" ] && out="$arg"; prev="$arg"; done
@@ -62,6 +65,10 @@ func setup(t *testing.T) (*config.Config, string) {
 	_ = os.WriteFile(filepath.Join(bin, "claude"), []byte(fakeClaude), 0o755)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	t.Setenv("HOME", filepath.Join(root, "user"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, "user", ".local", "share"))
+	t.Setenv("CODEX_HOME", filepath.Join(root, "user", ".codex"))
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(root, "user", ".claude"))
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "lead-session")
 	t.Chdir(repo)
 	cfg, err := config.Load()
@@ -208,7 +215,7 @@ func TestCallRunsUnderTheChosenProfileAndKeepsItsLoginFresh(t *testing.T) {
 	for _, name := range []string{"one", "two"} {
 		homes[name] = filepath.Join(root, "repo", "profiles", name)
 		_ = os.MkdirAll(homes[name], 0o700)
-		_ = os.WriteFile(filepath.Join(homes[name], "auth.json"), []byte(name+"\n"), 0o600)
+		_ = os.WriteFile(filepath.Join(homes[name], "auth.json"), []byte(`{"name":"`+name+`","refreshed":false}`), 0o600)
 	}
 	_ = os.WriteFile("refresh-token", nil, 0o644)
 	lane := filepath.Join(root, "state", "lane")
@@ -222,11 +229,11 @@ func TestCallRunsUnderTheChosenProfileAndKeepsItsLoginFresh(t *testing.T) {
 	if _, err := Run(call); err != nil {
 		t.Fatal(err)
 	}
-	if target, _ := os.Readlink(filepath.Join(lane, "home", "auth.json")); target != filepath.Join(homes["two"], "auth.json") {
-		t.Fatalf("the lane authenticates from the chosen profile, got %s", target)
+	if target, err := os.Readlink(filepath.Join(lane, "home", "auth.json")); err == nil {
+		t.Fatalf("the lane must hold a private regular credential copy, not a host symlink: %s", target)
 	}
 	for name, home := range homes {
-		if got := read(t, filepath.Join(home, "auth.json")); got != name+"\nrefreshed\n" {
+		if got := read(t, filepath.Join(home, "auth.json")); got != `{"name":"`+name+`","refreshed":true}` {
 			t.Fatalf("a token refreshed inside the sandbox must reach profile %s, got %q", name, got)
 		}
 	}

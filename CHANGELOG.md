@@ -2,6 +2,30 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.14.0
+
+- Refactored command parsing/dispatch, task state/lifecycle/evidence, provider adapters, accounts,
+  configuration storage and terminal state/update/render into focused modules.
+- Added `task` and `setup` command groups, read-only help, strict flags/JSON, `config validate`,
+  interrupted-round `continue`, JSON dashboard snapshots and terminal-safe responsive rendering.
+- Fixed baseline failure waivers, stale receipt reuse, corrupt-state handling, author/reviewer collisions,
+  fallback session directories, cancellation races and unchecked persistence errors.
+- Release validation also fixed read-only configuration requiring writable state, stale architecture on
+  writer continuation/answers, and corrupt peer state silently releasing file claims. Corrected the browser
+  workflow fixture's duplicate options without weakening strict parsing.
+- Guarded Git landing against unrelated staged/user changes and confined worktree cleanup to managed paths.
+  Writable MCP grants reject symlink escapes; private Figma profiles are masked after all other mounts.
+- Isolated worker credential snapshots with guarded refresh writeback; corrected quota windows,
+  duplicate subscriptions, probe caching, environment conflicts and account/model fallback behavior.
+- Added official Figma REST transport, verified atomic packages, exact-variable GraphQL recordings,
+  explicit missing-fixture errors and bounded owned stand cleanup; improved color measurements.
+- Hardened downloads/install/update; semantic version comparison prevents automatic downgrades.
+  Added source-plus-binary offline ZIP packaging, checksums, migration/security/research/validation guides.
+- Corrected mixed-profile heavy/ultra frontend routes to avoid a built-in writer/reviewer identity conflict.
+  Removed unverified benchmark and price claims from model documentation.
+
+See [release notes](RELEASE_NOTES.md) and [validation](docs/validation.md) for exact scope and limits.
+
 ## 0.13.0
 
 - Project rules and local skill criteria reach preparation, architecture, discovery and scoped UI design,

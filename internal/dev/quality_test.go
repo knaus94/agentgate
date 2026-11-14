@@ -123,7 +123,8 @@ func TestQualityRejectsMissingDuplicateAndInventedProof(t *testing.T) {
 			}
 		})
 	}
-	// A grandfathered failure can unblock ordinary checks, but cannot prove a criterion.
+	// A baseline failure remains blocking, and cannot prove a criterion even
+	// when the lead explicitly asks for a review before checks pass.
 	t.Run("preexisting failure", func(t *testing.T) {
 		f := newFixture(t)
 		plan := f.plan("-m preserve existing behavior")
@@ -134,7 +135,11 @@ func TestQualityRejectsMissingDuplicateAndInventedProof(t *testing.T) {
 			r.Requirements[0].Status = "verified"
 			r.Requirements[0].Evidence = []Proof{{Kind: "check", Ref: checkID([]string{"false"}), Detail: "claimed success"}}
 		})
-		f.fails("review", "current successful receipt", func() (any, error) { return ReviewTask(f.cfg, Current(), ReviewInput{}) })
+		f.review()
+		if f.count("review") != 0 || len(Current().failing()) != 1 {
+			t.Fatal("baseline failure was treated as successful verification")
+		}
+		f.fails("review", "current successful receipt", func() (any, error) { return ReviewTask(f.cfg, Current(), ReviewInput{SkipChecks: true}) })
 	})
 }
 

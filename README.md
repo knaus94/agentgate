@@ -1,187 +1,195 @@
-# agentgate
+# AgentGate
 
-[Русский](README.ru.md)
+[Русский](README.ru.md) · [Quick start](#quick-start) · [Commands](docs/cli.md) · [Architecture](docs/architecture.md) · [Release notes](RELEASE_NOTES.md)
 
-**A quality gate around sandboxed model workers: your Claude Code or Codex session leads, Claude and Codex
-workers write and review, and the gate decides when the task is done.**
+**A local orchestrator and quality gate for Claude Code and Codex workers.** Your lead session owns the task;
+AgentGate runs scoped workers, records their results, runs checks and independent reviews, and allows
+completion only while that evidence still matches the change.
 
-*Formerly `claude-dev`. The tool can now be led from Codex as well, so the name no longer fit; an existing
-install renames itself on `claude-dev update`.*
+AgentGate is a Linux CLI with a live terminal dashboard. It runs without a background daemon or a hosted
+service. It uses the provider CLIs and accounts you configure. Former installations named `claude-dev` are
+recognized for migration.
 
-You type `/dev add rate limiting to the export endpoint` in Claude Code (`$dev …` in Codex). Your session becomes the lead: it
-accepts scope and authorizes work. `agentgate prepare` delegates discovery and plan drafting to a read-only
-worker, then `agentgate` runs the writers and reviewers as
-separate processes on the models you configured, keeps receipts of everything they did, and refuses to close
-the task while a review, a check or a blocking finding is outstanding.
+## Quick start
 
+### From the complete release archive
+
+The archive includes source, documentation, SHA-256 checksums, and binaries for Linux x86-64 and arm64.
+After extracting it:
+
+```sh
+cd agentgate-0.14.0
+sh scripts/install-local.sh --lead both
+agentgate setup doctor
+agentgate config validate
+agentgate modes
 ```
-/dev [-l|-m|-h|-x] <task>
-   │
-   ├─ scout      medium: a cheap model maps the code once for the writers and the reviewers
-   ├─ design     heavy, ultra: two independent designs in parallel; the lead accepts one
-   ├─ write      one sandboxed writer per stream, wave by wave; writers run the declared checks themselves
-   ├─ check      the declared checks run first — reviewers are never paid to read code that fails them
-   ├─ review     reviewers from two vendors in parallel, each on a different model than the writer
-   ├─ correct    failing checks and accepted findings go back to the same writers, in their own sessions
-   └─ finish     only with a current review, passing checks and no blocking finding
+
+Choose `--lead codex`, `--lead claude` or `--lead both`. Codex-only installation selects the built-in `codex`
+worker profile when no profile is already selected; an existing custom profile is preserved.
+`--no-integrations` copies the binary without changing your lead configuration. The local installer uses
+no network and requires no root access; your chosen directory must be writable and on `PATH`.
+
+Required: Linux (including WSL2), `git`, `diff`, `bubblewrap` (`bwrap`), and the Claude/Codex CLIs used by your
+profile. Log into those CLIs yourself. The optional design workflow also needs Node.js 20+ and
+`playwright-core` with Chromium. See [design setup](docs/design.md).
+
+### From source
+
+```sh
+make build                       # Go 1.25+, no third-party Go modules
+./dist/agentgate setup install --lead both
+./dist/agentgate setup doctor
 ```
 
-## Why
-
-- **Several subscriptions at once.** Each job goes to the model you choose, and parallel jobs run on different
-  pools (Claude, Fable and Codex by default), so no single limit is the bottleneck. When a pool is
-  exhausted, a declared alternate takes over and the substitution is reported.
-- **The strongest model creates, the others verify.** The author never reviews its own code: reviewers are
-  fresh processes on different models, from two vendors in every mode above light.
-- **Evidence, not claims.** Reviews and check results are bound to the exact content they saw. Change a file
-  and they are stale.
-- **Real isolation.** Every worker runs under `bwrap` with a read-only host. A reviewer cannot write; a writer
-  can write only the checkout.
-- **Cheap conversations.** A blocked writer is answered in its own session. Corrections go to the writer that
-  wrote the code, and the reviewer that raised a finding rechecks only the fix.
-- **One dial.** Four modes instead of a matrix of options, and the mode is chosen for you.
-
-## Modes
-
-Without a flag the lead records what it found in the code — size, named risks, whether the change can be
-undone, uncertainty — and the mode follows from a fixed rule table. A flag always wins.
-
-| | light `-l` | medium `-m` | heavy `-h` | ultra `-x` |
-|---|---|---|---|---|
-| Chosen when | trivial, ≤3 files, no risk | ordinary work | a named risk, or complex and uncertain | an irreversible risk, or a severe risk in complex work |
-| Context | the lead's own | scout `sol:medium` | the accepted design | the accepted design |
-| Architect | the lead | the lead | `fable:high` ∥ `astra:high` | `fable:xhigh` ∥ `astra:xhigh`, then cross-critique |
-| Backend writer | `sol:medium` | `opus:medium` | `opus:high` | `opus:xhigh` |
-| Frontend writer | `sonnet:medium` | `opus:medium` | `astra:high` | `astra:xhigh` |
-| Review: architecture | the lead | `fable:medium` | `fable:high` | `fable:high` |
-| Review: correctness | the lead | `astra:medium` | `astra:high` | `fable:xhigh` ∥ `astra:xhigh` |
-| Review: security | — | — | — | `astra:high` |
-| Effort ceiling | `high` | `high` | `xhigh` | `max` |
-| Blocks completion | P0–P1 | P0–P1 | P0–P2 | P0–P2 |
-
-Each cell is `model:effort`. Two rules run through the table:
-
-- **The strongest model the mode can afford creates; the other frontier models verify.**
-- **Effort is spent where it pays.** A later round continues the session that already read the code — a
-  critique and a revision the architect's, a correction the writer's, a recheck the reviewer's — instead of
-  reading it again. Medium runs every model at the level its vendor ships as default, heavy one step
-  above, ultra two. `max` is never a default: it is reached only when a correction stalls or the lead raises
-  one hard stream. A recheck after a fix runs one step lower and only on the lanes with something to verify.
-
-The choices follow public benchmark, price and vendor-guidance data — see
-[Why these models](docs/model-selection.md) — and every cell can be [changed](docs/configuration.md). Named
-risks: `authorization`, `security`, `money`, `data-integrity`, `concurrency`, `migration`, `public-contract`.
-
-## Install
-
-Linux, x86-64 or arm64. Requires `bwrap` (bubblewrap), `git`, `diff`, and the CLIs you use:
-[Claude Code](https://claude.com/claude-code), [Codex CLI](https://github.com/openai/codex), or both.
+The online installer remains available for published GitHub releases:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/knaus94/agentgate/main/scripts/install.sh | sh
 ```
 
-The script downloads the release binary into `~/.local/bin`, verifies its checksum and asks which sessions
-lead the work:
+A locally delivered archive may be ahead of GitHub. Check versions before running `agentgate update`.
 
-| Choice | Lead | Workers |
+## Start a task
+
+Open a new Claude Code or Codex session after installing the integration:
+
+```text
+/dev add rate limiting to the export endpoint          Claude Code
+$dev add rate limiting to the export endpoint          Codex
+
+/dev -h move invoice totals to integer cents           explicit heavy mode
+/dev -w add pagination to the orders list              isolated task worktree
+/dev -2 review --fix the current branch changes        at most two workers
+/dev plan -x split the wallet service                  plan before implementation
+```
+
+The lead prepares and accepts a plan, then drives structured commands. `--preview` shows intended work.
+`plan`, `research` and `verify` are read-only. `review` inspects an existing change; `--fix` adds write authority.
+
+| Stage | What happens | Completion evidence |
 |---|---|---|
-| `claude` (default) | `/dev` in Claude Code | Claude and Codex models |
-| `codex` | `$dev` in Codex | Codex models only |
-| `both` | `/dev` and `$dev` | Claude and Codex models |
+| Prepare | Read-only discovery, scope and plan | Validated plan and explicit requirements |
+| Scout / architecture | Context collection or independent proposals, depending on mode | Context pack or accepted design |
+| Write | Disjoint streams, dependency waves and bounded parallelism | Structured reports and file ownership audit |
+| Check | Declared commands run before reviewers | Exit code, logs and current input fingerprint |
+| Review | Separate models inspect the change and quality criteria | Findings and review bound to content and contract |
+| Correct | The original writer continues with checks or accepted findings | New result in the correct provider session |
+| Finish | The gate checks all required evidence | Current review, passing checks and no blocking findings |
 
-`agentgate install --lead <choice>` changes it later. [Leading from Codex](docs/codex.md) explains the
-Codex side and the Codex-only model table. Then:
+A failure before the task began is diagnostic evidence, not permission to ignore later failures. Changing a
+file, plan contract or required evidence invalidates the relevant receipts. An author model cannot review
+its own work, including earlier stages and partially failed attempts.
 
-```sh
-agentgate doctor     # verify the environment
-agentgate modes      # see which model does what
-```
+## Commands organized around the work
 
-Start a new session and type `/dev help` (Claude Code) or `$dev help` (Codex).
+| Need | Command |
+|---|---|
+| See available commands | `agentgate help`, `agentgate help task` |
+| Install / diagnose | `agentgate setup install --lead both`, `agentgate setup doctor` |
+| Inspect effective configuration | `agentgate config show`, `agentgate config validate` |
+| Observe work | `agentgate task watch`, `agentgate task status --all` |
+| Export a machine-readable dashboard | `agentgate task watch --json` |
+| Stop work | `agentgate task stop` |
+| Resume an interrupted writer round | `agentgate task resume`, then `agentgate task continue` |
+| Reuse a saved plan | `agentgate plan list`, `agentgate task launch --plan <name>` |
+| Inspect accounts | `agentgate accounts`, `agentgate accounts discover --save` |
+| Inspect provider routes | `agentgate modes` |
+| Design tools | `agentgate figma --help`, `agentgate layout --help`, `agentgate fixtures --help` |
 
-Update with `agentgate update`. Remove with `agentgate install --uninstall` and delete the binary.
-Build from source with `go build ./cmd/agentgate` (Go 1.25+).
+Existing flat commands remain supported. Every `--help` is read-only, including help for install, stop and
+update. Unknown flags, conflicting input sources, malformed JSON and trailing input are rejected.
+See [the command reference](docs/cli.md) for exit codes and JSON behavior.
 
-## Use
-
-```
-/dev fix the pagination off-by-one in the orders list
-/dev -h move invoice totals to integer cents
-/dev -2 review --fix the changes on this branch
-/dev plan -x split the wallet service
-/dev status      /dev stop      /dev help
-```
-
-`-N` caps how many model processes run at once. `--preview` shows what would run without starting anything.
-`plan`, `research` and `verify` are read-only. `review` judges an existing diff; add `--fix` to let it correct.
-
-Watch every task from any terminal in the repository:
-
-```sh
-agentgate watch
-```
-
-An interactive panel: the tasks of all sessions, the stages each went through with timings, its workers, checks
-and findings — and, one `enter` deeper, what a worker is doing right now, command by command.
-See [docs/watch.md](docs/watch.md).
-
-Zed users: `agentgate install --zed` adds `agentgate: watch`, `status` and `stop` to Zed's tasks.
-
-The plan of a task is kept in the repository, in `.agentgate/plans/<name>/`: `plan.json` is what runs,
-`brief.md` is the same plan for a person to read. `agentgate plan list` shows them; a saved plan can be
-launched from a later session.
-
-## Isolated tasks
-
-```
-/dev -w add rate limiting to the export endpoint
-```
-
-With `-w` a task works in its own git worktree and branch. Your checkout stays clean while it runs, several
-sessions can work in one repository on the same files, and the finished change comes in only on your word —
-uncommitted by default. If your checkout moved on, the merge and any conflict are handled inside the worktree.
-See [docs/isolation.md](docs/isolation.md).
-
-## Several subscriptions
+## A dashboard for people and scripts
 
 ```sh
-agentgate accounts discover --save   # pick up every logged-in CLI profile on this machine
-agentgate accounts                   # live limits of each account
+agentgate task watch
+agentgate task watch --once --no-color
+agentgate task watch --json
 ```
 
-With more than one Claude or Codex subscription, workers are spread over the accounts by remaining quota, an
-account that hits a limit rests until it resets, and the model is substituted only after every account refused
-it. See [docs/accounts.md](docs/accounts.md).
+The panel shows tasks, stage durations, worker activity, checks and findings. Navigate with arrows or `j/k`;
+Enter opens details, Escape goes back, `r` refreshes and `?` shows help. It adapts to terminal width and keeps
+the selection in view. `NO_COLOR` is respected. Untrusted text cannot inject terminal control sequences.
+Pipes, redirected input and `TERM=dumb` produce one snapshot instead of an interactive loop.
+[Dashboard guide](docs/watch.md).
 
-## Configure
+## Four modes, configurable models
+
+| Mode | Typical scope | Architecture | Review | Blocking severities |
+|---|---|---|---|---|
+| light `-l` | Small, low-risk change | Lead | Lead | P0–P1 |
+| medium `-m` | Ordinary implementation | Lead plus scout | Independent configured lanes | P0–P1 |
+| heavy `-h` | Named risk or complex uncertain work | Two independent proposals | Architecture and correctness | P0–P2 |
+| ultra `-x` | Severe or irreversible risk | Proposals and cross-critique | Additional correctness and security lanes | P0–P2 |
+
+With no flag, the recorded assessment selects a mode deterministically. A flag takes precedence. The mixed
+profile keeps implementation models separate from the Fable/Astra review routes; a Codex-only profile is
+also included. These are editable starting configurations, not universal performance rankings.
+[Routing policy](docs/model-selection.md) · [Mode rules](docs/modes.md).
 
 ```sh
-agentgate config init                               # create ~/.config/agentgate/config.json
-agentgate config set models.sol.model gpt-6.1-sol   # point an alias at another model
-agentgate config set modes.medium.backend sonnet:high  # change who does what
-agentgate config show
+agentgate config set modes.medium.backend sol:high
+agentgate config set modes.medium.frontend sol:high
+agentgate config validate
 ```
 
-A repository can carry its own `.agentgate.json`. See [docs/configuration.md](docs/configuration.md).
+## Accounts, isolation and recovery
+
+Accounts are selected from configured CLI profiles using known quota headroom. Expired quota windows no
+longer block an account forever; failed probes do not invent fresh capacity. Selected accounts use private
+worker credential snapshots, and refreshes are reconciled without overwriting a concurrent login.
+[Account guide](docs/accounts.md).
+
+Workers run through `bwrap`: the host is read-only, temporary paths are private, and writers receive a
+writable checkout. Files between writers are assigned and audited. This is write confinement for trusted
+local development, not a complete secrecy boundary against hostile code. Read
+[the security model](SECURITY.md) before granting extension tools or running untrusted projects.
+
+With `-w`, the whole task uses its own worktree. Landing audits the task scope and preserves unrelated
+staged changes. Interrupted operations retain their state; continuing retries unfinished streams instead
+of starting a replacement task. [Worktrees](docs/isolation.md) · [Recovery and migration](docs/migration.md).
+
+## Figma, layout measurement and fixtures
+
+The design toolkit exports reusable packages, measures a page against them, and can run a local stand with
+recorded GraphQL responses. Exports publish only after completion; content inventories detect missing or
+modified files. Missing fixtures are explicit errors unless you deliberately request empty responses.
+
+Figma supports two transports:
+
+- **REST API:** set `FIGMA_ACCESS_TOKEN` with `file_content:read`, or select `--transport api`. Rendering is
+  pinned to the loaded file version. Rate limits are reported without silently switching transport.
+- **Browser session:** `agentgate figma login`, then `--transport browser`. This preserves the previous
+  workflow. It relies on Figma's internal scene graph and is explicitly a compatibility adapter.
+
+No Figma token is written to the exported package. Layout measurement and independent visual acceptance
+remain separate. [Complete design workflow](docs/design.md).
+
+## Development and validation
+
+```sh
+make check                       # formatting, vet, Go race tests, Node core tests
+npm ci --prefix design-kit --ignore-scripts --no-audit --no-fund
+node design-kit/node_modules/playwright-core/cli.js install chromium
+make design-browser              # actual Chromium workflow scenarios
+make package                     # both Linux binaries + source ZIP + checksums
+```
+
+Go integration tests use controlled fake provider executables so they can exercise launching, checks,
+review, correction and completion without consuming subscriptions. They do not claim that a live provider
+accepted a particular model. [Validation record](docs/validation.md) lists what was actually run for this
+archive and any environment limits.
 
 ## Documentation
 
-- [How it works](docs/how-it-works.md) — the gate, the sandbox, how agents talk to each other, how
-  model-written extras are filtered
-- [Modes](docs/modes.md) — the rule table and what each mode runs
-- [Why these models](docs/model-selection.md) — the public data behind the defaults
-- [Configuration](docs/configuration.md) — models, pools, fallbacks, per-repository overrides
-- [Several subscriptions](docs/accounts.md) — accounts, limits, load spreading, failover
-- [Leading from Codex](docs/codex.md) — `$dev`, the Codex-only setup and its model table
-- [Extensions](docs/extensions.md) — plug tools into the workers with one file: a code graph, the Nx project graph
-- [The panel](docs/watch.md) — `agentgate watch`: tasks, timings, live worker activity
-- [Stages](docs/stages.md) — a large specification done and reviewed part by part
-- [Design](docs/design.md) — implementing a Figma design and proving the result
-- [Isolated tasks](docs/isolation.md) — `-w`: worktrees, landing, catching up, preparing dependencies
-- [Releasing](docs/releasing.md) — how versions are published and installed
-- `agentgate guide` and `agentgate reference` print what the lead reads
+[Commands](docs/cli.md) · [Architecture](docs/architecture.md) · [How it works](docs/how-it-works.md) ·
+[Configuration](docs/configuration.md) · [Modes](docs/modes.md) · [Model routing](docs/model-selection.md) ·
+[Accounts](docs/accounts.md) · [Codex](docs/codex.md) · [Extensions](docs/extensions.md) ·
+[Dashboard](docs/watch.md) · [Stages](docs/stages.md) · [Design](docs/design.md) ·
+[Worktrees](docs/isolation.md) · [Migration](docs/migration.md) · [Research decisions](docs/research.md) ·
+[Releasing](docs/releasing.md).
 
-## License
-
-MIT
+`agentgate guide` and `agentgate reference` print the lead workflow and JSON protocol installed with this
+exact binary. License: [MIT](LICENSE).

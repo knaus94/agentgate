@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/knaus94/agentgate/internal/config"
@@ -160,20 +161,73 @@ func (g *Gate) isolate(cfg *config.Config) error {
 }
 
 // discard removes the worktree and its branch.
-func (g *Gate) discard() {
+func (g *Gate) discard() error {
+	if err := g.validateWorktreePath(); err != nil {
+		return err
+	}
 	main := g.Cwd
 	if main == "" {
 		main = base()
 	}
-	_, _ = gitIn(main, "worktree", "remove", "--force", g.Worktree)
-	_ = os.RemoveAll(g.Worktree)
+	if _, err := gitIn(main, "worktree", "remove", "--force", g.Worktree); err != nil {
+		if _, statErr := os.Lstat(g.Worktree); !errors.Is(statErr, os.ErrNotExist) {
+			return err
+		}
+	}
 	_, _ = gitIn(main, "worktree", "prune")
-	_, _ = gitIn(main, "branch", "-D", g.Branch)
+	if _, err := gitIn(main, "branch", "-D", g.Branch); err != nil {
+		if _, verifyErr := gitIn(main, "show-ref", "--verify", "--quiet", "refs/heads/"+g.Branch); verifyErr == nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateWorktreePath confines destructive cleanup to this task's generated
+// directory and branch. Stored state is evidence, never authority to delete an
+// arbitrary path. Existing legacy directory aliases remain supported.
+func (g *Gate) validateWorktreePath() error {
+	if !gateIDPattern.MatchString(g.ID) || !filepath.IsAbs(g.Worktree) || !strings.HasPrefix(g.Branch, "dev/") ||
+		!strings.HasSuffix(g.Branch, g.ID[:6]) || strings.ContainsAny(strings.TrimPrefix(g.Branch, "dev/"), "/\\\x00") {
+		return errors.New("invalid managed worktree identity; refusing cleanup")
+	}
+	expected := filepath.Join(checkoutDir(g.Cwd), "worktrees", g.ID[:12])
+	if info, err := os.Lstat(g.Worktree); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("managed worktree is a symlink; refusing cleanup")
+	}
+	if filepath.Clean(g.Worktree) == expected {
+		return nil
+	}
+	parent, parentErr := filepath.EvalSymlinks(filepath.Dir(g.Worktree))
+	expectedParent, expectedErr := filepath.EvalSymlinks(filepath.Dir(expected))
+	if parentErr == nil && expectedErr == nil && parent == expectedParent && filepath.Base(g.Worktree) == filepath.Base(expected) {
+		return nil
+	}
+	return errors.New("worktree path is outside this task's managed directory; refusing cleanup")
 }
 
 // commitTask records the task's files on its branch. The branch is private to the tool, so no hook runs.
 func (g *Gate) commitTask(message string) error {
-	for _, file := range append(slices.Clone(g.Files), g.Foreign...) {
+	if err := g.auditScope(); err != nil {
+		return err
+	}
+	if len(g.Foreign) > 0 {
+		return fmt.Errorf("the isolated task changed files outside its reviewed scope: %s; add them through replan and review before finishing", strings.Join(g.Foreign, ", "))
+	}
+	beforeRepository, err := repositoryDigest()
+	if err != nil {
+		return err
+	}
+	staged, err := git("diff", "--cached", "--name-only", "-z")
+	if err != nil {
+		return err
+	}
+	for _, file := range nulList(staged) {
+		if !slices.Contains(g.Files, file) {
+			return fmt.Errorf("the private worktree has an unreviewed staged file: %s", file)
+		}
+	}
+	for _, file := range g.Files {
 		if _, err := os.Lstat(file); err == nil {
 			if _, err := gitIn(".", "add", "-f", "--", file); err != nil {
 				return err
@@ -187,10 +241,24 @@ func (g *Gate) commitTask(message string) error {
 	if exec.Command("git", "diff", "--cached", "--quiet").Run() == nil {
 		return nil
 	}
-	if _, err := gitIn(".", "commit", "-q", "--no-verify", "-m", message); err != nil {
+	if _, err := gitIn(".", "-c", "core.hooksPath=/dev/null", "commit", "-q", "--no-verify", "-m", message); err != nil {
 		return err
 	}
-	return g.remeasure()
+	if err := g.remeasure(); err != nil {
+		return err
+	}
+	afterRepository, err := repositoryDigest()
+	if err != nil {
+		return err
+	}
+	// Recording the already verified bytes as a private commit changes HEAD,
+	// but not the checked content. Preserve only receipts bound to that state.
+	for index := range g.Checks {
+		if g.Checks[index].Repository == beforeRepository {
+			g.Checks[index].Repository = afterRepository
+		}
+	}
+	return nil
 }
 
 // remeasure makes the worktree's present HEAD the point later changes are measured from.
@@ -242,13 +310,22 @@ func Land(cfg *config.Config, gate *Gate, input LandInput) (any, error) {
 		return nil, errors.New("how is apply, commit, branch or drop")
 	}
 	main := gate.Cwd
+	unlockLanding, err := flock(filepath.Join(checkoutDir(main), "land.lock"), syscall.LOCK_EX|syscall.LOCK_NB, "another task is landing in this checkout; retry after it finishes")
+	if err != nil {
+		return nil, err
+	}
+	defer unlockLanding()
 	close := func(result map[string]any) (any, error) {
 		leave()
 		if how == "branch" {
-			_, _ = gitIn(main, "worktree", "remove", "--force", gate.Worktree)
+			if _, err := gitIn(main, "worktree", "remove", "--force", gate.Worktree); err != nil {
+				return nil, err
+			}
 			_, _ = gitIn(main, "worktree", "prune")
 		} else {
-			gate.discard()
+			if err := gate.discard(); err != nil {
+				return nil, err
+			}
 		}
 		gate.Landed = how
 		if gate.active() {
@@ -265,6 +342,37 @@ func Land(cfg *config.Config, gate *Gate, input LandInput) (any, error) {
 	}
 	if origin == "" {
 		return nil, fmt.Errorf("the task's worktree is gone (%s); only `land` {how: drop} is left", gate.Worktree)
+	}
+	if how == "commit" {
+		staged, err := gitIn(main, "diff", "--cached", "--name-only", "-z")
+		if err != nil {
+			return nil, err
+		}
+		if staged != "" {
+			return nil, errors.New("the checkout has staged changes; commit or unstage them before land {how: commit}, or use how: apply to preserve the index")
+		}
+	}
+	// Only committed, reviewed contents may be landed. In particular, never
+	// discard work someone added to the private worktree after completion.
+	if changed, err := manifest(); err != nil {
+		return nil, err
+	} else if digest(changed) != digest(gate.Manifest) {
+		return nil, errors.New("the completed worktree has new uncommitted changes; review and finish them before landing, or explicitly drop the task")
+	}
+	if err := gate.auditScope(); err != nil {
+		return nil, err
+	}
+	if len(gate.Foreign) > 0 {
+		return nil, fmt.Errorf("the completed worktree has unreviewed changes outside its scope: %s", strings.Join(gate.Foreign, ", "))
+	}
+	if current, _, err := gate.contentDigest(); err != nil {
+		return nil, err
+	} else if current != gate.ReviewDigest || len(gate.Reviews) == 0 || gate.Reviews[len(gate.Reviews)-1].Contract != gate.contract() {
+		gate.Phase, gate.Final, gate.Reported = "awaiting-review", nil, false
+		if err := gate.save(); err != nil {
+			return nil, err
+		}
+		return nil, errors.New("the finished task changed since review; review and finish it again before landing")
 	}
 	target, err := gitIn(main, "rev-parse", "HEAD")
 	if err != nil {
@@ -290,6 +398,29 @@ func Land(cfg *config.Config, gate *Gate, input LandInput) (any, error) {
 	}
 	changed, _ := git("diff", "--name-only", "-z", target, "HEAD")
 	files := nulList(changed)
+	unlockScope, err := scopeLock()
+	if err != nil {
+		return nil, err
+	}
+	defer unlockScope()
+	if err := checkOwnership(files); err != nil {
+		return nil, fmt.Errorf("cannot land task: %w", err)
+	}
+	if how == "commit" && len(files) > 0 {
+		args := append([]string{"status", "--porcelain", "-z", "--untracked-files=all", "--"}, files...)
+		dirty, err := gitIn(main, args...)
+		if err != nil {
+			return nil, err
+		}
+		if dirty != "" {
+			return nil, errors.New("the checkout has uncommitted changes in files this task would commit; nothing was applied, commit or stash them first, or use how: apply")
+		}
+	}
+	if current, err := gitIn(main, "rev-parse", "HEAD"); err != nil {
+		return nil, err
+	} else if strings.TrimSpace(current) != target {
+		return nil, errors.New("the checkout advanced while preparing the landing; nothing was applied, retry to catch up")
+	}
 	if len(diff) > 0 {
 		if _, err := gitIn(main, "apply", "--check", "--whitespace=nowarn", patch); err != nil {
 			return nil, fmt.Errorf("the checkout has its own uncommitted changes where the task lands, so nothing was applied: %v. "+
@@ -305,7 +436,7 @@ func Land(cfg *config.Config, gate *Gate, input LandInput) (any, error) {
 		args := append([]string{"-C", main, "add", "--"}, files...)
 		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
 			result["commit_error"] = strings.TrimSpace(string(out))
-		} else if out, err := exec.Command("git", "-C", main, "commit", "-q", "-m", message).CombinedOutput(); err != nil {
+		} else if out, err := exec.Command("git", append([]string{"-C", main, "commit", "-q", "--only", "-m", message, "--"}, files...)...).CombinedOutput(); err != nil {
 			result["commit_error"] = strings.TrimSpace(string(out))
 		} else {
 			commit, _ := gitIn(main, "rev-parse", "--short", "HEAD")
@@ -313,6 +444,11 @@ func Land(cfg *config.Config, gate *Gate, input LandInput) (any, error) {
 		}
 		if result["commit_error"] != nil {
 			result["next"] = "The change is applied but the commit was refused (see commit_error). Report it; do not bypass the hook."
+			// The actual outcome is an applied change, not a successful commit.
+			how = "apply"
+			result["requested"] = "commit"
+			value, saveErr := close(result)
+			return value, errors.Join(fmt.Errorf("change applied, but commit failed: %v", result["commit_error"]), saveErr)
 		}
 	}
 	return close(result)
@@ -375,19 +511,27 @@ func (g *Gate) catchUp(cfg *config.Config, target string) (any, error) {
 	}
 	for index := range g.Plan.Checks {
 		check := &g.Plan.Checks[index]
-		key, _ := inputKey(check)
-		code, log, err := g.execCheck(check, "land")
+		force := *check
+		force.NoReuse = true
+		receipt, err := g.runCheck(&force)
 		if err != nil {
 			return nil, err
 		}
-		g.Checks = append(g.Checks, CheckReceipt{Argv: check.Argv, ReturnCode: code, Digest: content, InputKey: key, Log: log})
-		failed = failed || code != 0
+		g.Checks = append(g.Checks, receipt)
+		failed = failed || receipt.ReturnCode != 0
 	}
 	switch {
 	case failed:
 		return reopen("a declared check fails after merging the checkout's new commits")
 	case content != reviewed:
 		return reopen("the checkout's new commits changed files this task also changes; the merged result needs a review")
+	}
+	quality, err := g.qualityInputs(cfg)
+	if err != nil {
+		return nil, err
+	}
+	if len(g.Reviews) == 0 || g.Reviews[len(g.Reviews)-1].QualityDigest != quality.fingerprint() {
+		return reopen("fresh verification receipts after merging need acceptance review")
 	}
 	return nil, g.save()
 }

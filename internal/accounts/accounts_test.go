@@ -30,6 +30,8 @@ func newWorld(t *testing.T) *world {
 	t.Helper()
 	root := t.TempDir()
 	t.Setenv("HOME", root)
+	t.Setenv("CODEX_THREAD_ID", "")
+	t.Setenv("CODEX_TOOL_CALL_ID", "")
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(root, "lead"))
 	w := &world{statuses: map[string]Status{}, path: filepath.Join(root, "state", "accounts.json")}
 	probe := func(account config.Account) Status {

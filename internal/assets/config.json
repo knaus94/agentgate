@@ -122,7 +122,7 @@
       "writer_timeout_s": 1800,
       "reviewer_timeout_s": 1200,
       "backend": "opus:high",
-      "frontend": "astra:high",
+      "frontend": "opus:high",
       "review": [
         {
           "axes": [
@@ -156,7 +156,7 @@
       "writer_timeout_s": 3600,
       "reviewer_timeout_s": 1800,
       "backend": "opus:xhigh",
-      "frontend": "astra:xhigh",
+      "frontend": "opus:xhigh",
       "review": [
         {
           "axes": [

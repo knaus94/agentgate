@@ -4,9 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/knaus94/agentgate/internal/config"
@@ -145,8 +147,13 @@ func Fix(cfg *config.Config, gate *Gate, input FixInput) (any, error) {
 		if err != nil {
 			return nil, err
 		}
+		defer unlock()
+		if gate.Worktree == "" {
+			if err := checkOwnership(extra); err != nil {
+				return nil, err
+			}
+		}
 		added, err := capture(extra)
-		unlock()
 		if err != nil {
 			return nil, err
 		}
@@ -156,6 +163,12 @@ func Fix(cfg *config.Config, gate *Gate, input FixInput) (any, error) {
 		gate.Files = append(gate.Files, extra...)
 		sort.Strings(gate.Files)
 		gate.Context = subtract(gate.Context, extra)
+		if err := gate.save(); err != nil {
+			return nil, err
+		}
+		unlock()
+		// Unlock is idempotent; do not retain the checkout-wide claim lock while
+		// writers run. The saved state now owns the added files.
 	}
 	// A failing check does not say which stream broke it: every stream gets it unless the lead names the owners.
 	if len(failing) > 0 {
@@ -195,9 +208,6 @@ func Fix(cfg *config.Config, gate *Gate, input FixInput) (any, error) {
 	gate.Round = &Round{Batch: fmt.Sprintf("v%d.c%d", gate.PlanVersion, gate.Iteration), Streams: streams, Correction: true,
 		Findings: accepted, Remedy: input.Brief, Boost: gate.Boost, Failures: failing, Conflicts: conflicts}
 	gate.Phase, gate.WriteFiles = "correcting", gate.Files
-	if gate.Manifest, err = manifest(); err != nil {
-		return nil, err
-	}
 	return gate.write(cfg)
 }
 
@@ -223,6 +233,15 @@ func Finish(cfg *config.Config, gate *Gate, input FinishInput) (any, error) {
 	}
 	if gate.Phase != "reviewed" || content != gate.ReviewDigest {
 		return nil, errors.New("the code has no current independent review")
+	}
+	if err := gate.readyForReview(); err != nil {
+		return nil, err
+	}
+	if len(gate.Reviews) == 0 {
+		return nil, errors.New("the code has no current independent review")
+	}
+	if !gate.independentReview(cfg, gate.Reviews[len(gate.Reviews)-1]) {
+		return nil, errors.New("the current reviewer policy or author history requires a fresh independent review")
 	}
 	if gate.Reviews[len(gate.Reviews)-1].Contract != gate.contract() {
 		return nil, errors.New("the task contract changed since the review")
@@ -276,6 +295,13 @@ func Finish(cfg *config.Config, gate *Gate, input FinishInput) (any, error) {
 		if err := gate.commitTask("dev: " + firstLine(input.Summary)); err != nil {
 			return nil, err
 		}
+		if current, err := gate.qualityInputs(cfg); err != nil {
+			return nil, err
+		} else {
+			// A private commit records the same verified bytes under a new HEAD.
+			// Check logs and verdicts are unchanged; only their repository stamp moves.
+			gate.Reviews[len(gate.Reviews)-1].QualityDigest = current.fingerprint()
+		}
 	}
 	return gate.Summary(cfg), gate.save()
 }
@@ -326,7 +352,20 @@ func Stop(cfg *config.Config) (any, error) {
 		return map[string]any{"cancellation_requested": true, "operation": ops.Status(home()),
 			"next": "The running operation is terminating its processes and will hold the task. Check status to confirm."}, nil
 	}
-	gate := Current()
+	unlock, err := lock()
+	if err != nil {
+		// Another operation may have started between the first observation and
+		// the lock attempt. Ask that owner to stop; never overwrite its state.
+		if ops.RequestStop(home(), "the user stopped /dev") {
+			return map[string]any{"cancellation_requested": true, "operation": ops.Status(home())}, nil
+		}
+		return nil, err
+	}
+	defer unlock()
+	gate, err := LoadCurrent()
+	if err != nil {
+		return nil, err
+	}
 	if gate == nil || !gate.active() {
 		return map[string]any{"stopped": true}, nil
 	}
@@ -361,17 +400,21 @@ func (g *Gate) Summary(cfg *config.Config) map[string]any {
 	}
 	sort.Slice(writers, func(a, b int) bool { return writers[a].Stream < writers[b].Stream })
 	var outstanding [][]string
-	for _, check := range g.outstanding() {
+	current := g.currentReceipts()
+	for _, check := range g.outstandingReceipts(current) {
 		outstanding = append(outstanding, check.Argv)
 	}
 	dir := sessionDir(g.Cwd, g.Session)
 	out := map[string]any{"id": g.ID, "mode": g.Mode, "action": g.Request.Action, "phase": g.Phase, "iteration": g.Iteration,
 		"writers": writers, "findings": open, "blocking": ids(blocking), "untriaged": g.untriaged(), "notes": notes,
-		"checks_outstanding": outstanding, "checks_failed": g.failing(), "progress": g.progress(), "foreign_changes": g.Foreign,
+		"checks_outstanding": outstanding, "checks_failed": g.failingReceipts(current), "progress": g.progress(), "foreign_changes": g.Foreign,
 		"substitutions": g.Substitutions, "operation": ops.Status(dir), "timings_s": ops.Timings(dir, g.ID),
-		"board": g.board(), "state": dir, "next": g.next(cfg, len(blocking) > 0)}
+		"board": g.board(), "state": dir, "next": g.nextWithReceipts(cfg, len(blocking) > 0, current)}
 	if g.ContextPack != "" {
 		out["context_pack"] = g.ContextPack
+	}
+	if review := g.reviewDiversity(); review != nil {
+		out["review_diversity"] = review
 	}
 	if g.ScoutNote != "" {
 		out["scout_note"] = g.ScoutNote
@@ -409,6 +452,14 @@ func (g *Gate) Summary(cfg *config.Config) map[string]any {
 
 // next tells the lead the one thing to do now, so the workflow does not live only in a document.
 func (g *Gate) next(cfg *config.Config, blocked bool) string {
+	var current map[string]*CheckReceipt
+	if g.Phase == "awaiting-review" || g.Phase == "reviewed" {
+		current = g.currentReceipts()
+	}
+	return g.nextWithReceipts(cfg, blocked, current)
+}
+
+func (g *Gate) nextWithReceipts(cfg *config.Config, blocked bool, current map[string]*CheckReceipt) string {
 	switch g.Phase {
 	case "staged":
 		stage := g.stage()
@@ -416,14 +467,15 @@ func (g *Gate) next(cfg *config.Config, blocked bool) string {
 			"committed to memory; if what you learned changes the stages still ahead, revise them in the plan with `update` first.",
 			g.StageIndex+1, len(g.Epic.Stages), stage.Name, g.Mode)
 	case "implementing", "correcting":
-		return "Writers have not finished this round: launch (or answer the blocked stream)."
+		return "Writers have not finished this round: `agentgate task continue` retries unfinished streams (or answer a blocked stream)."
 	case "awaiting-review":
 		if left := g.unresolved(); len(left) > 0 {
 			return "Catching up with the checkout left conflict markers in " + strings.Join(left, ", ") +
 				". `fix` {brief}: say how the two changes combine; the owning writers resolve them in their sessions."
 		}
-		if g.Request.Writes() && len(g.failing()) > 0 {
-			if slices.ContainsFunc(g.failing(), func(f CheckFailure) bool { return f.Setup }) {
+		failed := g.failingReceipts(current)
+		if g.Request.Writes() && len(failed) > 0 {
+			if slices.ContainsFunc(failed, func(f CheckFailure) bool { return f.Setup }) {
 				return "A layout tool could not observe the page (checks_failed.setup). Repair the stand or use prepare with the failure context, then replan the corrected contract and review. Do not tune CSS, baselines or tolerances to bypass it."
 			}
 			return "A declared check fails, so no reviewer was started. Run `fix`: the owning writers receive the output and diagnose the defect in their own sessions. The lead need not inspect source or pictures."
@@ -450,7 +502,7 @@ func (g *Gate) next(cfg *config.Config, blocked bool) string {
 			return "Run `fix`; the owning writers diagnose and correct accepted findings in their sessions. Supply brief only for an additional decision or constraint."
 		case blocked:
 			return "Blocking findings remain: accept and fix them, or reject them with contrary evidence."
-		case len(g.outstanding()) > 0:
+		case len(g.outstandingReceipts(current)) > 0:
 			return "Run the outstanding checks with `check`."
 		}
 		if quality := g.qualityStatus(cfg); quality != nil && len(quality["problems"].([]string)) > 0 {
@@ -472,7 +524,22 @@ func (g *Gate) next(cfg *config.Config, blocked bool) string {
 // StopHook is the Claude Code Stop hook: it keeps the lead from ending a turn on an unfinished task
 // unless an operation is still running or the task is honestly on hold.
 func StopHook(cwd, sessionID string) map[string]any {
-	gate := readGate(cwd, sessionID)
+	gate, err := loadGate(cwd, sessionID)
+	if err != nil {
+		return map[string]any{"decision": "block", "reason": "AgentGate cannot verify the task because its saved state is unreadable: " + err.Error()}
+	}
+	if gate == nil {
+		return map[string]any{}
+	}
+	unlock, err := flock(filepath.Join(sessionDir(cwd, sessionID), "lock"), syscall.LOCK_EX|syscall.LOCK_NB, "operation running")
+	if err != nil {
+		return map[string]any{} // the operation owner reports its own completion
+	}
+	defer unlock()
+	gate, err = loadGate(cwd, sessionID)
+	if err != nil {
+		return map[string]any{"decision": "block", "reason": "AgentGate cannot verify the saved task: " + err.Error()}
+	}
 	if gate == nil || gate.Session != sessionID || gate.Phase == "held" || gate.Phase == "cancelled" || gate.Landed != "" {
 		return map[string]any{}
 	}

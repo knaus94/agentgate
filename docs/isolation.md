@@ -15,7 +15,8 @@ same file. With `-w` a task works somewhere else, and your checkout changes only
 1. **Start.** The tool creates a branch `dev/<task>-<id>` from your current `HEAD` and a git worktree for it
    under `~/.local/state/agentgate/…/worktrees/`. Your uncommitted edits are not part of it.
 2. **Work.** Writers, declared checks and reviewers all run inside that worktree. For the sandboxed workers
-   your checkout is read-only like the rest of the machine. `git status` in your checkout stays clean.
+   your checkout is read-only. Task source edits appear in the worktree; any preexisting uncommitted edits
+   in your checkout remain there. Setup scripts and explicitly shared directories have their own permissions.
 3. **Several tasks.** Every session has its own worktree and branch, so tasks may change the same files.
    `agentgate watch` and `agentgate status` in the repository show them all.
 4. **Finish.** The task passes the usual gate — checks, review, triage — and is committed on its own branch.
@@ -46,6 +47,11 @@ is merged into the task **inside its worktree**:
 Your checkout never receives conflict markers. Landing also refuses — and changes nothing — when you have your
 own uncommitted edits in the files the task lands; commit or stash them, or land as `branch`.
 
+`land {how: "commit"}` also refuses when the checkout has any staged changes, including unrelated files, so
+it cannot include someone else's index entries in the task commit. Commit or unstage them first, or use
+`apply`, which preserves the index. New edits made to a completed task's worktree must pass review and finish
+again before landing.
+
 ## Preparing a worktree
 
 A worktree holds only what git tracks: no `node_modules`, no generated code, no local env files. Say what a
@@ -70,8 +76,8 @@ the worktree. `"default": true` isolates every writing task without the flag.
 
 Do not link `node_modules` from the checkout into the worktree in a workspace monorepo: workspace packages in it
 point back at the checkout's sources, and the checks would silently test the wrong code. Install instead — or,
-when the checkout's dependencies are current and on the same filesystem, copy them with hard links, which takes
-seconds and no disk space, and keeps the relative workspace links pointing into the worktree:
+when the checkout's dependencies are current and on the same filesystem, copy them with hard links. This
+shares file contents instead of duplicating them and keeps relative workspace links pointing into the worktree:
 
 ```json
 {"worktree": {"setup": [["sh", "-c", "cp -al \"$AGENTGATE_CHECKOUT/node_modules\" node_modules"]]}}

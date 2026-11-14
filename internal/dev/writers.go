@@ -77,6 +77,14 @@ func Launch(cfg *config.Config, plan *Plan) (any, error) {
 	if gate != nil && gate.Phase == "held" {
 		return nil, errors.New("the task is on hold; answer the blocker with `answer`, or `resume` and launch an updated plan")
 	}
+	// Resume an interrupted round without creating a new batch, discarding the
+	// correction brief or charging again for streams that already completed.
+	if gate != nil && gate.Round != nil && (gate.Phase == "implementing" || gate.Phase == "correcting") && digest(plan) == digest(gate.Plan) {
+		if err := gate.canResumeRound(); err != nil {
+			return nil, err
+		}
+		return gate.write(cfg)
+	}
 	if resolved.Request.ReviewFirst() {
 		if gate, err = begin(resolved); err != nil {
 			return nil, err
@@ -194,11 +202,10 @@ func requireTools(resolved *Resolved) error {
 
 // write runs the pending streams of the current round wave by wave, then moves the gate on.
 func (g *Gate) write(cfg *config.Config) (any, error) {
-	resolved, err := Resolve(cfg, g.Plan)
+	resolved, err := g.resolveWriterPlan(cfg)
 	if err != nil {
 		return nil, err
 	}
-	resolved.Mode = g.Mode
 	limit, err := resolved.Parallelism()
 	if err != nil {
 		return nil, err
@@ -246,16 +253,59 @@ func (g *Gate) write(cfg *config.Config) (any, error) {
 	return g.Summary(cfg), g.save()
 }
 
+// Every entry into a saved round must recheck its accepted contract before starting workers. Staged
+// architecture belongs to the whole task, while writer scope and UI belong to the current stage.
+func (g *Gate) resolveWriterPlan(cfg *config.Config) (*Resolved, error) {
+	plan := g.Plan
+	if g.Epic != nil {
+		plan = g.Epic
+	}
+	whole, err := Resolve(cfg, plan)
+	if err != nil {
+		return nil, err
+	}
+	if g.Epic == nil {
+		whole.Mode = g.Mode
+	}
+	if err := whole.requireArchitecture(); err != nil {
+		return nil, err
+	}
+	if _, err := loadReviewRules(cfg, g.Plan.Files()); err != nil {
+		return nil, err
+	}
+	if _, err := loadUI(g.Plan); err != nil {
+		return nil, err
+	}
+	if g.Epic == nil {
+		return whole, nil
+	}
+	stage, err := Resolve(cfg, g.Plan)
+	if err != nil {
+		return nil, err
+	}
+	stage.Mode = g.Mode
+	return stage, nil
+}
+
 // settle puts the gate on hold when a wave did not finish; later waves never start on top of a blocked one.
 func (g *Gate) settle(cfg *config.Config, records []*Writer, failure error) (bool, any, error) {
 	var reasons []string
 	for _, record := range records {
+		if record.Status == "RUNNING" && failure != nil {
+			record.Status, record.Error = "FAILED", failure.Error()
+			if ops.IsCancelled(failure) {
+				record.Status = "CANCELLED"
+			}
+		}
 		switch record.Status {
 		case "BLOCKED":
 			reasons = append(reasons, fmt.Sprintf("%s is blocked: %s", record.Stream, strings.Join(record.Blockers, "; ")))
 		case "FAILED", "CANCELLED":
 			reasons = append(reasons, fmt.Sprintf("%s %s: %s", record.Stream, strings.ToLower(record.Status), record.Error))
 		}
+	}
+	if len(reasons) == 0 && failure != nil {
+		reasons = append(reasons, failure.Error())
 	}
 	if len(reasons) == 0 {
 		return false, nil, nil
@@ -272,7 +322,12 @@ func (g *Gate) settle(cfg *config.Config, records []*Writer, failure error) (boo
 func (g *Gate) prepare(resolved *Resolved, stream Stream) *Writer {
 	route := resolved.WriterRoute(stream, g.Round.Boost)
 	record := &Writer{Stream: stream.Name, Route: route, Status: "RUNNING", Summary: "writer running", Blockers: []string{}, Batch: g.Round.Batch}
-	if previous := g.latest()[stream.Name]; previous != nil && previous.Session != "" && previous.Route.Model == route.Model {
+	previous := g.latest()[stream.Name]
+	if previous != nil && previous.Session != "" && (previous.Route.Model == route.Model || g.Round.Correction && permittedContinuation(resolved.Config, route, previous.Route)) {
+		if previous.Route.Model != route.Model {
+			record.Route = previous.Route
+			record.Route.Effort, record.Route.SubstitutedFrom = route.Effort, ""
+		}
 		record.Dir, record.Session = previous.Dir, previous.Session // same context, at this round's effort
 		record.Route.Account = previous.Route.Account
 	} else {
@@ -340,7 +395,7 @@ func (g *Gate) runWriter(resolved *Resolved, stream Stream, record *Writer, answ
 		if ops.IsCancelled(err) {
 			record.Status = "CANCELLED"
 		}
-		return err
+		return errors.Join(err, g.save())
 	}
 	mu.Lock()
 	packet := g.assignment(stream)
@@ -372,6 +427,18 @@ func (g *Gate) runWriter(resolved *Resolved, stream Stream, record *Writer, answ
 	result, used, err := subs.invoke(resolved.Config, provider.Call{Route: record.Route, Prompt: prompt + toolNote, Dir: record.Dir,
 		Schema: writerSchema, Timeout: seconds(timeout), Writer: true, Persist: true, Resume: record.Session, MCP: tools,
 		Writable: append([]string{g.board()}, toolDirs...), ReadDirs: append(append(packDirs(g.ContextPack), filepath.Join(g.dir(), "checks")), g.designReadDirs(stream.Name)...)}, nil)
+	if used.Model != "" {
+		mu.Lock()
+		g.AuthorModels = append(g.AuthorModels, record.Route.Model, used.Model)
+		record.Route = used
+		if result.Dir != "" {
+			record.Dir = result.Dir
+		}
+		if result.Session != "" {
+			record.Session = result.Session
+		}
+		mu.Unlock()
+	}
 	if err != nil {
 		return fail(err)
 	}
@@ -388,7 +455,9 @@ func (g *Gate) runWriter(resolved *Resolved, stream Stream, record *Writer, answ
 	record.Route, record.Session = used, result.Session
 	record.Status, record.Summary, record.Blockers = report.Status, report.Summary, report.Blockers
 	record.Handoff, record.Deviations, record.Error = report.Handoff, report.Deviations, ""
-	return nil
+	// Persist each worker independently. If another lane or the coordinator
+	// crashes later, this completed stream must not be dispatched again.
+	return g.save()
 }
 
 // AnswerInput is the lead's reply to one blocked stream.
@@ -409,11 +478,10 @@ func Answer(cfg *config.Config, gate *Gate, input AnswerInput) (any, error) {
 	if previous.Session == "" {
 		return nil, errors.New("that writer kept no session; `resume` and launch an updated plan instead")
 	}
-	resolved, err := Resolve(cfg, gate.Plan)
+	resolved, err := gate.resolveWriterPlan(cfg)
 	if err != nil {
 		return nil, err
 	}
-	resolved.Mode = gate.Mode
 	index := slices.IndexFunc(gate.Round.Streams, func(stream Stream) bool { return stream.Name == input.Stream })
 	if index < 0 {
 		return nil, fmt.Errorf("stream %q is not part of the current round", input.Stream)
@@ -429,6 +497,12 @@ func Answer(cfg *config.Config, gate *Gate, input AnswerInput) (any, error) {
 	failure := gate.runWriter(resolved, gate.Round.Streams[index], record, input.Answer, subs, mu)
 	if done, value, err := gate.settle(cfg, []*Writer{record}, failure); done {
 		return value, err
+	}
+	for _, other := range gate.latest() {
+		if other.Batch == gate.Round.Batch && other.Status == "BLOCKED" {
+			gate.holdNow(fmt.Sprintf("%s is still blocked: %s", other.Stream, strings.Join(other.Blockers, "; ")))
+			return gate.Summary(cfg), gate.save()
+		}
 	}
 	return gate.write(cfg)
 }

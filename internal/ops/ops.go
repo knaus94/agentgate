@@ -9,11 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -58,32 +56,28 @@ var (
 
 func now() float64 { return float64(time.Now().UnixNano()) / 1e9 }
 
-// WriteJSON replaces a file atomically with private permissions.
-func WriteJSON(path string, value any) error {
-	raw, err := json.MarshalIndent(value, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := fmt.Sprintf("%s.%d.tmp", path, time.Now().UnixNano())
-	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
-
 // identity is the process start time, so a recycled PID is never mistaken for the owner.
 func identity(pid int) string {
 	raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
 		return ""
 	}
-	_, rest, ok := strings.Cut(string(raw), ") ")
-	fields := strings.Fields(rest)
-	if !ok || len(fields) < 20 {
+	// comm is parenthesized and can itself contain ') '. The final delimiter is
+	// the only unambiguous start of the numeric fields.
+	end := strings.LastIndex(string(raw), ") ")
+	if end < 0 {
+		return ""
+	}
+	fields := strings.Fields(string(raw)[end+2:])
+	if len(fields) < 20 {
 		return ""
 	}
 	return fields[19]
 }
+
+// ProcessIdentity is the kernel start time used to distinguish a live process
+// from a later process that reused its PID. Empty means it cannot be observed.
+func ProcessIdentity(pid int) string { return identity(pid) }
 
 // Status returns the last operation of a session directory, or nil.
 func Status(dir string) *Record {
@@ -130,9 +124,7 @@ func Checkpoint() error {
 	return nil
 }
 
-func save() {
-	_ = WriteJSON(filepath.Join(root, "operation.json"), active)
-}
+func save() error { return WriteJSON(filepath.Join(root, "operation.json"), active) }
 
 // Begin records the start of an operation owned by this process.
 func Begin(dir, action, gateID string) error {
@@ -147,16 +139,19 @@ func Begin(dir, action, gateID string) error {
 	root = dir
 	active = &Record{ID: fmt.Sprintf("%x", time.Now().UnixNano()), Action: action, GateID: gateID, PID: os.Getpid(),
 		Identity: identity(os.Getpid()), State: "running", StartedAt: now(), Children: []*Child{}}
-	save()
+	if err := save(); err != nil {
+		active, root = nil, ""
+		return fmt.Errorf("record operation start: %w", err)
+	}
 	return nil
 }
 
 // End closes the running operation with its outcome.
-func End(err error) {
+func End(err error) error {
 	mu.Lock()
 	defer mu.Unlock()
 	if active == nil {
-		return
+		return nil
 	}
 	active.State = "complete"
 	if err != nil {
@@ -167,9 +162,10 @@ func End(err error) {
 	}
 	active.EndedAt = now()
 	active.DurationS = float64(int((active.EndedAt-active.StartedAt)*1000)) / 1000
-	_ = WriteJSON(filepath.Join(root, "operations", active.ID+".json"), active)
-	save()
+	archiveErr := WriteJSON(filepath.Join(root, "operations", active.ID+".json"), active)
+	currentErr := save()
 	active = nil
+	return errors.Join(archiveErr, currentErr)
 }
 
 // BindGate attaches the running operation to a gate created inside it.
@@ -180,78 +176,6 @@ func BindGate(gateID string) {
 		active.GateID = gateID
 		save()
 	}
-}
-
-func killGroup(pid int, signal syscall.Signal) { _ = syscall.Kill(-pid, signal) }
-
-// Terminate stops a whole process group: grandchildren outlive their leader otherwise.
-func Terminate(cmd *exec.Cmd, done <-chan error) {
-	killGroup(cmd.Process.Pid, syscall.SIGTERM)
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-	}
-	killGroup(cmd.Process.Pid, syscall.SIGKILL)
-}
-
-// ErrTimeout is returned when a child exceeded its process ceiling.
-var ErrTimeout = errors.New("process timed out")
-
-// Run starts cmd in its own process group and waits for it, honouring stop requests and the timeout.
-// A zero timeout means no ceiling.
-func Run(cmd *exec.Cmd, timeout time.Duration) error { return RunStarted(cmd, timeout, nil) }
-
-// RunStarted is Run with a callback made once the process exists, for a caller that records its pid.
-func RunStarted(cmd *exec.Cmd, timeout time.Duration, started func()) error {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	if started != nil {
-		started()
-	}
-	child := &Child{PID: cmd.Process.Pid, StartedAt: now()}
-	mu.Lock()
-	if active != nil {
-		active.Children = append(active.Children, child)
-		save()
-	}
-	mu.Unlock()
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	began := time.Now()
-	ticker := time.NewTicker(200 * time.Millisecond)
-	defer ticker.Stop()
-	var result error
-loop:
-	for {
-		select {
-		case result = <-done:
-			break loop
-		case <-ticker.C:
-			if err := Checkpoint(); err != nil {
-				Terminate(cmd, done)
-				result = err
-				break loop
-			}
-			if timeout > 0 && time.Since(began) >= timeout {
-				Terminate(cmd, done)
-				result = fmt.Errorf("%w after %s", ErrTimeout, timeout)
-				break loop
-			}
-		}
-	}
-	mu.Lock()
-	child.EndedAt = now()
-	if cmd.ProcessState != nil {
-		code := cmd.ProcessState.ExitCode()
-		child.ReturnCode = &code
-	}
-	mu.Unlock()
-	if result == nil {
-		return Checkpoint()
-	}
-	return result
 }
 
 // Timings sums the duration of finished operations of a gate by action.

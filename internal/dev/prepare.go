@@ -109,6 +109,7 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 	tools, toolDirs, toolNote := workerTools(cfg, "scout")
 	subs := &substitutions{}
 	session := ""
+	workerDir := filepath.Join(dir, "worker")
 	used := cfg.MustRoute(route)
 	for attempt := 0; attempt < 2; attempt++ {
 		if err := writePacket(path, packet); err != nil {
@@ -116,12 +117,15 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 		}
 		result, actual, err := subs.invoke(cfg, provider.Call{Route: used,
 			Prompt: assets.Prompt("prepare") + "\nRead " + path + ".\n" + toolNote,
-			Dir:    filepath.Join(dir, "worker"), Schema: prepareSchema, Timeout: seconds(scoutTimeout),
+			Dir:    workerDir, Schema: prepareSchema, Timeout: seconds(scoutTimeout),
 			Persist: true, Resume: session, MCP: tools, Writable: toolDirs, ReadDirs: []string{dir}}, nil)
 		if err != nil {
 			return nil, err
 		}
 		session, used = result.Session, actual
+		if result.Dir != "" {
+			workerDir = result.Dir
+		}
 		var answer struct {
 			Status    string      `json:"status"`
 			Summary   string      `json:"summary"`
@@ -168,7 +172,11 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 		}
 		if !plan.staged() && strings.TrimSpace(answer.Pack.Summary) != "" && len(answer.Pack.Files) > 0 && resolved.ModeConfig().Scout != "" {
 			answer.Pack.Route = used
-			if err := writePacket(scoutPath(resolved, rules), answer.Pack); err != nil {
+			packPath, err := scoutPath(resolved, rules)
+			if err != nil {
+				return nil, err
+			}
+			if err := writePacket(packPath, answer.Pack); err != nil {
 				return nil, err
 			}
 		}

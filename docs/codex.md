@@ -1,109 +1,131 @@
-# Leading from Codex, and Codex only
+# Leading from Codex and the Codex-only profile
 
 [Русский](ru/codex.md)
 
-`agentgate` can be led from a Claude Code session (`/dev`), from a Codex session (`$dev`), or from either.
-The gate, the stages, the checks, the panel, isolated tasks, accounts and extensions are the same: none of
-them depends on which CLI the lead is. What differs is how the lead command is installed and, in the
-Codex-only setup, which models do the work.
+AgentGate can be led from Claude Code (`/dev`), Codex (`$dev`), or both. The same task state machine,
+checks, reviews, terminal dashboard and worktree workflow serve either lead. Choosing a lead integration
+and choosing worker routes are related setup decisions; the effective configuration determines the models
+that actually run.
 
-## Choose at install
+## Install the lead integration
 
 ```sh
-agentgate install --lead claude   # /dev in Claude Code; Claude and Codex models work (the default table)
-agentgate install --lead codex    # $dev in Codex; every worker is a Codex model
-agentgate install --lead both     # /dev and $dev; the default table
+agentgate setup install --lead claude
+agentgate setup install --lead codex
+agentgate setup install --lead both
+agentgate setup doctor
 ```
 
-Without `--lead`, the first install asks when a terminal is attached; `scripts/install.sh` asks the same
-question, or takes `AGENTGATE_LEAD`. The choice is remembered, so `agentgate update` repeats it silently.
-Choosing a lead explicitly removes the other one's install; `--lead both` keeps both.
+`claude` installs `/dev`; `codex` installs `$dev`; `both` installs both integrations. An explicit single-lead
+choice removes AgentGate's integration for the other lead. With no explicit choice, installation reuses the
+saved selection or asks when a terminal is attached. The release install script also accepts
+`AGENTGATE_LEAD=claude|codex|both`.
 
-For Codex the installer writes three things:
+On a setup with no selected profile, `--lead codex` also selects the built-in `codex` worker profile. An
+existing custom profile is preserved. Switching explicitly to Claude or both leaves the built-in `codex`
+profile if that was active. Inspect the resulting routes with `agentgate modes`.
 
-| What | Where | Why |
+For Codex the installer writes:
+
+| Artifact | Default path | Purpose |
 |---|---|---|
-| the `dev` skill | `~/.agents/skills/dev/` | `$dev <task>` in a session; it is never started from keywords |
-| a rule | `~/.codex/rules/agentgate.rules` | lets Codex run `agentgate` outside Codex's own sandbox (see below) |
-| a Stop hook | `~/.codex/hooks.json` | keeps the lead from ending a turn on an unfinished task |
+| `dev` skill and its invocation policy | `~/.agents/skills/dev/` | Explicit `$dev <task>` invocation |
+| Executable prefix rule | `~/.codex/rules/agentgate.rules` | Allow the lead to request execution of AgentGate outside Codex's own sandbox |
+| Stop-hook entry | `~/.codex/hooks.json` | Ask the lead to continue an unfinished task when it tries to end its turn |
 
-Codex does not run a hook until you have reviewed it: open a Codex session once and trust the agentgate hook
-with `/hooks`. Everything else works without that step; the hook is a safety net.
+`CODEX_HOME` changes the Codex rules and hooks location. The skill directory remains under the user's home.
+The installer asks you to review and trust the AgentGate Stop hook in Codex with `/hooks`. Check this against
+the Codex version you run; a hook entry alone does not establish that the host has enabled it. Task commands
+and the dashboard can be used independently of the hook.
 
-## Why the rule
+## Run a task
 
-`agentgate` runs every worker in its own sandbox (`bwrap`), talks to the model providers and keeps its state
-under `~/.local/state/agentgate`. Inside Codex's sandbox none of that is possible: a sandbox cannot be started
-within it, the network is off and the home directory is read-only. So the lead has to run `agentgate` outside
-its sandbox, and the rule allows exactly that command, nothing else:
+Start a new Codex session in the repository and invoke the installed skill explicitly:
 
+```text
+$dev fix the pagination limit
+$dev -h review the payment state transition
 ```
-prefix_rule(pattern=["agentgate"], decision="allow")
+
+The lead prepares structured requests and calls AgentGate. A separate terminal can observe the same checkout:
+
+```sh
+agentgate task watch
+agentgate task status --all
 ```
 
-The workers stay in agentgate's sandbox, so writers and reviewers are confined as before. The rule matches
-only a plain command — `agentgate <action> --file <path>` — and not one with a pipe, a heredoc or `&&`. The
-lead is told this, writes its inputs to files first, and when it slips, `agentgate` answers with what to do
-instead of failing somewhere deep.
+The tool runs workers through bubblewrap, writes its own state and connects to provider CLIs. A containing
+sandbox may prevent these operations. When AgentGate detects confinement, its error asks the lead to write
+input to a file and make a plain command invocation, for example:
 
-## The Codex-only table
+```sh
+agentgate task launch --file plan.json
+```
 
-`agentgate install --lead codex` selects the built-in `codex` profile (`agentgate config profile codex`):
+The installed rule contains the `agentgate` command prefix and, when available, its absolute executable path.
+Keep the invocation separate from pipelines, heredocs and shell wrappers so the host can evaluate that
+executable rule. Host approval and sandbox policy still apply; the rule does not override a managed policy.
+Workers retain AgentGate's own mount restrictions. Their precise read, write and network boundary is
+explained in the [security and trust model](../SECURITY.md).
 
-| | light | medium | heavy | ultra |
+## The shipped Codex-only profile
+
+The profile's routes are configuration defaults, not a model ranking or a guarantee of account access.
+The source of this table is [the bundled profile](../internal/assets/profiles/codex.json), layered over
+[the base configuration](../internal/assets/config.json). Personal and repository overrides can change it.
+
+| Role | light | medium | heavy | ultra |
 |---|---|---|---|---|
-| Context | the lead's own | scout `terra:medium` | the accepted design | the accepted design |
-| Architect | the lead | the lead | `astra:high` ∥ `sol:xhigh` | `astra:max` ∥ `sol:max`, then cross-critique |
+| Context | lead context | scout `terra:medium` | accepted architecture | accepted architecture |
+| Architecture | lead | lead | `astra:high` + `sol:xhigh` | `astra:max` + `sol:max`, then cross-critique |
 | Writers | `sol:medium` | `astra:medium` | `astra:high` | `astra:high` |
-| Review: architecture + simplicity | the lead | `sol:high` | `sol:xhigh` | `sol:xhigh` |
-| Review: correctness | the lead | `sol:high` | `sol:xhigh` | `sol:max` ∥ `terra:max` |
-| Review: security | — | — | — | `sol:xhigh` |
-| Effort ceiling | `high` | `high` | `max` | `max` |
+| Architecture and simplicity review | lead | `sol:high` | `sol:xhigh` | `sol:xhigh` |
+| Correctness review | lead | `sol:high` | `sol:xhigh` | `sol:max` + `terra:max` |
+| Security review | — | — | — | `sol:xhigh` |
+| Escalation ceiling | `high` | `high` | `max` | `max` |
 
-Other roles: consultations on `sol:medium`, UI design on `astra:medium`, the browser pass on `terra:high`.
+Other configured roles are `sol:medium` for consultation, `astra:medium` for UI design and `terra:high` for
+the optional browser pass. These are alias-and-effort pairs. The actual provider model identifiers come
+from `models` in the effective configuration.
 
-### Why these choices
+The profile assigns substantial writing and review to different model identities. The runtime excludes
+any model that authored part of the change, including failed partial writers, previous stages and fallbacks.
+If no eligible reviewer remains, the task reports a routing failure rather than treating self-review as
+independent evidence. Separate aliases pointing to the same model do not satisfy this rule.
 
-Public data, November 2026 (Artificial Analysis Intelligence Index v5.0 as reported by Respan; OpenAI's own
-guidance as reported by DataCamp):
+All default routes in this profile use Codex. They therefore do not provide cross-provider review, and
+parallel calls may share account limits. Configured [accounts](accounts.md) allow account selection and
+quota failover; the dashboard and receipts report actual substitutions. Pool names do not promise separate
+billing or unlimited parallel capacity.
 
-| Effort | Astra | Sol | Terra | Luna |
-|---|---|---|---|---|
-| max | 57 · $6.24 | 55 · $1.27 | 51 · $0.96 | 28 · $0.15 |
-| xhigh | 55 · $3.66 | 52 · $0.76 | 45 · $0.40 | 23 · $0.10 |
-| high | 55 · $3.24 | 50 · $0.59 | 42 · $0.26 | 21 · $0.07 |
-| medium | 51 · $2.73 | 46 · $0.36 | 38 · $0.17 | 18 · $0.04 |
+## Inspect and adapt the profile
 
-(index score · cost per task)
+```sh
+agentgate config profiles
+agentgate config profile codex
+agentgate config show
+agentgate config validate
+agentgate modes
+```
 
-- **Astra creates, Sol verifies.** Astra is the strongest of the four at every effort, and Sol is close behind
-  for a fifth of the cost. With two strong models, "the author never reviews its own code" is kept by exactly
-  this pair. OpenAI itself recommends Sol or Astra for the hardest coding.
-- **Astra is never set to `xhigh`.** On the index it scores the same 55 at `high` and at `xhigh`, for more
-  money and twice the wait. The step that buys something is `max`, so that is where the architects of ultra
-  run and where a stalled correction escalates.
-- **Sol's effort is where its quality comes from**: 46 at medium, 50 at high, 55 at max. A reviewer reads
-  rather than writes, so the cost of a high effort is small; reviewers run at `high` and above.
-- **Terra reads.** It is the fastest of the usable models (91–109 tokens per second) and cheap, which is what
-  a scout needs, and OpenAI positions it for computer-use work, which is the browser pass. At `max` it reaches
-  51, so in ultra it is a second, different pair of eyes on correctness.
-- **Luna is not used.** At 28 it is half the others.
+A profile is a layer below explicit settings. For example, this changes the medium backend writer's effort
+while keeping its configured model identity:
 
-### What is weaker than the default table
+```sh
+agentgate config set modes.medium.backend astra:high
+agentgate config validate
+agentgate modes
+```
 
-- **One vendor.** In the default table code written by one vendor is reviewed by another, and models of
-  different families fail in different ways. Here the reviewer is a different model of the same family.
-- **One pool of limits.** Every lane draws on the Codex subscription. Several Codex accounts
-  ([accounts](accounts.md)) spread it.
-- **No independent data on code review.** As with the default table, reviewer choices are inferred from
-  coding and reasoning results.
+`agentgate config profile default` returns to the built-in mixed-provider table; explicit overrides remain
+in place. Remove an override with `agentgate config unset <key>`. Custom profiles live under
+`~/.config/agentgate/profiles/<name>.json`, or the corresponding `XDG_CONFIG_HOME` directory.
 
-A profile is only a layer under your settings: `agentgate config set modes.medium.backend sol:high` still
-overrides one cell, and a file in `~/.config/agentgate/profiles/<name>.json` is a profile of your own
-(`agentgate config profiles` lists them).
+Configuration validation checks syntax and relationships. It does not query a provider to prove that an
+account exposes a model, effort level or subscription feature. Verify your installed CLI and available
+models, then evaluate representative repository tasks. Useful observations are completion time, failed
+checks, correction rounds, review findings and whether the final change meets its requirements. This
+profile makes no claims about current prices, benchmark scores or comparative model performance.
 
-## Sources
-
-- [Respan: GPT-6.1 Sol vs Terra vs Luna vs Astra](https://www.respan.ai/articles/gpt-6-sol-vs-luna-vs-astra)
-- [DataCamp: GPT-6.1 Terra](https://www.datacamp.com/blog/gpt-6-1-terra)
-- [OpenAI Codex: hooks](https://learn.chatgpt.com/docs/hooks) and [skills](https://learn.chatgpt.com/docs/build-skills)
+See [model routing and independence](model-selection.md), [configuration](configuration.md) and
+[CLI reference](cli.md) for the remaining commands and routing rules.

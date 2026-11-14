@@ -1,58 +1,77 @@
-# Релизы
+# Сборка и публикация релиза
 
 [English](../releasing.md)
 
-## Опубликовать версию
+## Полный архив локально
 
 ```sh
-# 1. обновить CHANGELOG.md
-git commit -am "chore(release): v0.2.0"
-git tag v0.2.0
-git push origin main v0.2.0
+make check
+npm ci --prefix design-kit --ignore-scripts --no-audit --no-fund
+node design-kit/node_modules/playwright-core/cli.js install chromium
+make design-browser
+make package VERSION=0.14.0
 ```
 
-Пуш тега `v*` запускает [.github/workflows/release.yml](../../.github/workflows/release.yml):
+Результат: `dist/agentgate-0.14.0.zip` и файл `.sha256`. Внутри исходники, документация, статические бинарники
+Linux amd64/arm64, `scripts/install-local.sh`, `RELEASE.json`, опись `SHA256SUMS`. Упаковщик использует явный
+список и фиксированное время ZIP. `.git`, node_modules, приватные профили и кэши не включаются.
+`SOURCE_DATE_EPOCH` задаёт время релиза при необходимости.
 
-1. `go vet` и `go test` на помеченном коммите;
-2. статические сборки для `linux/amd64` и `linux/arm64` с вшитой версией;
-3. `agentgate_linux_<arch>.tar.gz` для каждой плюс `checksums.txt`;
-4. GitHub Release с автоматическими заметками.
+Проверка перед передачей:
 
-С машины разработчика ничего не публикуется. Тег, не прошедший тесты, ничего не выпускает.
+```sh
+unzip dist/agentgate-0.14.0.zip
+cd agentgate-0.14.0
+sha256sum -c SHA256SUMS
+sh scripts/install-local.sh --prefix "$HOME/.local/bin" --no-integrations
+```
 
-Номера версий — семантические: изменение схемы плана, формата состояния или входа команды — минорная версия
-до 1.0 и мажорная после.
+Создание архива ничего не публикует. Недоступные проверки браузера или провайдера не считаются пройденными:
+запишите ограничения окружения вместе с результатом.
 
-## Как это получают пользователи
+## Публикация через GitHub
 
-Первая установка:
+Обновите версию, changelog и release notes, включите все новые/изменённые файлы в коммит и выполните проверки.
+После разрешения сопровождающего push тега `v*` запускает
+[release.yml](../../.github/workflows/release.yml). Workflow проверяет форматирование, vet, race-тесты,
+настоящие Chromium-сценарии, собирает обе архитектуры, проверяет архив и локальную установку, публикует:
+
+- `agentgate_linux_<arch>.tar.gz` и совместимые архивы `claude-dev`;
+- `checksums.txt` для обновления;
+- полный ZIP с исходниками/бинарниками и его SHA-256.
+
+Ошибка обязательного шага отменяет публикацию. Настоящие аккаунты моделей и доступ к Figma в CI не
+используются; протокольные фикстуры не являются сертификацией live-провайдера.
+
+## Установка и обновление
+
+Онлайн-установщик получает опубликованный релиз:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/knaus94/agentgate/main/scripts/install.sh | sh
+agentgate update --check
+agentgate update
 ```
 
-Обновление:
+Автообновление разрешено только на строго более новую корректную SemVer-версию. Учитывается порядок
+prerelease, build metadata не делает версию новее. Неизвестная/dev-версия автоматически не заменяется.
+Размер загрузки ограничен, проверяется точный SHA-256, замена выполняется через случайный временный файл
+и атомарный rename. Затем новый бинарник обновляет установленные интеграции лида.
 
-```sh
-agentgate update --check   # есть ли версия новее?
-agentgate update           # скачать, проверить, заменить, обновить команду /dev
-```
+Завершите или явно остановите активные операции перед заменой их бинарника. Читайте миграцию конкретного
+релиза: совместимость состояния нельзя обещать безусловно для всех будущих версий.
 
-`update` скачивает архив для текущей платформы, сверяет его SHA-256 с `checksums.txt`, атомарно заменяет
-бинарник и запускает `install` нового бинарника, чтобы команда `/dev` ему соответствовала. Идущая задача не
-страдает: её формат состояния читается новым бинарником.
-
-Закрепить версию: `AGENTGATE_VERSION=v0.2.0 sh install.sh`.
-Установить в другое место: `AGENTGATE_BIN=/usr/local/bin sh install.sh`.
-Зеркало релизов: `AGENTGATE_BASE_URL=https://mirror.example/releases sh install.sh`.
+Настройки установщика: `AGENTGATE_VERSION=v0.14.0`, `AGENTGATE_BIN=/some/bin`,
+`AGENTGATE_BASE_URL` для разрешённого зеркала релизов. Закреплённая версия — явный выбор и может быть старее;
+обычный `update` не должен случайно понижать новую локальную сборку.
 
 ## Форки
 
-Репозиторий релизов вшивается при сборке. Собрать со своим:
+Путь Go-модуля остаётся `github.com/knaus94/agentgate`. Репозиторий релизов переопределяется при линковке:
 
 ```sh
-go build -ldflags "-X github.com/knaus94/agentgate/internal/update.Repo=you/agentgate \
-                   -X github.com/knaus94/agentgate/internal/update.Version=0.2.0" ./cmd/agentgate
+go build -trimpath -buildvcs=false -ldflags '-X github.com/knaus94/agentgate/internal/update.Repo=you/agentgate -X github.com/knaus94/agentgate/internal/update.Version=0.14.0' ./cmd/agentgate
 ```
 
-и поменять `REPO` в `scripts/install.sh`.
+Workflow получает путь символов из `go list -m`, а репозиторий — из `GITHUB_REPOSITORY`.
+Для постоянного форка измените default `REPO` в онлайн-установщике.

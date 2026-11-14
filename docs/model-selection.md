@@ -1,180 +1,86 @@
-# Why these models
+# Model routing and independence
 
 [Русский](ru/model-selection.md)
 
-The default mode table is built from public data, not from taste: independent benchmark runs, the vendors'
-own published guidance, and list prices. This page shows the data, the decisions it led to, and where the
-data is thin. Snapshot: **November 2026**. Models change; re-check before you trust it, and
-[override anything](configuration.md) that no longer holds.
+Model names are configuration, not an architectural dependency. The shipped table is a starting profile for
+accounts that have the named models. It is not a ranking, a claim of benchmark superiority, or a promise that
+your subscription exposes every route. Inspect the effective profile with `agentgate modes` and validate
+changes with `agentgate config validate`.
 
-## The data
+## Invariants before preferences
 
-### Independent runs (Vals AI)
+1. A reviewer cannot use a model that authored any part of the change, including a failed partial writer,
+   a fallback writer, or a writer in an earlier stage. Comparing actual model identities prevents aliases
+   from bypassing this rule.
+2. A fallback can spend only the accounts and aliases declared in configuration. Quota exhaustion may
+   trigger an alternate; a successful answer mentioning a rate limit is not an exhaustion event.
+3. Continuing a worker keeps both its provider session identifier and its actual lane directory. Account
+   rotation may retry that session within the same provider; if the CLI refuses it, the error is explicit.
+   Model substitution is disabled for a resumed session.
+4. The selected effort is explicit. A recheck can be cheaper because it sees a delta; escalation is tied to
+   lack of progress rather than to an unsupported claim about a universal best model.
+5. The dashboard and receipts show the actual routes and substitutions. Model independence is mandatory;
+   vendor diversity depends on the configured profile and the available fallbacks.
 
-Same harness for every model. Vals does not state the reasoning effort it used, so treat cross-vendor gaps as
-"each model as shipped", not as an equal-effort comparison.
+## Mixed-provider defaults
 
-| Benchmark | Opus 5.5 | Sonnet 5.5 | GPT-6 Astra | GPT-6.1 Sol |
+| Role | light | medium | heavy | ultra |
 |---|---|---|---|---|
-| SWE-bench Multimodal (real repositories, front-end heavy) | **70.2%** | 58.3% | 43.3% | 43.5% |
-| Terminal-Bench 4.0 (agentic terminal work) | **65.2%** | 64.1% | 59.6% | 55.1% |
-| Code Migration v1.1 | 81.0% | **86.9%** | 80.6% | 77.3% |
-| ProgramBench | **18.5%** | 6.5% | 5.5% | 3.0% |
-| Vibe Code Bench v1.1 (building an app) | 90.3% | **92.4%** | 89.6% | 88.9% |
-| IOI (algorithms) | 95.1% | 83.1% | **100%** | 96.9% |
-| SRE Bench (operations) | 33.6% | 30.2% | **56.9%** | 50.8% |
-| CyberBench v1.1 | **55.4%** | — | 41.1% | — |
+| Scout | lead context | sol:medium | accepted architecture | accepted architecture |
+| Architecture | lead | lead | fable:high + astra:high | fable:xhigh + astra:xhigh, cross-critique |
+| Backend writer | sol:medium | opus:medium | opus:high | opus:xhigh |
+| Frontend writer | sonnet:medium | opus:medium | opus:high | opus:xhigh |
+| Architecture and simplicity review | lead | fable:medium | fable:high | fable:high |
+| Correctness review | lead | astra:medium | astra:high | fable:xhigh + astra:xhigh |
+| Security review | — | — | — | astra:high |
+| Escalation ceiling | high | high | xhigh | max |
 
-Cost and time per benchmark task, same runs:
+Heavy and ultra use Opus for both implementation domains. The previous table used Astra for frontend work
+and also for correctness review, which conflicted with author independence in mixed tasks. Keeping Fable
+and Astra available as reviewers makes the standard routes coherent before any fallback is needed.
 
-| | Opus 5.5 | Sonnet 5.5 | GPT-6 Astra | GPT-6.1 Sol |
-|---|---|---|---|---|
-| SWE-bench Multimodal | $3.63 · 18 min | $3.26 · 24 min | $1.81 · 7 min | **$0.35 · 7 min** |
-| Terminal-Bench 4.0 | $12.04 · 64 min | $10.75 · 82 min | $9.58 · 36 min | **$1.72 · 45 min** |
-| Code Migration v1.1 | $72.40 · 3 h 29 min | $43.88 · 4 h 07 min | $62.07 · 1 h 27 min | **$9.51 · 1 h 39 min** |
+The table intentionally does not encode prices, subscription multipliers or benchmark scores. Those change
+independently of the gate and do not establish the best route for a particular repository. Use observed
+completion time, correction rounds and quota use on representative tasks to tune your own profile.
 
-### Vendor-reported (Anthropic's Fable 5.2 launch table)
+## One provider
 
-Measured at each model's highest available effort unless noted. Not independently replicated.
+`agentgate setup install --lead codex` selects the Codex-only profile. It retains independent model identities
+inside the same provider: Astra writes substantial tasks, Sol reviews, and Terra supplies another role when
+configured. See [Codex](codex.md) and the actual profile in
+[internal/assets/profiles/codex.json](../internal/assets/profiles/codex.json).
 
-| Benchmark | Fable 5.2 | Opus 5.5 | GPT-6 Astra |
-|---|---|---|---|
-| FrontierCode 2.0 (would a maintainer merge it) | 49.1% at xhigh, 45.3% at high | 45.5% | 42.8% |
-| FrontierSWE v2 | 69.9% | 62.3% | 65.5% |
-| Terminal-Bench-Science 0.1 | 74.6% | 58.7% | 68.1% |
-| Remote Labor Index (open-ended projects) | 41.3% | 21.3% | 20.8% |
-| OSWorld 2.1 (computer use) | 89.3% | 87.2% | 79.5% |
+A single-provider setup cannot provide cross-vendor review. It can still enforce independent sessions,
+different author/reviewer model identities, current checks and evidence-bound completion. A single-model
+setup is suitable only for light mode, where the lead reviews the change.
 
-Artificial Analysis, as reported by secondary coverage: on Terminal-Bench 4.0 Fable 5.2 ties Opus 5.5 at 60%
-while Sonnet 5.5 reaches 64%; Fable 5.2 at high or xhigh uses about 98,000 output tokens per task against
-173,000 for Opus 5.5 at max.
+## Change a route
 
-### List prices, per million tokens
+```sh
+agentgate config set models.sol.model gpt-6.1-sol
+agentgate config set modes.medium.backend sol:high
+agentgate config set modes.medium.frontend sol:high
+agentgate config validate
+agentgate modes
+```
 
-| | Input | Output |
-|---|---|---|
-| Claude Fable 5.2 | $8 | $40 |
-| Claude Opus 5.5 | $4 | $20 |
-| Claude Sonnet 5.5 | $2 | $10 |
-| GPT-6 Astra | $10 | $50 |
-| GPT-6.1 Sol | $2 | $10 |
+Before assigning a writer to a reviewer model, change the review routes too. If all eligible reviewers are
+excluded or exhausted, the task stops with a routing error; it must not approve its own code. Configuration
+validation checks structure and configured relationships, not live access to a paid provider model.
 
-The Fable 5.2 price comes from one secondary source; Anthropic's reference lists $10 / $50 for Fable 5.1.
-On a subscription you pay in usage limits rather than dollars, but the ratios still tell you what is heavy.
+For an experiment, change one role at a time and compare similar tasks. Track elapsed wall time, failed
+checks, reopened findings and whether the final result met the original requirements. Do not infer token
+cost or account capacity from the number of parallel processes alone.
 
-### Effort
+## Protocol references
 
-- Anthropic: `low` for simple tasks and sub-agents, at least `high` for intelligence-sensitive work, `xhigh`
-  for coding and agentic work where it counts, `max` only when measurement shows headroom. Opus 5.5 defaults
-  to `medium`; for Sonnet 5.5 start at `medium` for agentic coding. Lower effort on the newest models often
-  matches the previous generation at high effort.
-- OpenAI ships Sol with `low` as its default level and Astra with `medium`, and describes Sol as "near-Astra
-  performance at a lower cost".
-- Returns flatten near the top: one published sweep (previous-generation Sol) scored 53.6 at low, 60.6 at
-  medium, 64.1 at high and 65.1 at xhigh. A small observational study found xhigh mainly buys *first-try
-  reliability* rather than peak score.
+The adapters follow the provider CLIs rather than reimplementing their authentication or billing:
 
-## What follows from it
+- [Codex non-interactive execution](https://developers.openai.com/codex/noninteractive/)
+- [Codex CLI reference](https://developers.openai.com/codex/cli/reference/)
+- [Claude Code CLI reference](https://code.claude.com/docs/en/cli-reference)
+- [Claude Code headless usage](https://code.claude.com/docs/en/headless)
 
-One rule organises the table: **the strongest model the mode can afford creates; the other frontier models
-verify.** A defect that is never written costs nothing to find, so the best model goes to design and code, and
-the review is done by models that did not write it.
-
-**1. Fable designs but does not write.** It is the strongest coder in the published data (49.1% against 45.5%
-on FrontierCode 2.0, 69.9% against 62.3% on FrontierSWE v2), but writing is the largest token spend of a run
-and Fable is the most expensive model, so it is kept for the architects, where one pass decides the design.
-Back-end writers in heavy and ultra are Opus, at `high` and `xhigh`.
-
-**2. Opus writes in medium.** It is the best coder in the independent runs (70.2% on real repositories, 12
-points above Sonnet, 27 above both OpenAI models) at about the same cost per task as Sonnet. Everyday work is
-most of the work, so this is where an independent measurement matters most.
-
-**3. Front-end writers in heavy and ultra are Astra.** This is a cost and pool decision rather than a quality
-one: SWE-bench Multimodal, the closest public proxy for front-end work, favours the Claude models by 15–27
-points, so the choice trades some front-end quality for spend and moves that work onto the Codex pool.
-
-**4. Every review above light comes from two vendors.** Astra reviews correctness in medium and heavy and is
-the second architect: it is strongest exactly where the Claude models are weakest (algorithms, operations,
-scientific reasoning), 2–3× faster per task, and a reviewer from another vendor fails in different ways than
-the writer. The Claude reviewer is Fable in every mode above light: it writes nowhere, so it is never the author of the code it
-reads, and a review spends far fewer output tokens than writing.
-
-**5. Ultra checks correctness twice.** Correctness is reviewed by Fable and by Astra independently, both at
-`xhigh`; a defect has to get past both. Ultra is also the only mode whose effort ceiling is `max`.
-
-**6. Light stays cheap, and Sol reads for everyone.** Sol is 5–10× cheaper per task and the fastest; for an
-exact change of a few lines that is the right trade, and the lead reads the diff itself. Front-end in light
-goes to Sonnet. The same qualities make Sol the scout in medium.
-
-**7. The security lane runs on Astra.** Claude models route or decline some security-flavoured requests through
-safety classifiers; a review lane that can be declined is not a dependable gate.
-
-## The resulting table
-
-| | light | medium | heavy | ultra |
-|---|---|---|---|---|
-| Context | the lead's own | scout `sol:medium` | the accepted design | the accepted design |
-| Architect | the lead | the lead | `fable:high` ∥ `astra:high` | `fable:xhigh` ∥ `astra:xhigh`, then cross-critique |
-| Backend writer | `sol:medium` | `opus:medium` | `opus:high` | `opus:xhigh` |
-| Frontend writer | `sonnet:medium` | `opus:medium` | `astra:high` | `astra:xhigh` |
-| Review: architecture | the lead | `fable:medium` | `fable:high` | `fable:high` |
-| Review: correctness | the lead | `astra:medium` | `astra:high` | `fable:xhigh` ∥ `astra:xhigh` |
-| Review: security | — | — | — | `astra:high` |
-| Effort ceiling | `high` | `high` | `xhigh` | `max` |
-
-Other roles: read-only consultations on `sonnet:medium`, UI design on `opus:medium`, the browser pass on
-`astra:medium` (strong computer-use scores, and the browser tooling is wired to the Codex CLI).
-
-Which subscriptions each mode draws on: light — Codex and Claude; medium, heavy and ultra — Claude, Fable and
-Codex, with the parallel design and review phases split across them.
-
-### Why these effort levels
-
-- **Vendor defaults are the baseline.** OpenAI ships Astra at `medium`; Anthropic ships Opus 5.5 at `medium`
-  and recommends starting Sonnet 5.5 at `medium` for agentic coding. The independent Vals scores above were,
-  as far as can be told, measured at those shipped levels — so "medium" is the effort the published numbers
-  describe. Sol is the exception: it ships at `low`, and the published sweep shows a large gap between `low`
-  and `medium` (53.6 against 60.6), so it runs at `medium`.
-- **Fable at `high` already equals Opus at its maximum**, for roughly half the output tokens (98,000 against
-  173,000 per task). That makes `fable:high` the efficient strong setting for the architects. Its margin over
-  Opus opens at `xhigh`, which is what ultra pays for. Writers run on Opus and Astra at the same levels, and Fable reviews at them.
-- **Returns flatten near the top and cost does not.** In the published sweep `xhigh` adds about two points over
-  `high` for roughly 47% more cost. In our own runs of the same toy task, a design pass took 110 seconds at
-  `xhigh` and 349 seconds at `max`. So `max` is an escalation, not a default: it is used when a correction has
-  demonstrably stalled, which is the "measurement shows headroom" condition Anthropic sets for it.
-- **Reading is cheap work.** Anthropic's own guidance is to move reading-heavy sub-tasks to a cheaper worker.
-  The scout runs on Sol — the cheapest and fastest of the five, with the largest default context — and a
-  recheck, which reads only a delta, runs one step below the review. A map does not save an expensive worker
-  its own reading, though. In our run of one design pass with the scout's map and without it, Fable opened 36
-  files both times and took 324 seconds with the map against 304 without; Astra took 204 against 153. So
-  architects get no map, and heavy and ultra, where the accepted design plays that part, have no scout.
-
-## What the data does not show
-
-- **No public benchmark measures code review or architecture critique.** Reviewer choices are inferred from
-  coding and reasoning results plus the independence rule. So is the rule itself — that the strongest model
-  should create rather than review: the public data measures doing the work, not checking it.
-- **No equal-effort comparison across vendors.** Vals does not report effort; the Sol–Sonnet gap would likely
-  narrow with Sol at high effort.
-- **Vendor tables favour the vendor.** Fable's lead over Opus comes from Anthropic's own table, and Anthropic
-  chose which efforts to pair. Independent sources put the two level on everyday terminal work.
-- **`max` is expensive.** One measurement puts Fable 5.2 at its top tier at roughly twice the cost per task of
-  the level below, which is why no default uses it.
-- **Subscription limits are not list prices.** Whether Fable draws on its own limit or shares Opus's depends on
-  your plan; set `pool` accordingly.
-- **Your repository is not a benchmark.** If these defaults disagree with what you observe, change them.
-
-## Sources
-
-- [Vals AI: Claude Sonnet 5.5 vs GPT-6.1 Sol](https://www.vals.ai/comparisons/anthropic_claude-sonnet-5-5-vs-openai_gpt-6.1-sol)
-- [Vals AI: Claude Opus 5.5 vs GPT-6 Astra](https://www.vals.ai/comparisons/anthropic_claude-opus-5-5-vs-openai_gpt-6-astra)
-- [DataCamp: GPT-6.1 Sol vs Claude Sonnet 5.5](https://www.datacamp.com/blog/gpt-6-1-sol-vs-claude-sonnet-5-5)
-- [DataCamp: GPT-6 Astra vs Claude Opus 5.5](https://www.datacamp.com/blog/gpt-6-astra-vs-claude-opus-5-5)
-- [DataCamp: Claude Fable 5.2 and Mythos 5.2](https://www.datacamp.com/blog/claude-fable-5-2-and-mythos-5-2)
-- [SmartScope: Claude Fable 5.2 score table](https://smartscope.blog/en/blog/claude-fable-5-2-score-table-all-14-2026/)
-- [Singularity Moments: Fable 5.2 on daily dev work](https://singularitymoments.com/content/fable-52-delivers-huge-math-gains-but-stumbles-on-daily-dev-work/)
-- [Webiano: Fable 5.2 vs Opus 5.5 on FrontierCode](https://webiano.digital/claude-fable-5-2-beats-opus-5-5-by-only-3-6-points-on-frontiercode/)
-- [philippdubach.com: performance, cost and speed by effort](https://philippdubach.com/posts/llm-performance-cost-speed-sweet-spot/)
-- [alphaXiv 2607.02436: reasoning effort and first-try reliability](https://www.alphaxiv.org/abs/2607.02436)
-- Anthropic model reference and effort guidance (bundled with Claude Code), and the model list shipped by the
-  Codex CLI (`~/.codex/models_cache.json`).
+A provider can change its supported model identifiers, effort values or JSON events. Unit and integration
+fixtures exercise the adapter contract; a live smoke test with your installed CLI and account is still the
+last compatibility check. A protocol error is surfaced, never converted to a successful worker result.

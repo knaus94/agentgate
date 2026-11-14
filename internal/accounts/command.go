@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -20,10 +21,11 @@ const commandUsage = `usage:
 
 // LoginHint is the command that logs a profile in. It is interactive, so the user runs it in a terminal.
 func LoginHint(account config.Account) string {
+	home := "'" + strings.ReplaceAll(Home(account), "'", "'\"'\"'") + "'"
 	if account.Provider == "claude" {
-		return "CLAUDE_CONFIG_DIR=" + account.Home + " claude auth login"
+		return "CLAUDE_CONFIG_DIR=" + home + " claude auth login"
 	}
-	return "CODEX_HOME=" + account.Home + " codex login"
+	return "CODEX_HOME=" + home + " codex login"
 }
 
 // Command implements `agentgate accounts ...`.
@@ -36,11 +38,17 @@ func Command(cfg *config.Config, manager *Manager, rest []string, flags map[stri
 	case "", "list", "limits":
 		if len(cfg.Accounts) == 0 {
 			found := Discover()
+			if flags["json"] {
+				return found, nil
+			}
 			return "No accounts are configured: every worker uses the default profile of its CLI.\n" +
 				"Profiles found on this machine (add the usable ones with `agentgate accounts discover --save`):\n\n" +
 				Render(found, nil, manager.leadHome), nil
 		}
 		statuses := manager.Statuses(true)
+		if err := manager.Err(); err != nil {
+			return nil, fmt.Errorf("account state unavailable: %w", err)
+		}
 		if flags["json"] {
 			return statuses, nil
 		}
@@ -59,10 +67,17 @@ func Command(cfg *config.Config, manager *Manager, rest []string, flags map[stri
 		}
 		return "Added: " + strings.Join(added, ", ") + ".\n\n" + Render(New(list, manager.path).Statuses(true), nil, manager.leadHome), nil
 	case "add":
-		if len(rest) != 4 || (rest[2] != "claude" && rest[2] != "codex") {
+		if len(rest) != 4 || strings.TrimSpace(rest[1]) == "" || (rest[2] != "claude" && rest[2] != "codex") {
 			return nil, errors.New(commandUsage)
 		}
 		account := config.Account{Name: rest[1], Provider: rest[2], Home: rest[3], Paid: flags["paid"]}
+		if !filepath.IsAbs(Home(account)) {
+			absolute, err := filepath.Abs(Home(account))
+			if err != nil {
+				return nil, err
+			}
+			account.Home = absolute
+		}
 		if slices.ContainsFunc(cfg.Accounts, func(other config.Account) bool { return other.Name == account.Name }) {
 			return nil, fmt.Errorf("account %q already exists", account.Name)
 		}
@@ -83,7 +98,9 @@ func Command(cfg *config.Config, manager *Manager, rest []string, flags map[stri
 			return nil, fmt.Errorf("unknown account; %s", commandUsage)
 		}
 		if action == "reset" {
-			manager.Reset(rest[1])
+			if err := manager.Reset(rest[1]); err != nil {
+				return nil, err
+			}
 			return Render(manager.Statuses(true), nil, manager.leadHome), nil
 		}
 		list := slices.DeleteFunc(slices.Clone(cfg.Accounts), func(other config.Account) bool { return other.Name == rest[1] })
@@ -110,10 +127,13 @@ func merge(configured []config.Account, known, found []Status) ([]config.Account
 	}
 	var added []string
 	for _, status := range found {
-		if !status.LoggedIn || status.APIKey || homes[clean(status.Home)] || names[status.Name] || identities[status.Identity] {
+		if !status.LoggedIn || status.APIKey || homes[clean(status.Home)] || names[status.Name] || (status.Identity != "" && identities[status.Identity]) {
 			continue
 		}
-		identities[status.Identity] = true
+		if status.Identity != "" {
+			identities[status.Identity] = true
+		}
+		names[status.Name], homes[clean(status.Home)] = true, true
 		list, added = append(list, status.Account), append(added, status.Name)
 	}
 	return list, added
@@ -167,7 +187,7 @@ func Render(statuses []Status, at *int64, leadHome string) string {
 					}
 				}
 			}
-			if status.LoggedIn && status.Note != "" {
+			if status.Note != "" {
 				notes = append(notes, status.Note)
 			}
 			if provider == config.Lead() && clean(status.Home) == leadHome {

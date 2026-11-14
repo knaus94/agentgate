@@ -1,136 +1,212 @@
-# Design
+# Figma and layout verification
 
-[Русский](ru/design.md)
+[Русский](ru/design.md) · [Toolkit reference](../design-kit/README.md)
 
-A stream can implement a Figma design, and the gate can tell whether it did. What can be computed is computed
-by tools; a model reads short results.
+AgentGate can turn an authorized Figma node into a local design package, measure an implementation against
+it, and include the measurements and screenshots in independent review. It can also start a local frontend
+with recorded GraphQL responses. A passing measurement is one piece of evidence; it is not visual or
+behavioral acceptance by itself.
 
+## Setup
 
-## Coordination
+Basic AgentGate does not need Node or a browser. Design commands need Node.js 20+. Figma REST export needs
+no browser; layout measurement and browser-session export need `playwright-core` and Chromium.
 
-For phone and tablet references, declare `device: "mobile"` and the intended CSS `viewport` in each design
-entry (or in `screen.json`). A narrow desktop window is still a desktop: classic scrollbar gutters can
-reduce its document width. Tablet checks use the same mobile mode with their own viewport. This is Chromium
-mobile/touch emulation at one screenshot pixel per CSS pixel, not a physical-device or Safari test.
+An installation with browser tooling can supply these dependencies. For a source/archive checkout:
 
-```json
-{"design": [{"screen": ".agentgate/design/mobile", "root": "main.app-container",
-             "viewport": "390x844", "device": "mobile", "stream": "web"}]}
+```sh
+npm ci --prefix design-kit --ignore-scripts --no-audit --no-fund
+node design-kit/node_modules/playwright-core/cli.js install chromium
+export PLAYWRIGHT_CORE="$PWD/design-kit/node_modules/playwright-core"
 ```
 
-Match the exported frame's border box, including padding. A 390px content frame with 12px padding matches
-a 390px wrapper, not its 366px child. The wrapper may belong to the existing shell: measuring its content
-region does not require changing shell CSS. Do not add viewport pixels or raise tolerances to offset a gutter.
-Reports include the effective device, viewport, document width, root size/padding and horizontal overflow.
-Use those observations to distinguish a wrong comparison boundary from a real layout defect.
+The explicit module path also lets the embedded tools in the compiled binary find that installation.
+`AGENTGATE_BROWSER_EXECUTABLE=/path/to/chromium` selects a local Chromium for layout checking. Otherwise the
+checker tries managed Chromium, then common system Chromium locations. Browser-session Figma export uses
+Chrome or Playwright Chromium and retains the selected browser channel with its profile.
 
-For overlapping artwork, `map.select` maps a layer handle to a unique CSS selector inside the selected root.
-It selects the actual element even if its position is wrong; geometry/style checks still apply. Ambiguous
-selectors are setup errors. The compact element labels used by older maps remain supported when unique.
+### Official REST transport
 
+Provide `FIGMA_ACCESS_TOKEN` through your shell or secret manager. The token needs access to the file and
+the `file_content:read` scope. Then:
 
-Start with `agentgate prepare --file <JSON with request>`. The tool reads a bounded Figma catalogue and a
-read-only worker selects content nodes, discovers the repository and saves the plan. The lead handles product
-questions and authorization, not exports, CSS inspection or screenshot comparison. Writers receive packages
-and source checks; the gate owns layout commands, baseline files and stand lifecycle. It sends measured
-failures back through `fix`, and an independent reviewer checks pictures.
+```sh
+agentgate figma frames 'https://www.figma.com/design/FILE/Name?node-id=1-2' --transport api --depth 2
+agentgate figma pull 'https://www.figma.com/design/FILE/Name?node-id=1-2' --transport api --out screens/home/package
+```
 
-`agentgate layout` resolves `design.stand` through the same configuration as preparation, including extensions
-and personal checkout overrides. It uses the selected screen's repository even when invoked from elsewhere.
-Direct standalone Node use reads `.agentgate.json` only.
+The API adapter uses documented file and image endpoints, pins renders to the loaded file version, bounds
+response size and download concurrency, and reports permission/rate errors directly. A 429 does not trigger
+an automatic retry or a switch to browser access. The token is sent only to `api.figma.com`, never to an
+image CDN, a worker, or an exported package. Actual quotas depend on Figma's plan and access rules; see
+[Figma endpoints](https://developers.figma.com/docs/rest-api/file-endpoints/) and
+[rate limits](https://developers.figma.com/docs/rest-api/rate-limits/).
 
-`layout measurements: PASS` means only that the measured properties pass, including any unchanged baseline
-differences. The existing reviewer must also assess four built-in blocking rules per design: appearance
-(including crop), placement in the shell, control semantics, and exceptions/viewport/state coverage. This
-applies even without plan requirements. Missing pictures or other required evidence prevent completion;
-these rules cannot be waived as `not_applicable`. No extra reviewer is started.
+### Browser-session transport
 
-Packages retain the parent screen as `context.png`; layout saves the full implementation as `page.png` next
-to the cropped `actual.png`. Their coordinates and pictures preserve the header-to-content relationship.
-Figma references are exported at the node's absolute bounds so overflow cannot shift the comparison's origin
-([Figma export settings](https://developers.figma.com/docs/plugins/api/ExportSettings/)). Older linked packages
-without screen context are reimported by the gate; this never captures a new implementation baseline.
+```sh
+agentgate figma login
+agentgate figma status
+agentgate figma pull 'https://www.figma.com/design/FILE/Name?node-id=1-2' --transport browser --out screens/home/package
+```
 
-For a requested responsive range, preparation proposes reference widths and relevant intermediate/breakpoint
-observations from the repository's layout rules. Only approved scenarios run. Two endpoint screenshots and
-no overflow do not establish behavior throughout the range. Control semantics and unavailable-data states
-come from the accepted task and [project rules/skills](extensions.md#repository-frontend-skills), not the
-appearance of a still image or a universal HTML/CSS prescription.
+Login opens a window on your desktop. Its session lives under
+`${XDG_DATA_HOME:-~/.local/share}/agentgate/private/figma`; `AGENTGATE_FIGMA_HOME` can override that location.
+The profile is hidden from worker mounts. `import-cookies <file>` is available for an authorized exported
+session when a display is unavailable; treat that input as a credential file and remove it after importing.
 
-Use `replan --plan <name>` with an update reason to correct an idle task's measurement contract. This retains
-its original source snapshot and findings; it regenerates managed layout checks and invalidates review.
-No new baseline is captured after implementation. An absent/mismatched baseline makes all differences count.
-Only an identical discrepancy under the same design, root, viewport, map and tolerances is grandfathered;
-changed discrepancies remain visible. Exit 1 means a measured difference; exit 2 means verification could not
-run and must be repaired before asking a writer to change CSS.
+This adapter reads Figma's internal scene graph and checks export permission. It preserves the existing
+workflow but depends on an unpublished interface. A Figma UI change can require an adapter update. It is
+not a way to override file access or export restrictions.
 
-## The flow
+Transport selection is explicit `--transport`, then `AGENTGATE_FIGMA_TRANSPORT`, then API when a token is
+present, otherwise browser. `login`, `status` and `import-cookies` manage browser sessions only.
 
-| Step | Who | What happens |
-|---|---|---|
-| Sign in | you, once | `agentgate figma login` opens a browser window. The session stays in a profile under `~/.local/share/agentgate/private`, which no worker sees. No token and no cookie file |
-| Choose | preparation worker | receives the bounded catalogue and selects matching content nodes |
-| Pull | the gate | imports the selected design at launch |
-| Plan | preparation worker, then lead | drafts the plan; the lead accepts scope and authorizations |
-| Measure | the gate | before anyone writes, the page is compared with the package: what differs already is not the task's |
-| Write | the stream's writer | reads the brief, about two thousand tokens for a page section, and runs its declared source checks |
-| Check | the gate | the layout check again, as a declared check. A new difference blocks the review |
-| Judge | the first reviewer | is shown the design next to the page and looks for what numbers do not carry |
+## Choose and export a node
 
-## The package
+`figma frames <url> --depth 2` prints a bounded catalogue; `--json` returns structured rows. A page or section
+is a container to browse. Select the frame/component containing the intended implementation with
+`--node <id>`. `figma pull` exports that node; `--scales 2,3` adds render sizes and `--no-assets` omits separate
+icon/image extraction. `figma node <package> <handle> --depth 3` expands a layer from the compact brief.
 
-| File | Read by | Holds |
-|---|---|---|
-| `brief.md` | the writer, the reviewer | the layers as intent: layout rules, type, colour, design tokens |
-| `frame.png` | the writer, the reviewer | the picture of the node |
-| `context.png` | the writer, the reviewer | the parent screen when the selected node is a section |
-| `assets/` | the writer | icons as SVG, pictures as PNG |
-| `manifest.json` | the gate | source, file version and a digest of the content: a design pulled again makes earlier reviews stale |
-| `data/` | tools only | the node tree in Figma's REST format |
-
-A component instance is one line of the brief, repeated siblings are one item of a list, and positions that
-follow from auto layout are not printed. `agentgate figma node <dir> <handle>` prints one layer in full.
-
-## What is caught, and by what
-
-| Difference | Caught by |
+| Package file | Purpose |
 |---|---|
-| position, size, radius, font, colour, a missing element | the layout check, without a model |
-| a wrong icon, a lost gradient or shadow, clipped text | the reviewer of the `design` axis, from two pictures |
-| an exception that excuses what the product does not need | the same reviewer, reading the map |
-| behaviour | the correctness reviewer, the project's tests and, when opted in, browser verification |
+| `brief.md` | Compact layout, typography, colors and layer handles for workers |
+| `frame.png` | Reference image of the selected node |
+| `context.png` | Parent screen when a nested block needs placement context |
+| `assets/` | Exported SVG/PNG assets, deduplicated by content |
+| `data/nodes.json` | Source tree in Figma REST shape |
+| `data/spec.json` | Normalized measurement specification |
+| `manifest.json` | Source/version, screen geometry, complete file inventory and content digest |
 
-The layout check finds a text by its words and a painted box by where it lies, so the code needs no markup. It
-judges a layer against its matched parent: a panel that moved is one finding, not one per child.
+Exports build and verify a temporary sibling package under an exclusive lock, then replace the destination.
+An error preserves the previous complete package. Both the Go gate and Node checker verify required files,
+inventory paths and actual bytes. A changed specification or image invalidates design evidence even if
+someone leaves the old manifest digest in place. Reimport an incomplete or corrupt package.
 
 ## A screen and its stand
 
-A screen is a directory, and a project describes its front end once:
+A screen directory binds the package to the implementation:
 
-```
-.agentgate.json                design.stand: how the front end starts, once per project
-<screens>/<screen>/screen.json where the screen is: url, root, and optionally locale, viewport, cookies
-<screens>/<screen>/package/    the design, written by `agentgate figma pull`
-<screens>/<screen>/fixtures/   recorded GraphQL answers: the state the screen is shown in
-<screens>/<screen>/map.json    what the product shows differently
-```
+| Path | Meaning |
+|---|---|
+| `.agentgate.json` | Project-level `design.stand` configuration |
+| `screens/home/screen.json` | URL, root selector and optional locale, viewport, device, cookies |
+| `screens/home/package/` | Exported design package |
+| `screens/home/fixtures/` | GraphQL responses for this screen state |
+| `screens/home/map.json` | Deliberate exceptions and explicit layer-to-selector mappings |
+
+Example project configuration (merge into `.agentgate.json`):
 
 ```json
-{ "command": ["yarn", "nx", "run", "client:dev"], "ready": "http://localhost:4200",
-  "env_file": "env/.env.local", "graphql_env": ["VITE_PUBLIC_GRAPHQL_ENDPOINT", "GRAPHQL_INTERNAL_URL"] }
+{
+  "design": {
+    "stand": {
+      "command": ["npm", "run", "dev", "--", "--host", "127.0.0.1"],
+      "ready": "http://127.0.0.1:5173",
+      "ready_timeout_s": 120,
+      "graphql_env": ["VITE_GRAPHQL_URL"]
+    }
+  }
+}
 ```
 
-`agentgate layout <screen>` is the whole of it. When nothing answers at `ready`, it serves the screen's
-fixtures as the GraphQL endpoint, starts `command` with the variables of `graphql_env` pointing there, waits,
-compares, and stops everything it started; the screen needs no backend behind it. In a plan the screen is
-`design [{screen, stream}]`, and the gate runs the same command. `agentgate layout <screen> --record
-<gateway>` runs against a real gateway instead and keeps its answers as the fixtures.
+Example `screen.json`:
 
-What the product deliberately shows differently is named in the screen's `map.json`, each entry with its reason:
-`{"ignore": {"<handle>": "why"}, "dynamic": ["<handle>"]}`.
+```json
+{
+  "url": "/home",
+  "root": "main",
+  "viewport": "1440x900",
+  "locale": "en-US"
+}
+```
 
-## Limits
+```sh
+agentgate layout screens/home --out artifacts/home
+agentgate layout screens/home --record https://your-authorized-gateway.example/graphql
+agentgate layout screens/home --keep
+```
 
-`figma pull` works with view access by reading the Figma web application's own scene graph, because the REST
-API and the MCP server allow a view seat a few calls a month. That graph is not a published interface: when
-Figma changes it, the command stops and says which part is gone. A Dev seat makes the official API usable.
+The stand starts only when the readiness URL has no server. The command receives the configured GraphQL
+environment variables pointing at the screen's local fixture server. A healthy existing server is reused
+and left running. An unhealthy existing listener is an error; AgentGate does not replace it. Recording
+requires a newly controlled stand so its endpoint can actually be redirected.
+
+Readiness has a timeout and startup logs are retained. Normal completion/error/cancellation terminates only
+owned stand and fixture processes, with bounded TERM/KILL escalation. `--keep` deliberately detaches the
+started processes and prints their PIDs and log path; you are then responsible for stopping them.
+`env_file` is optional, but an explicitly configured missing file is an error.
+
+`agentgate layout` resolves effective configuration, including local overrides and extensions, for the
+screen's repository. A direct Node invocation without AgentGate reads only the project `.agentgate.json`.
+
+## Fixtures and recording
+
+```sh
+agentgate fixtures screens/home/fixtures --port 4317
+agentgate fixtures screens/home/fixtures --record https://your-authorized-gateway.example/graphql
+```
+
+The fixture server binds to loopback, validates operation names and request size, and restricts browser
+origins to local development by default. `--origin <origin>` explicitly allows another origin. Record only
+endpoints and data you are authorized to use; recorded JSON may contain application data.
+
+New recordings are keyed by operation plus canonical variables. Recording one user or page does not create
+an all-variables response. A manually supplied `<Operation>.json` is an intentional fallback for all
+variable sets. Missing fixtures return a GraphQL `FIXTURE_NOT_FOUND` error; `--allow-missing` deliberately
+restores empty responses for exploratory use. Upstream HTTP failures are not saved as successful fixtures.
+
+## What the checker measures
+
+The checker reads visible text and painted/layout boxes, then compares positions, dimensions, typography,
+solid colors, borders, radii and missing layers. Matching is heuristic: text by content and boxes by
+geometry. Parent-relative reporting avoids repeating one displaced panel as a finding on every child.
+Modern CSS color spaces are converted through the browser to sRGB for comparison. The pixel report also
+keeps missing/extra image area rather than clipping both images to their smaller common extent.
+
+Use `map.select` for overlapping or ambiguous layers; each selector must identify exactly one element:
+
+```json
+{
+  "select": {"hero-art": "[data-design=hero]"},
+  "ignore": {"live-balance": "Real account values differ from the example"},
+  "dynamic": ["updated-at"]
+}
+```
+
+An ignore entry needs a reason. These exceptions remain reviewable evidence. The report cannot prove all
+semantics, interaction states, fonts, gradients or responsive widths automatically.
+
+To measure an already running page without stand management:
+
+```sh
+agentgate layout screens/home/package --url http://127.0.0.1:5173/home --root main --viewport 1440x900 --out artifacts/home
+```
+
+`--storage-state`, `--wait`, `--locale`, `--device mobile`, `--tolerance` and `--max-pixel-diff` refine the
+measurement contract. A local `file:` page is also accepted for static fixtures. Output includes
+`report.json`, `report.md`, `actual.png`, full-page `page.png`, `marked.png` and `diff.png`.
+
+| Exit | Meaning |
+|---|---|
+| 0 | Measured properties pass under the declared contract |
+| 1 | Measured differences or pixel threshold exceeded |
+| 2 | Verification could not run; repair setup/input before assigning CSS fixes |
+
+## Gate integration and baseline
+
+A plan can bind `design: [{"screen":"screens/home","stream":"frontend"}]`. Preparation selects the intended
+nodes and measurements. The gate captures the initial measurement before writers start, runs the same
+check afterwards, and gives the independent reviewer reference/actual/context images. Mandatory design
+criteria cover appearance/cropping, placement in the application shell, control semantics and declared
+width/state coverage. A numerical PASS does not waive those criteria.
+
+`--write-baseline <file>` records exact initial discrepancies. `--baseline <file>` accepts only unchanged
+issue signatures under an identical package, URL/root, viewport/device, locale, map and tolerance contract.
+A missing/incompatible baseline means strict comparison. A page not yet built does not receive a blanket
+waiver for absent design layers. Ordinary command-check baseline failures are always blocking.
+
+If the measurement contract was wrong, use `replan --plan <name>` with an explanation. Do not create a new
+baseline after implementation to hide a regression. For responsive tasks, declare relevant intermediate
+breakpoints/states; two endpoint screenshots cannot establish behavior across the whole range.

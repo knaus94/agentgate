@@ -118,8 +118,8 @@ they report, so declare checks that are narrow and fast. Then read every report.
 
 - A stream comes back `BLOCKED` with questions: decide, then `agentgate answer` `{stream, answer}`. The
   writer continues in its own session and the remaining waves follow. Ask the user first if the decision is theirs.
-- `FAILED` or stopped: the task is on hold with partial work kept. Inspect, `resume`, then launch the complete
-  plan again with `update` and `done: true` on finished streams.
+- `FAILED` or stopped: the task is on hold with partial work kept. Inspect the cause, explicitly `resume`, then `continue`. The saved round retries only unfinished streams
+  and retains completed work. A BLOCKED writer needs `answer`; changed scope needs `replan` or a complete plan update.
 - While writers run you may `agentgate tell` a note to the shared board. It is a note, not an interrupt.
 - A changed requirement mid-task is a new complete plan with `update`; the gate and its baseline stay.
 

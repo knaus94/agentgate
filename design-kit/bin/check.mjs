@@ -3,10 +3,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { openBrowser } from '../lib/browser.mjs';
 import { compare, defaults, summary } from '../lib/compare.mjs';
 import { diffImages, readPage, still } from '../lib/page-read.mjs';
 import { ensureStand, readScreen } from '../lib/stand.mjs';
+import { pageURL, numberOption, parseArgs, wantsHelp } from '../lib/cli.mjs';
+import { writeJSON } from '../lib/files.mjs';
+import { verifyPackage } from '../lib/package.mjs';
 
 const usage = `usage:
   layout new <screen> <figma-url> --url <path> --root <css> [--locale ru-RU]
@@ -35,40 +39,39 @@ const fail = (message, code = 2) => {
 };
 
 async function main() {
-  const flags = {};
-  const rest = [];
-  for (let index = 2; index < process.argv.length; index++) {
-    const value = process.argv[index];
-    if (value === '--keep') flags.keep = true;
-    else if (value === '--record' && !/^https?:/.test(process.argv[index + 1] || '')) flags.record = true;
-    else if (value.startsWith('--')) flags[value.slice(2)] = process.argv[++index];
-    else rest.push(value);
-  }
-  if (process.argv.includes('--help') || process.argv.includes('-h') || rest[0] === 'help') {
+  const argv = process.argv.slice(2);
+  if (wantsHelp(argv) || argv[0] === 'help') {
     console.log(usage);
     return;
   }
+  const { flags, rest } = parseArgs(argv, { booleans: ['keep'],
+    values: ['url', 'root', 'storage-state', 'wait', 'locale', 'viewport', 'device', 'map', 'tolerance', 'max-pixel-diff', 'out', 'write-baseline', 'baseline'],
+    optional: { record: (value) => /^https?:\/\//.test(value) } });
+  if (flags['write-baseline'] && flags.baseline) fail('--write-baseline and --baseline cannot be combined');
+  if (flags.tolerance !== undefined) flags.tolerance = numberOption(flags.tolerance, 'tolerance', { min: 0, max: 100 });
+  if (flags['max-pixel-diff'] !== undefined) flags['max-pixel-diff'] = numberOption(flags['max-pixel-diff'], 'max-pixel-diff', { min: 0, max: 1 });
+  if (flags.viewport && !/^[1-9][0-9]*x[1-9][0-9]*$/.test(flags.viewport)) fail('viewport must be WIDTHxHEIGHT in pixels');
   if (rest[0] === 'new') {
     // A screen is made in one go: the design and where it is shown.
     const [, target, figma] = rest;
-    if (!target || !figma || !flags.url || !flags.root) fail(usage);
+    if (rest.length !== 3 || !target || !figma || !flags.url || !flags.root) fail(usage);
     fs.mkdirSync(target, { recursive: true });
     const { execFileSync } = await import('node:child_process');
     try {
-      execFileSync(process.execPath, [new URL('./figma.mjs', import.meta.url).pathname, 'pull', figma, '--out', path.join(target, 'package')], { stdio: ['ignore', 'ignore', 'inherit'] });
+      execFileSync(process.execPath, [fileURLToPath(new URL('./figma.mjs', import.meta.url)), 'pull', figma, '--out', path.join(target, 'package')], { stdio: ['ignore', 'ignore', 'inherit'] });
     } catch {
       fail("could not import the design; see the exporter error above");
     }
     // A screen somebody described already keeps its description: only the design was missing.
     if (!fs.existsSync(path.join(target, 'screen.json'))) {
-      fs.writeFileSync(path.join(target, 'screen.json'), JSON.stringify({ url: flags.url, root: flags.root, locale: flags.locale, viewport: flags.viewport, device: flags.device }, null, 2) + '\n');
+      writeJSON(path.join(target, 'screen.json'), { url: flags.url, root: flags.root, locale: flags.locale, viewport: flags.viewport, device: flags.device });
     }
     const brief = fs.readFileSync(path.join(target, 'package', 'brief.md'), 'utf8');
     console.log(JSON.stringify({ screen: target, brief: path.join(target, 'package', 'brief.md'), brief_tokens_about: Math.round(Buffer.byteLength(brief) / 3.2) }, null, 2));
     return;
   }
   let dir = rest[0];
-  if (!dir) fail(usage);
+  if (!dir || rest.length !== 1) fail(usage);
   // A screen is a directory that knows its own page: nothing else has to be said.
   let screen = null;
   try {
@@ -86,6 +89,8 @@ async function main() {
     flags.map ??= screen.map;
   }
   if (!flags.url) fail(usage);
+  flags.url = pageURL(flags.url).href;
+  if (!screen && (flags.record !== undefined || flags.keep)) fail('--record and --keep need a screen with a configured stand');
   const device = flags.device || 'desktop';
   if (!['desktop', 'mobile'].includes(device)) fail('device must be desktop or mobile');
 
@@ -97,6 +102,7 @@ async function main() {
     }
   };
   const manifest = read('manifest.json');
+  verifyPackage(dir, manifest);
   const spec = read(path.join('data', 'spec.json'));
   const map = flags.map ? JSON.parse(fs.readFileSync(flags.map, 'utf8')) : {};
   for (const [handle, why] of Object.entries(map.ignore || {})) {
@@ -108,8 +114,10 @@ async function main() {
     }
   }
   const limits = { ...defaults };
-  if (flags.tolerance) limits.position = limits.size = Number(flags.tolerance);
+  if (flags.tolerance !== undefined) limits.position = limits.size = flags.tolerance;
   const [width, height] = (flags.viewport || `${manifest.screen?.width || spec.frame.width}x${Math.min(manifest.screen?.height || 1080, 1200)}`).split('x').map(Number);
+  numberOption(width, 'viewport width', { min: 1, max: 16384, integer: true });
+  numberOption(height, 'viewport height', { min: 1, max: 16384, integer: true });
   const contract = crypto.createHash('sha256').update(JSON.stringify({ package: manifest.digest,
     url: flags.url, root: flags.root || '', viewport: [width, height], device, locale: flags.locale, map, limits })).digest('hex');
 
@@ -135,7 +143,7 @@ async function main() {
     const seen = await page.evaluate(readPage, { root: flags.root || '', select: map.select });
     if (seen.missingRoot && flags['write-baseline']) {
       // The page or its root is not there before the work: it is what the task builds.
-      fs.writeFileSync(flags['write-baseline'], JSON.stringify({ contract, known: [] }) + '\n');
+      writeJSON(flags['write-baseline'], { contract, known: [] });
       console.log(`design baseline: ${page.url()} does not show “${spec.frame.name}” yet`);
       return;
     }
@@ -147,7 +155,7 @@ async function main() {
     const result = compare(spec, seen, map, limits);
     if (result.contentCompared === 0 && flags['write-baseline']) {
       // Nothing is built yet: every difference the finished screen has will be a new one.
-      fs.writeFileSync(flags['write-baseline'], JSON.stringify({ contract, known: [] }) + '\n');
+      writeJSON(flags['write-baseline'], { contract, known: [] });
       console.log(`design baseline: the page shows nothing of “${spec.frame.name}” yet`);
       return;
     }
@@ -159,13 +167,14 @@ async function main() {
       // A page that shows next to nothing of the design is not a screen with differences: it is not built, and
       // nothing it lacks may count as known.
       const built = result.compared >= result.total / 10;
-      fs.writeFileSync(flags['write-baseline'], JSON.stringify({ contract, known: built ? result.issues.map(keyOf) : [] }) + '\n');
+      writeJSON(flags['write-baseline'], { contract, known: built ? result.issues.map(keyOf) : [] });
       console.log(built ? `design baseline: ${result.issues.length} differences recorded` : `design baseline: the page shows ${result.compared} of ${result.total} layers — taken as not built yet`);
       return;
     }
     if (flags.baseline) {
       // No record of the page before the work means nothing about it is known: every difference counts.
       const baseline = fs.existsSync(flags.baseline) ? JSON.parse(fs.readFileSync(flags.baseline, 'utf8')) : null;
+      if (baseline && (!Array.isArray(baseline.known) || baseline.known.some((value) => typeof value !== 'string'))) fail('invalid baseline: known must be an array of issue signatures');
       const known = new Set(baseline?.contract === contract ? baseline.known : []);
       result.known = result.issues.filter((issue) => known.has(keyOf(issue))).length;
       result.issues = result.issues.filter((issue) => !known.has(keyOf(issue)));
@@ -199,7 +208,8 @@ async function main() {
     code = result.issues.length || tooDifferent ? 1 : 0;
   } finally {
     await browser?.close().catch(() => {});
-    if (!flags.keep) await stopStand();
+    if (flags.keep) stopStand.release?.();
+    else await stopStand();
   }
   process.exitCode = code;
 }

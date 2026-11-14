@@ -17,30 +17,50 @@ case "$(uname -m)" in
   aarch64 | arm64) ARCH=arm64 ;;
   *) fail "unsupported architecture $(uname -m)" ;;
 esac
-for tool in curl tar sha256sum; do
+for tool in curl tar sha256sum install mktemp awk; do
   command -v "$tool" >/dev/null 2>&1 || fail "$tool is required"
 done
 
 RELEASES="${AGENTGATE_BASE_URL:-https://github.com/$REPO/releases}"
 VERSION="${AGENTGATE_VERSION:-}"
 if [ -z "$VERSION" ]; then
-  VERSION=$(curl -fsSL -o /dev/null -w '%{url_effective}' "$RELEASES/latest" | sed 's#.*/tag/##')
+  VERSION=$(curl -fsSL --connect-timeout 10 --max-time 120 -o /dev/null -w '%{url_effective}' "$RELEASES/latest" | sed 's#.*/tag/##')
   [ -n "$VERSION" ] || fail "could not find the latest release"
 fi
+case "$VERSION" in
+  '' | [!a-zA-Z0-9]* | *[!a-zA-Z0-9._-]*) fail "invalid release version: $VERSION" ;;
+esac
+case "${AGENTGATE_LEAD:-}" in
+  '' | claude | codex | both) ;;
+  *) fail "AGENTGATE_LEAD must be claude, codex or both" ;;
+esac
 
 ASSET="agentgate_linux_$ARCH.tar.gz"
 BASE="$RELEASES/download/$VERSION"
 TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
+STAGED=""
+trap 'rm -rf "$TMP"; [ -z "$STAGED" ] || rm -f "$STAGED"' 0
+trap 'exit 130' INT
+trap 'exit 143' HUP TERM
 
 echo "Downloading agentgate $VERSION ($ARCH)"
-curl -fsSL -o "$TMP/$ASSET" "$BASE/$ASSET" || fail "download failed: $BASE/$ASSET"
-curl -fsSL -o "$TMP/checksums.txt" "$BASE/checksums.txt" || fail "download failed: checksums.txt"
-(cd "$TMP" && grep " $ASSET\$" checksums.txt | sha256sum -c - >/dev/null) || fail "checksum mismatch; nothing was installed"
+curl -fsSL --connect-timeout 10 --max-time 120 --retry 2 -o "$TMP/$ASSET" "$BASE/$ASSET" || fail "download failed: $BASE/$ASSET"
+curl -fsSL --connect-timeout 10 --max-time 120 --retry 2 -o "$TMP/checksums.txt" "$BASE/checksums.txt" || fail "download failed: checksums.txt"
+EXPECTED=$(awk -v asset="$ASSET" '$2 == asset || $2 == "*" asset { print $1 }' "$TMP/checksums.txt")
+case "$EXPECTED" in
+  '' | *[!a-fA-F0-9]*) fail "missing, duplicate or invalid release checksum" ;;
+esac
+[ "${#EXPECTED}" -eq 64 ] || fail "invalid SHA-256 digest"
+ACTUAL=$(sha256sum "$TMP/$ASSET")
+[ "${ACTUAL%% *}" = "$EXPECTED" ] || fail "checksum mismatch; nothing was installed"
 
-tar -xzf "$TMP/$ASSET" -C "$TMP" agentgate
+tar -xOzf "$TMP/$ASSET" agentgate > "$TMP/agentgate" || fail "archive has no agentgate binary"
+[ -s "$TMP/agentgate" ] || fail "archive contains an empty agentgate binary"
 mkdir -p "$BIN"
-install -m 0755 "$TMP/agentgate" "$BIN/agentgate"
+STAGED=$(mktemp "$BIN/.agentgate.XXXXXX")
+install -m 0755 "$TMP/agentgate" "$STAGED"
+mv -f "$STAGED" "$BIN/agentgate"
+STAGED=""
 echo "Installed $BIN/agentgate"
 
 case ":$PATH:" in
@@ -50,7 +70,7 @@ esac
 
 # Which sessions lead the work: AGENTGATE_LEAD=claude|codex|both, or a question when a terminal is attached.
 LEAD="${AGENTGATE_LEAD:-}"
-if [ -z "$LEAD" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
+if [ -z "$LEAD" ] && [ -r /dev/tty ] && [ -w /dev/tty ] && ( : < /dev/tty ) 2>/dev/null; then
   {
     echo
     echo "Which sessions lead the work?"

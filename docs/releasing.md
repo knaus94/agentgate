@@ -1,58 +1,77 @@
-# Releasing
+# Building and publishing a release
 
 [Русский](ru/releasing.md)
 
-## Publish a version
+## Build a complete archive locally
 
 ```sh
-# 1. update CHANGELOG.md
-git commit -am "chore(release): v0.2.0"
-git tag v0.2.0
-git push origin main v0.2.0
+make check
+npm ci --prefix design-kit --ignore-scripts --no-audit --no-fund
+node design-kit/node_modules/playwright-core/cli.js install chromium
+make design-browser
+make package VERSION=0.14.0
 ```
 
-Pushing a `v*` tag runs [.github/workflows/release.yml](../.github/workflows/release.yml):
+The output is `dist/agentgate-0.14.0.zip` plus its `.sha256` file. It includes source, documentation,
+static Linux amd64/arm64 binaries, `scripts/install-local.sh`, `RELEASE.json` and a full `SHA256SUMS` inventory.
+The packager uses an explicit file list and fixed ZIP timestamps; Git metadata, node_modules, private
+profiles and build caches are excluded. `SOURCE_DATE_EPOCH` can supply the release timestamp.
 
-1. `go vet` and `go test` on the tagged commit;
-2. static builds for `linux/amd64` and `linux/arm64`, with the version stamped in;
-3. `agentgate_linux_<arch>.tar.gz` for each, plus `checksums.txt`;
-4. a GitHub Release with generated notes.
+Extract and validate before distribution:
 
-Nothing is published from a developer machine. A tag that fails its tests publishes nothing.
+```sh
+unzip dist/agentgate-0.14.0.zip
+cd agentgate-0.14.0
+sha256sum -c SHA256SUMS
+sh scripts/install-local.sh --prefix "$HOME/.local/bin" --no-integrations
+```
 
-Version numbers follow semantic versioning: a change to the plan schema, the state format or a command's
-input is a minor version before 1.0 and a major one after.
+Building an archive does not publish anything. Do not label unavailable provider/browser tests as passing;
+record environment limitations with the artifact.
 
-## How users get it
+## Publish through GitHub
 
-First install:
+Update the version, changelogs and release notes, commit all intended new/changed files, and run the checks
+above. After maintainer authorization, pushing a `v*` tag runs
+[release.yml](../.github/workflows/release.yml). The workflow checks formatting, vet, race tests and actual
+Chromium scenarios, builds both platforms, verifies the complete archive/offline installer, and publishes:
+
+- `agentgate_linux_<arch>.tar.gz` and compatibility `claude-dev` archives;
+- `checksums.txt` for updater archives;
+- the complete source-plus-binary ZIP and its SHA-256 file.
+
+A failed gate prevents publication. Model account access and Figma access are external to CI; protocol
+fixtures are not a live provider certification.
+
+## Install and update
+
+The online installer obtains a published release:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/knaus94/agentgate/main/scripts/install.sh | sh
+agentgate update --check
+agentgate update
 ```
 
-Update:
+Automatic update requires a strictly newer valid semantic version. Prerelease precedence is respected and
+build metadata does not make a version newer. Unknown/development versions are not replaced automatically.
+Downloaded assets have bounded size and exact SHA-256 verification; replacement uses a random temporary
+file and atomic rename. The new binary then refreshes installed lead integrations.
 
-```sh
-agentgate update --check   # is there a newer release?
-agentgate update           # download, verify, replace, refresh the /dev command
-```
+Finish or explicitly stop active operations before changing their executable. Check release-specific
+migration notes; forward/backward state compatibility is not a blanket guarantee for every future version.
 
-`update` downloads the archive for the running platform, compares its SHA-256 with `checksums.txt`, replaces
-the binary atomically and runs the new binary's `install` so the `/dev` command matches it. A running task is
-not disturbed: its state format is read by the new binary.
-
-Pin a version: `AGENTGATE_VERSION=v0.2.0 sh install.sh`.
-Install elsewhere: `AGENTGATE_BIN=/usr/local/bin sh install.sh`.
-Release mirror: `AGENTGATE_BASE_URL=https://mirror.example/releases sh install.sh`.
+The installer supports `AGENTGATE_VERSION=v0.14.0`, `AGENTGATE_BIN=/some/bin`, and an authorized
+`AGENTGATE_BASE_URL` release mirror. A pinned install is an explicit selection and can choose an older
+version; the normal `update` command cannot accidentally downgrade a newer local archive.
 
 ## Forks
 
-The release repository is compiled in. Build with your own:
+The module path remains `github.com/knaus94/agentgate`. Override the release repository in linker flags:
 
 ```sh
-go build -ldflags "-X github.com/knaus94/agentgate/internal/update.Repo=you/agentgate \
-                   -X github.com/knaus94/agentgate/internal/update.Version=0.2.0" ./cmd/agentgate
+go build -trimpath -buildvcs=false -ldflags '-X github.com/knaus94/agentgate/internal/update.Repo=you/agentgate -X github.com/knaus94/agentgate/internal/update.Version=0.14.0' ./cmd/agentgate
 ```
 
-and set `REPO` in `scripts/install.sh`.
+The release workflow derives the linker symbol path from `go list -m` and sets the repository from
+`GITHUB_REPOSITORY`. Set the install script's default `REPO` for a permanently distributed fork.

@@ -594,7 +594,7 @@ func TestRouteAndPreviewStartNothing(t *testing.T) {
 	routed, err := Route(f.cfg, plan)
 	must(t, err)
 	raw, _ := json.Marshal(routed)
-	for _, want := range []string{`"mode":"heavy"`, `"api":"opus:high"`, `"web":"astra:high"`, `[["api"],["web"]]`, `"read_only":true`, "opus:high", `"scout":"none: the accepted design"`} {
+	for _, want := range []string{`"mode":"heavy"`, `"api":"opus:high"`, `"web":"opus:high"`, `[["api"],["web"]]`, `"read_only":true`, "opus:high", `"scout":"none: the accepted design"`} {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("route lacks %s: %s", want, raw)
 		}
@@ -670,7 +670,7 @@ func TestDoctorReportsWhatIsMissing(t *testing.T) {
 	if checks["browser tooling"].Required {
 		t.Fatal("browser tooling is optional")
 	}
-	_, err := Install(InstallOptions{})
+	_, err := Install(InstallOptions{Lead: "claude"})
 	must(t, err)
 	checks = map[string]probe{}
 	for _, item := range Doctor()["checks"].([]probe) {
@@ -1332,8 +1332,8 @@ func TestWorkerToolsGoToTheirRolesAndIndexesAreRefreshedOnce(t *testing.T) {
 	if seen["scout"] != "docs+graph" || seen["writer"] != "" || seen["review"] != "graph" {
 		t.Fatalf("each role gets its servers; one without roles is the scout's: %v", seen)
 	}
-	if raw, _ := os.ReadFile(marker); strings.Count(string(raw), "x") != 1 {
-		t.Fatalf("an index is refreshed once per run, before its first reader: %q", raw)
+	if raw, _ := os.ReadFile(marker); strings.Count(string(raw), "x") != 2 {
+		t.Fatalf("an index is refreshed once per operation, before its first reader: %q", raw)
 	}
 }
 

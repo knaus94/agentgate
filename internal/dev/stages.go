@@ -254,7 +254,7 @@ func isolateStaged(cfg *config.Config) bool {
 }
 
 func (g *Gate) stage() *Stage {
-	if g.Epic == nil || g.Integration || g.StageIndex >= len(g.Epic.Stages) {
+	if g.Epic == nil || g.Integration || g.StageIndex < 0 || g.StageIndex >= len(g.Epic.Stages) {
 		return nil
 	}
 	return &g.Epic.Stages[g.StageIndex]
@@ -270,10 +270,9 @@ func (g *Gate) enterStage(resolved *Resolved, baseline Snapshot) error {
 		if err != nil {
 			return err
 		}
-		clash := owners(files)
-		unlock()
-		if len(clash) > 0 {
-			return fmt.Errorf("files are owned by another session's gate: %s", strings.Join(clash, "; "))
+		defer unlock()
+		if err := checkOwnership(files); err != nil {
+			return err
 		}
 	}
 	context := subtract(append(slices.Clone(plan.Context), guidance(files)...), files)
@@ -298,13 +297,18 @@ func (g *Gate) enterStage(resolved *Resolved, baseline Snapshot) error {
 	if g.Manifest, err = manifest(); err != nil {
 		return err
 	}
+	g.AuthorModels = g.authors()
 	g.Writers, g.Reviews, g.ReviewDigest, g.ReviewError = nil, nil, "", ""
 	g.VisualRuns, g.VisualSkip = nil, ""
 	g.Dispositions, g.Resolutions, g.Baselines = map[string]Disposition{}, map[string]string{}, map[string]int{}
 	g.Checks, g.Corrections, g.Round, g.Iteration, g.Boost = nil, nil, nil, 0, 0
 	g.Signals, g.Conflicts, g.Foreign = nil, nil, nil
 	g.ContextPack, g.ScoutNote, g.Final, g.Reported = "", "", nil, false
-	return nil
+	g.Phase = "staged"
+	if g.Integration {
+		g.Phase = "awaiting-review"
+	}
+	return g.save()
 }
 
 // acceptStage closes the present stage and opens what follows: the next stage, the pass over the whole

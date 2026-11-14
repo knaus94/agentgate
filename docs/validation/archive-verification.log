@@ -1,0 +1,50 @@
+ok  	github.com/knaus94/agentgate/cmd/agentgate	1.203s
+ok  	github.com/knaus94/agentgate/design-kit	0.010s
+ok  	github.com/knaus94/agentgate/internal/accounts	0.012s
+?   	github.com/knaus94/agentgate/internal/assets	[no test files]
+ok  	github.com/knaus94/agentgate/internal/config	0.025s
+ok  	github.com/knaus94/agentgate/internal/dev	5.294s
+ok  	github.com/knaus94/agentgate/internal/ops	1.008s
+ok  	github.com/knaus94/agentgate/internal/provider	0.140s
+ok  	github.com/knaus94/agentgate/internal/update	0.066s
+✔ all design commands show help without touching files or starting a process (247.119148ms)
+✔ design argument errors are rejected before side effects (202.533995ms)
+✔ GraphQL names cannot read or overwrite files outside the fixture directory (33.719832ms)
+✔ fixtures make missing data, malformed input and untrusted origins visible (13.907456ms)
+✔ fixture identity is stable across variable key order and each recording replays exactly (9.940049ms)
+✔ upstream HTTP errors never become valid recordings (2.114679ms)
+✔ failed and concurrent exports preserve the last complete design package (0.854206ms)
+✔ export setup failures release their own lock and descriptor (0.868307ms)
+✔ cleanup cannot adopt an arbitrary or recycled child PID (0.193279ms)
+✔ exported inventories detect tampering instead of accepting stale design evidence (2.331583ms)
+✔ Figma URLs and transport selection are explicit (0.465205ms)
+✔ Figma REST pins renders to one version and never sends tokens to the image host (1.140283ms)
+✔ Figma rate limits are explicit and do not trigger a fallback or retry loop (0.276614ms)
+✔ a removed solid background is a measured difference (0.634728ms)
+✔ an unhealthy existing stand is reported and never replaced (3.041563ms)
+✔ owned stands are stopped, including a child that ignores SIGTERM (1387.665542ms)
+✔ recorded fixture subprocess follows the owned stand lifecycle (260.118568ms)
+✔ a nonexistent stand executable fails promptly and restores signal listeners (172.479929ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2410.020705
+Installed <extracted-archive>/installed bin/agentgate
+0.14.0
+
+Next: <extracted-archive>/installed bin/agentgate setup doctor
+Add <extracted-archive>/installed bin to PATH before opening a new lead session.
+{
+  "archive_checksums": "all passed",
+  "file_inventory": "no Git database, node_modules or account profiles",
+  "offline_install": "passed, including path with spaces and embedded checksum",
+  "installed_version": "0.14.0",
+  "fresh_source_build": "passed; byte-identical to included amd64 binary",
+  "fresh_source_go_tests": "all passed",
+  "fresh_source_node_core": "18/18 passed",
+  "corrupt_archive_binary": "installation refused; existing installed binary preserved"
+}

@@ -28,12 +28,14 @@ var reviewSchema = object(map[string]any{"reports": list(object(map[string]any{"
 
 // Change points a reviewer at readable before/after/diff files instead of embedding source in the prompt.
 type Change struct {
-	Path      string `json:"path"`
-	Before    string `json:"before"`
-	After     string `json:"after"`
-	Diff      string `json:"diff"`
-	Generated bool   `json:"generated"`
-	Bytes     int    `json:"diff_bytes"`
+	Path       string `json:"path"`
+	Before     string `json:"before"`
+	After      string `json:"after"`
+	Diff       string `json:"diff"`
+	Generated  bool   `json:"generated"`
+	Bytes      int    `json:"diff_bytes"`
+	BeforeMode uint32 `json:"before_mode,omitempty"`
+	AfterMode  uint32 `json:"after_mode,omitempty"`
 }
 
 func evidence(dir string, from, to Snapshot, files []string) ([]Change, error) {
@@ -48,6 +50,12 @@ func evidence(dir string, from, to Snapshot, files []string) ([]Change, error) {
 		stem := filepath.Join(dir, fmt.Sprint(index))
 		change := Change{Path: path, Before: stem + ".before.txt", After: stem + ".after.txt", Diff: stem + ".diff",
 			Generated: strings.HasPrefix(path, "generated/") || strings.HasPrefix(path, "dist/")}
+		if from[path] != nil {
+			change.BeforeMode = from[path].Mode
+		}
+		if to[path] != nil {
+			change.AfterMode = to[path].Mode
+		}
 		if err := os.WriteFile(change.Before, []byte(from[path].text()), 0o600); err != nil {
 			return nil, err
 		}
@@ -55,7 +63,16 @@ func evidence(dir string, from, to Snapshot, files []string) ([]Change, error) {
 			return nil, err
 		}
 		// diff exits 1 when the files differ; only its output matters here.
-		diff, _ := exec.Command("diff", "-u", "--label", "before/"+path, "--label", "after/"+path, change.Before, change.After).Output()
+		diff, err := exec.Command("diff", "-u", "--label", "before/"+path, "--label", "after/"+path, change.Before, change.After).Output()
+		if err != nil {
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+				return nil, fmt.Errorf("produce review diff for %s: %w", path, err)
+			}
+		}
+		if change.BeforeMode != change.AfterMode {
+			diff = append([]byte(fmt.Sprintf("file mode %04o -> %04o\n", change.BeforeMode, change.AfterMode)), diff...)
+		}
 		if err := os.WriteFile(change.Diff, diff, 0o600); err != nil {
 			return nil, err
 		}
@@ -67,7 +84,12 @@ func evidence(dir string, from, to Snapshot, files []string) ([]Change, error) {
 
 func (g *Gate) contract() string {
 	parts := map[string]any{"brief": g.Plan.Brief, "files": g.Files, "context": g.Context, "streams": g.Plan.Streams,
-		"ui": g.Plan.UI, "checks": g.Plan.Checks, "mode": g.Mode}
+		"ui": g.Plan.UI, "checks": g.Plan.Checks, "mode": g.Mode, "architecture": architectureFor(g.Plan)}
+	ui, uiError := loadUI(g.Plan)
+	parts["ui_contract"] = ui
+	if uiError != nil {
+		parts["ui_error"] = uiError.Error()
+	}
 	// A design that was pulled again is another design, also when it lies at the same path.
 	if designs := g.designDigests(); designs != nil {
 		parts["design"] = designs
@@ -161,19 +183,56 @@ type laneSpec struct {
 
 // authors are the models whose code is under review; none of them may judge it.
 func (g *Gate) authors() []string {
-	var backend, all []string
-	for name, writer := range g.latest() {
-		all = append(all, writer.Route.Model)
-		for _, stream := range g.Plan.Streams {
-			if stream.Name == name && stream.Domain == "backend" {
-				backend = append(backend, writer.Route.Model)
-			}
+	all := slices.Clone(g.AuthorModels)
+	for _, writer := range g.Writers {
+		// Even a failed or superseded writer may have changed the checkout.
+		if writer.Route.Model != "" {
+			all = append(all, writer.Route.Model)
 		}
 	}
-	if len(backend) > 0 {
-		return backend
+	sort.Strings(all)
+	return slices.Compact(all)
+}
+
+func (g *Gate) reviewPolicy(cfg *config.Config) string {
+	return digest(map[string]any{"lanes": cfg.Modes[g.Mode].Review, "excluded": cfg.ReviewersExcluded, "models": cfg.Models})
+}
+
+func (g *Gate) independentReview(cfg *config.Config, review Review) bool {
+	if review.Policy != g.reviewPolicy(cfg) {
+		return false
 	}
-	return all
+	authors := g.authors()
+	for _, lane := range review.Lanes {
+		if lane.Route.Alias == "lead" && len(cfg.Modes[g.Mode].Review) == 0 {
+			continue
+		}
+		if lane.Route.Model == "" || slices.Contains(authors, lane.Route.Model) || slices.Contains(cfg.ReviewersExcluded, lane.Route.Alias) {
+			return false
+		}
+	}
+	return len(review.Lanes) > 0
+}
+
+func (g *Gate) reviewDiversity() map[string]any {
+	if len(g.Reviews) == 0 {
+		return nil
+	}
+	var models, providers []string
+	for _, lane := range g.Reviews[len(g.Reviews)-1].Lanes {
+		if lane.Route.Model != "" {
+			models = append(models, lane.Route.Model)
+			providers = append(providers, lane.Route.Provider)
+		}
+	}
+	sort.Strings(models)
+	sort.Strings(providers)
+	models, providers = slices.Compact(models), slices.Compact(providers)
+	result := map[string]any{"models": models, "providers": providers, "authors_excluded": g.authors()}
+	if len(models) > 0 && len(providers) < 2 {
+		result["note"] = "The completed review used one provider; it did not provide cross-provider validation."
+	}
+	return result
 }
 
 func (g *Gate) lanes(cfg *config.Config, subs *substitutions, quality bool) ([]laneSpec, func(config.Route) bool, error) {
@@ -239,8 +298,8 @@ type ReviewInput struct {
 // ReviewTask checks the change before starting its reviewers. Browser observations used as acceptance
 // evidence precede their reviewer; otherwise the browser pass can run alongside code review.
 func ReviewTask(cfg *config.Config, gate *Gate, input ReviewInput) (any, error) {
-	if !gate.active() || gate.Phase == "held" {
-		return nil, fmt.Errorf("cannot review a gate that is %s", gate.Phase)
+	if err := gate.readyForReview(); err != nil {
+		return nil, err
 	}
 	for _, writer := range gate.latest() {
 		if writer.Status == "RUNNING" {
@@ -304,7 +363,8 @@ func ReviewTask(cfg *config.Config, gate *Gate, input ReviewInput) (any, error) 
 	}
 	accepted := gate.accepted()
 	if !input.Recheck && input.LeadReview == nil && gate.ReviewDigest == content && len(gate.Reviews) > 0 &&
-		gate.Reviews[len(gate.Reviews)-1].Contract == contract && gate.Reviews[len(gate.Reviews)-1].QualityDigest == quality.fingerprint() {
+		gate.Reviews[len(gate.Reviews)-1].Contract == contract && gate.Reviews[len(gate.Reviews)-1].QualityDigest == quality.fingerprint() &&
+		gate.independentReview(cfg, gate.Reviews[len(gate.Reviews)-1]) {
 		last := gate.Reviews[len(gate.Reviews)-1]
 		pending := false
 		for _, finding := range accepted {
@@ -403,7 +463,7 @@ func ReviewTask(cfg *config.Config, gate *Gate, input ReviewInput) (any, error) 
 	for _, finding := range gate.Findings() {
 		known[finding.ID] = finding
 	}
-	review := Review{Iteration: gate.Iteration, Digest: content, Contract: contract, Dir: dir, QualityDigest: quality.fingerprint()}
+	review := Review{Iteration: gate.Iteration, Digest: content, Contract: contract, Dir: dir, QualityDigest: quality.fingerprint(), Policy: gate.reviewPolicy(cfg)}
 	for _, finding := range accepted {
 		review.Rechecked = append(review.Rechecked, finding.ID)
 	}
@@ -435,7 +495,7 @@ func ReviewTask(cfg *config.Config, gate *Gate, input ReviewInput) (any, error) 
 	if visualStage != nil {
 		jobs = append(jobs, func() error { visualError = visualStage.run(); return nil })
 	}
-	failure := firstError(parallel(len(jobs), limit+1, func(index int) error { return jobs[index]() }))
+	failure := firstError(parallel(len(jobs), limit, func(index int) error { return jobs[index]() }))
 
 	if visualStage != nil {
 		if visualError == nil && failure == nil {
@@ -448,7 +508,9 @@ func ReviewTask(cfg *config.Config, gate *Gate, input ReviewInput) (any, error) 
 		}
 	}
 	if failure == nil {
-		if after, _, _ := gate.contentDigest(); after != content {
+		if after, _, err := gate.contentDigest(); err != nil {
+			failure = err
+		} else if after != content {
 			failure = errors.New("files changed during the review; its evidence is stale")
 		}
 		currentQuality, err := gate.qualityInputs(cfg)
@@ -551,7 +613,7 @@ func (g *Gate) runLane(cfg *config.Config, spec laneSpec, index int, dir string,
 		"route": spec.Route.String(), "recheck": recheck, "decisions": g.Dispositions, "quality": quality.fingerprint()})
 	cache := filepath.Join(g.dir(), "review-cache", key+".json")
 	lane := LaneRun{}
-	if raw, err := os.ReadFile(cache); packet["refresh"] != true && err == nil && json.Unmarshal(raw, &lane) == nil {
+	if raw, err := os.ReadFile(cache); packet["refresh"] != true && err == nil && json.Unmarshal(raw, &lane) == nil && !skip(lane.Route) {
 		return lane, nil // a finished lane of a partly failed review is kept
 	}
 	scoped := map[string]any{"axes": spec.Axes, "scope": spec.Scope, "scope_files": spec.Files, "recheck": relevant}
@@ -581,10 +643,10 @@ func (g *Gate) runLane(cfg *config.Config, spec laneSpec, index int, dir string,
 	prompt := assets.Prompt("review") + "\nMode: " + g.Mode + "; your axes: " + strings.Join(spec.Axes, ", ") + ".\nRead " + path + ".\n"
 	// The reviewer that raised a finding verifies its fix in its own session: it only needs the delta.
 	route := spec.Route
-	if previous := g.previousLane(spec); previous != nil {
+	if previous := g.previousLane(cfg, spec); previous != nil {
 		lane.Dir, lane.Session = previous.Dir, previous.Session
-		route.Account = previous.Route.Account
-		route.Effort = config.Lower(route.Effort) // a recheck reads the delta, not the whole change
+		route = previous.Route
+		route.Effort, route.SubstitutedFrom = config.Lower(spec.Route.Effort), "" // a recheck reads the delta, not the whole change
 		prompt = "The task you reviewed was corrected. A fresh packet is at " + path + ": start from since_last_review and recheck, " +
 			"resolve or keep every finding listed there, report new defects of the correction, and return the same JSON schema.\n"
 	}
@@ -620,6 +682,9 @@ func (g *Gate) runLane(cfg *config.Config, spec laneSpec, index int, dir string,
 	}
 	lane.Quality = answer.Quality
 	lane.Route, lane.Session = used, result.Session
+	if result.Dir != "" {
+		lane.Dir = result.Dir
+	}
 	if err := ops.Checkpoint(); err != nil {
 		return lane, err
 	}
@@ -627,14 +692,15 @@ func (g *Gate) runLane(cfg *config.Config, spec laneSpec, index int, dir string,
 	return lane, nil
 }
 
-func (g *Gate) previousLane(spec laneSpec) *LaneRun {
+func (g *Gate) previousLane(cfg *config.Config, spec laneSpec) *LaneRun {
 	if len(g.Reviews) == 0 {
 		return nil
 	}
 	lanes := g.Reviews[len(g.Reviews)-1].Lanes
 	for index := range lanes {
 		lane := &lanes[index]
-		if slices.Equal(lane.Axes, spec.Axes) && lane.Scope == spec.Scope && lane.Route.Model == spec.Route.Model && lane.Session != "" {
+		if slices.Equal(lane.Axes, spec.Axes) && lane.Scope == spec.Scope && lane.Session != "" &&
+			permittedContinuation(cfg, spec.Route, lane.Route) && !slices.Contains(g.authors(), lane.Route.Model) && !slices.Contains(cfg.ReviewersExcluded, lane.Route.Alias) {
 			return lane
 		}
 	}
@@ -799,8 +865,10 @@ func Triage(cfg *config.Config, gate *Gate, input TriageInput) (any, error) {
 		if item.Files, err = cleanPaths(item.Files); err != nil {
 			return nil, err
 		}
-		if clash := owners(item.Files); len(clash) > 0 {
-			return nil, fmt.Errorf("files are owned by another session's gate: %s", strings.Join(clash, "; "))
+		if gate.Worktree == "" {
+			if err := checkOwnership(item.Files); err != nil {
+				return nil, err
+			}
 		}
 		gate.Dispositions[item.ID] = item
 	}

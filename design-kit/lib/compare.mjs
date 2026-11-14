@@ -159,8 +159,12 @@ export function compare(spec, page, map = {}, limits = defaults) {
       if (differs) report(node, actual, 'radius', `radius ${[...new Set(design)].join('/')} → ${[...new Set(actual.radius)].join('/')}`, 25);
     }
     const fill = node.fills?.length === 1 && node.fills[0].color ? node.fills[0] : null;
-    if (fill && actual.background && fill.opacity >= 1 && actual.background.a >= 1 && colourGap(fill.color, actual.background) > limits.colour) {
-      report(node, actual, 'colour', `background ${fill.color} → ${hexOf(actual.background)}`, 35);
+    if (fill && (fill.opacity ?? 1) >= 1) {
+      if (!actual.background || actual.background.a < 1) {
+        report(node, actual, 'colour', `background ${fill.color} → ${actual.background ? `opacity ${actual.background.a}` : 'transparent'}`, 35);
+      } else if (colourGap(fill.color, actual.background) > limits.colour) {
+        report(node, actual, 'colour', `background ${fill.color} → ${hexOf(actual.background)}`, 35);
+      }
     }
     if (node.stroke && typeof node.stroke.weight === 'number') {
       const width = actual.border?.width || 0;

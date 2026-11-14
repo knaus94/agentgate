@@ -176,10 +176,15 @@ func Consult(cfg *config.Config, input ConsultInput) (any, error) {
 		return nil, err
 	}
 	routes := make([]config.Route, len(input.Lanes))
+	names := map[string]bool{}
 	for index, lane := range input.Lanes {
-		if strings.TrimSpace(lane.Name) == "" || strings.TrimSpace(lane.Question) == "" {
-			return nil, errors.New("each lane needs a name and a bounded question")
+		if !safeName.MatchString(lane.Name) || strings.TrimSpace(lane.Question) == "" {
+			return nil, errors.New("each lane needs a safe name (letters, numbers, dot, dash or underscore) and a bounded question")
 		}
+		if names[lane.Name] {
+			return nil, fmt.Errorf("duplicate consultation lane %q", lane.Name)
+		}
+		names[lane.Name] = true
 		spec := lane.Route
 		if spec == "" {
 			spec = cfg.Consultant
@@ -207,7 +212,7 @@ func Consult(cfg *config.Config, input ConsultInput) (any, error) {
 		if err != nil {
 			return err
 		}
-		answers[index] = map[string]any{"name": lane.Name, "route": used, "answer": result.Answer}
+		answers[index] = map[string]any{"name": lane.Name, "route": used, "answer": result.Answer, "artifacts": result.Dir}
 		return nil
 	})
 	if err := firstError(errs); err != nil {

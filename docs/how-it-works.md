@@ -26,7 +26,7 @@ Every stage exists because skipping it costs more than running it.
 | 3 | Design | two top models, independently | Heavy and ultra only. Two designs take the time of one and show where the real decision is. The lead accepts one. A critique (ultra) and a revision continue the architect's own session: the code is already read |
 | 4 | Write | one writer per stream | Writers run the declared checks themselves, so the first thing the gate sees is code its author already tested |
 | 5 | Check | the declared commands | Runs before any reviewer. Seconds, against minutes and quota: code that fails its checks is not reviewed |
-| 6 | Review | models that did not write the code | The independent judgement. Two vendors in every mode above light |
+| 6 | Review | models that did not write the code | The independent judgement. Two vendors in the default mixed-provider routes above light; actual substitutions are reported |
 | 7 | Triage | the lead | A finding is a claim, not a fact. The lead assesses the reviewer's cited evidence and sends technical uncertainty back to a specialist |
 | 8 | Correct | the same writers, same sessions | Failing checks and accepted findings go back to whoever wrote the code, with its context intact |
 | 9 | Finish | the gate | Refuses unless the review is current, the checks pass and nothing blocks |
@@ -41,7 +41,14 @@ default (one optional revision, then the lead decides).
 
 ## Where the plan lives
 
-The lead writes the plan as JSON and saves it with `agentgate plan save <name>`:
+`agentgate prepare --file request.json` delegates repository discovery and plan preparation to a read-only
+worker and saves the result. The lead checks scope and authorizations. To save an explicitly edited plan:
+
+```sh
+agentgate plan save wallet --file plan.json
+```
+
+The saved files are:
 
 ```
 <repository>/.agentgate/plans/<name>/plan.json   what the tool runs
@@ -49,8 +56,10 @@ The lead writes the plan as JSON and saves it with `agentgate plan save <name>`:
                                                   their writers and files, checks, the accepted design
 ```
 
-Every later command takes `--plan <name>`. Saving again replaces both files, so they always show the plan that
-will run. The directory is yours to commit or to ignore; the gate never counts it as part of a change.
+`route`, `architecture`, `launch` and `replan` accept `--plan <name>` instead of a plan file. `plan save` can
+also read another saved plan with `--plan <name>`. Other commands use their own input schemas; for example,
+`review --file review.json` accepts a review request, not a plan. Saving again replaces the plan and its brief.
+The directory is yours to commit or to ignore; the gate does not count these notes as part of a change.
 
 To have the same plans on every computer, keep the directory in a synced folder:
 
@@ -99,19 +108,29 @@ the axis from turning into a style campaign.
 
 A task is a *gate*: one JSON state file per lead session and checkout, under `~/.local/state/agentgate/`.
 
+```mermaid
+stateDiagram-v2
+    direction TB
+    state "awaiting-review" as awaiting_review
+    implementing --> awaiting_review: writers finish
+    awaiting_review --> reviewed: review recorded
+    reviewed --> correcting: accepted findings
+    correcting --> awaiting_review: correction finishes
+    reviewed --> complete: gate accepts finish
 ```
-implementing ──▶ awaiting-review ──▶ reviewed ──▶ complete
-                        ▲               │
-                        └── correcting ◀┘        held / cancelled from any active phase
-```
+
+Active work can also be held or cancelled. An interrupted writer round retains its completed streams;
+after explicitly resuming a hold, `agentgate task continue` retries the unfinished streams.
 
 When the gate opens it stores the content of every owned file as it was before the task, including your
 uncommitted edits. From then on:
 
 - A **review** is bound to a digest of the code and of the task contract. Edit a file, or change the brief, and
   the review no longer counts.
-- A **check** result is bound to the files it declared as inputs, or to the whole task when it declared none.
-  Checks run before reviewers; a failing check sends the task back to its writers without a review.
+- A **check** result is bound to the files it declared as inputs. With no declared inputs, freshness also
+  covers the repository's HEAD and changed/untracked files, so an edited sibling dependency invalidates it.
+  Checks run before reviewers; a failing check sends the task back to its writers without a review. A failure
+  observed before the task is recorded for diagnosis; it does not waive the requirement for a passing check.
 - **Findings** keep their ids across rounds. A defect that comes back reopens under the same id; it cannot be
   renamed away.
 - `finish` succeeds only when the review is current, every declared check has a current passing result, no
@@ -130,11 +149,18 @@ Every worker is started through `bwrap`:
 - `/tmp` and `/run` are private and empty;
 - the worker's own lane directory is writable (its logs, its session);
 - a writer additionally gets the checkout writable, and the shared board;
-- no MCP servers, plugins, user settings or hooks are loaded.
+- unrelated lead integrations are not automatically loaded; explicitly configured worker MCP tools and
+  their declared writable directories are separate permissions.
 
-So a reviewer cannot change code even if it tries, and a writer cannot touch anything outside the repository.
-File ownership *between* writers is enforced by assignment and audit, not by the filesystem: after each round
-the gate compares the checkout with its manifest and reports any change outside the task's files.
+An ordinary reviewer receives the checkout read-only. Writers can write the checkout, their lane, the
+shared board and any explicitly granted extension directories. File ownership *between* writers is enforced
+by assignment and audit, not by per-file mounts: after each round the gate compares the checkout with its
+manifest and reports changes outside the task's files.
+
+The host read-only mount still allows broad reads, and network access remains available for providers and
+configured tools. AgentGate masks its lead-private browser directory, but this is not complete secrecy or
+isolation from hostile code. Declared checks and extensions also have executable authority; see the
+[security and trust model](../SECURITY.md) before choosing them.
 
 The provider's own sandbox is switched off inside `bwrap`: nesting a second one fails on hardened kernels.
 

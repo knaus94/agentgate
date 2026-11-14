@@ -1,0 +1,18 @@
+node --test --test-concurrency=1 design-kit/tests/workflow.test.mjs
+▶ layout measurements do not hide unpainted root geometry or an absent border
+  ✔ the selected root still has a measurable height without a fill (0.427938ms)
+  ✔ a missing border differs from the reference border (0.092522ms)
+✔ layout measurements do not hide unpainted root geometry or an absent border (1.56535ms)
+✔ explicit CSS mappings keep overlapping artwork distinct and expose real offsets (380.913208ms)
+✔ modern CSS colours remain measurable as painted sRGB boxes (182.440806ms)
+✔ section catalogues expose content nodes without trying to render a section (2.045786ms)
+✔ serving fixtures never creates a missing directory in a read-only package (31.202427ms)
+✔ real layout lifecycle: new page, overrides, baseline drift, errors and cancellation (25927.594563ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 26587.586695

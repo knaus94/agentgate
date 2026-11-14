@@ -41,7 +41,7 @@ func newFixture(t *testing.T) *fixture {
 	t.Setenv("AGENTGATE_SESSION", "fixture-session")
 	isolateHomes(t)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
-	os.Unsetenv(provider.WorkerEnv)
+	t.Setenv(provider.WorkerEnv, "")
 	previousRoot, previousRun := Root, provider.Run
 	Root = func() string { return filepath.Join(root, "state") }
 	f := &fixture{t: t, real: previousRun}
@@ -622,7 +622,7 @@ func TestLightModeIsReviewedByTheLead(t *testing.T) {
 	}
 }
 
-func TestBaselineFailureDoesNotHoldTheTaskHostage(t *testing.T) {
+func TestBaselineFailureIsRecordedButDoesNotWaiveCurrentFailures(t *testing.T) {
 	f := newFixture(t)
 	plan := f.plan("change the line")
 	plan.Checks = []Check{{Argv: []string{"false"}, Baseline: true}, {Argv: []string{"sh", "-c", "exit 3"}}}
@@ -631,10 +631,13 @@ func TestBaselineFailureDoesNotHoldTheTaskHostage(t *testing.T) {
 	must(t, err)
 	receipts := result.(*CheckResult)
 	if !receipts.Failed || !receipts.Receipts[0].Preexisting || receipts.Receipts[1].Preexisting {
-		t.Fatalf("only the check that was red before the task is excused: %+v", receipts)
+		t.Fatalf("only the check that was red before the task is marked preexisting: %+v", receipts)
+	}
+	if passed(&receipts.Receipts[0]) {
+		t.Fatal("a preexisting nonzero exit code is not a passing verification result")
 	}
 	f.do("review", func() (any, error) { return ReviewTask(f.cfg, Current(), ReviewInput{SkipChecks: true}) })
-	f.fails("finish", "exit 3", func() (any, error) { return Finish(f.cfg, Current(), FinishInput{Summary: "done"}) })
+	f.fails("finish", "false", func() (any, error) { return Finish(f.cfg, Current(), FinishInput{Summary: "done"}) })
 }
 
 func TestAnotherSessionCannotClaimOwnedFiles(t *testing.T) {
@@ -699,7 +702,7 @@ func TestInstallIsIdempotentAndKeepsOtherHooks(t *testing.T) {
 	settings := `{"model":"opus","hooks":{"Stop":[{"hooks":[{"type":"command","command":"/old/claude-dev quality-hook"},` +
 		`{"type":"command","command":"other-tool stop"}]}]}}`
 	must(t, os.WriteFile(filepath.Join(dir, "settings.json"), []byte(settings), 0o600))
-	_, err := Install(InstallOptions{})
+	_, err := Install(InstallOptions{Lead: "claude"})
 	must(t, err)
 	second, err := Install(InstallOptions{})
 	must(t, err)

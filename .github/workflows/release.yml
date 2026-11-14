@@ -38,18 +38,29 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           version="${GITHUB_REF_NAME#v}"
-          flags="-s -w -X github.com/${GITHUB_REPOSITORY}/internal/update.Version=${version} -X github.com/${GITHUB_REPOSITORY}/internal/update.Repo=${GITHUB_REPOSITORY}"
-          mkdir -p dist
+          module="$(go list -m)"
+          flags="-s -w -X ${module}/internal/update.Version=${version} -X ${module}/internal/update.Repo=${GITHUB_REPOSITORY}"
           for arch in amd64 arm64; do
-            GOOS=linux GOARCH="$arch" go build -trimpath -ldflags "$flags" -o "dist/$arch/agentgate" ./cmd/agentgate
-            tar -C "dist/$arch" -czf "dist/agentgate_linux_${arch}.tar.gz" agentgate
+            mkdir -p "dist/linux-$arch"
+            GOOS=linux GOARCH="$arch" go build -trimpath -buildvcs=false -ldflags "$flags" -o "dist/linux-$arch/agentgate" ./cmd/agentgate
+            tar -C "dist/linux-$arch" -czf "dist/agentgate_linux_${arch}.tar.gz" agentgate
             # The tool was called claude-dev. An install under that name updates by fetching an archive of
             # that name; it gets this same binary and renames itself on the next `install`.
-            cp "dist/$arch/agentgate" "dist/$arch/claude-dev"
-            tar -C "dist/$arch" -czf "dist/claude-dev_linux_${arch}.tar.gz" claude-dev
+            cp "dist/linux-$arch/agentgate" "dist/linux-$arch/claude-dev"
+            tar -C "dist/linux-$arch" -czf "dist/claude-dev_linux_${arch}.tar.gz" claude-dev
           done
+          python3 scripts/package.py --version "$version"
           (cd dist && sha256sum agentgate_linux_*.tar.gz claude-dev_linux_*.tar.gz > checksums.txt)
+      - name: Verify complete archive
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          scratch="$(mktemp -d)"
+          unzip -q "dist/agentgate-${version}.zip" -d "$scratch"
+          cd "$scratch/agentgate-${version}"
+          sha256sum --quiet -c SHA256SUMS
+          sh scripts/install-local.sh --prefix "$scratch/local bin" --no-integrations
+          "$scratch/local bin/agentgate" --version
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/agentgate_linux_*.tar.gz dist/claude-dev_linux_*.tar.gz dist/checksums.txt --generate-notes --verify-tag
+        run: gh release create "$GITHUB_REF_NAME" dist/agentgate_linux_*.tar.gz dist/claude-dev_linux_*.tar.gz dist/agentgate-*.zip dist/agentgate-*.zip.sha256 dist/checksums.txt --generate-notes --verify-tag

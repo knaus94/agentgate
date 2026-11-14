@@ -259,11 +259,15 @@ func (g *Gate) prepareVisual(cfg *config.Config, input VisualInput, now Snapshot
 		return filepath.Join(shots, name), nil
 	}
 	stage := &visualStage{}
+	authors := g.authors()
+	independent := func(route config.Route) bool {
+		return slices.Contains(authors, route.Model) || slices.Contains(cfg.ReviewersExcluded, route.Alias)
+	}
 	stage.run = func() error {
 		prompt := assets.Prompt("visual") + "\nRead the packet at " + path + ". Screenshots you take are saved in " + shots + ".\n"
 		result, _, err := subs.invoke(cfg, provider.Call{Route: cfg.MustRoute(cfg.VisualReviewer), Prompt: prompt, Dir: filepath.Join(dir, "reviewer"),
 			Schema: visualSchema, Timeout: seconds(timeout), ReadDirs: []string{dir}, Writable: []string{browser},
-			MCP: map[string]provider.MCPServer{"playwright": {Command: node, Args: args, Env: env, Tools: browserTools}}}, nil)
+			MCP: map[string]provider.MCPServer{"playwright": {Command: node, Args: args, Env: env, Tools: browserTools}}}, independent)
 		if err != nil {
 			return err
 		}

@@ -1,7 +1,9 @@
 # agentgate reference
 
-Every command prints JSON. Inputs are read from `--file <path>`, `--file -` (stdin) or `--plan <name>` (a plan
-saved with `plan save`). Unknown fields are rejected.
+Lead protocol commands print JSON. Help, guides, saved-plan briefs and human-readable tables print text.
+Structured inputs are read from `--file <path>` or `--file -` (stdin); commands expecting a plan also accept
+`--plan <name>`. Exactly one JSON object is required; unknown fields and trailing values are rejected.
+`parse` and `preview` instead read raw request text. Use `agentgate help <command>` for command syntax.
 
 ## Commands
 
@@ -27,13 +29,13 @@ saved with `plan save`). Unknown fields are rejected.
 | `finish` | `{summary, ...}` | close the task |
 | `land` | `{how?}` | isolated task only: bring it into the checkout — `apply` (default), `commit`, `branch` or `drop` |
 | `hold` | `{reason, cancelled?}` | park the task |
-| `resume`, `stop`, `status` | — | lifecycle and observation |
+| `resume`, `continue`, `stop`, `status` | — | resume a hold, retry unfinished streams, cancel and observe |
 | `prepare` | `{request, name?, context?, notes?, refresh_designs?}` | read-only worker drafts and saves the plan; reuses an active task's selected packages unless refresh_designs is true |
 | `replan` | complete plan with `update` | replace an idle single-pass task contract while preserving its original baseline |
-| `watch [--all] [--once]` | — | the user's interactive panel; `--once` prints it as text |
+| `watch [--all] [--once] [--json] [--no-color]` | — | the user's interactive panel; `--once` prints text, `--json` a structured snapshot |
 
-Setup: `doctor`, `install [--zed] [--uninstall]`, `update [--check]`, `modes`,
-`config show|path|init|set <key> <value>|unset <key>|extensions`, `prune`, `version`,
+Setup: `doctor`, `install [--lead claude|codex|both] [--zed] [--uninstall]`, `update [--check]`, `modes`,
+`config show|path|init|validate|set <key> <value>|unset <key>|extensions|profiles|profile <name>`, `prune`, `version`,
 `accounts [--json] | discover [--save] | add <name> <claude|codex> <home> [--paid] | remove <name> | reset <name>`
 (several subscriptions: limits, load spreading and failover are automatic).
 
@@ -138,7 +140,7 @@ covered by a stage. Each stage has `name`, `goal`, `covers`, `streams`, and opti
   raises the writer's effort for one hard stream, up to the mode's ceiling; leave it out otherwise.
 - `checks`: an argv array, or an object. `inputs` are globs (`**` crosses directories) whose content decides
   whether a result is still current; without them any change to the task's files invalidates it.
-  `baseline: true` runs the check before writing, and a check that was already failing does not block later.
+  `baseline: true` records the check before writing for diagnosis. A later nonzero result always blocks; a pre-existing failure is not a passing verification receipt.
   `no_reuse: true` for checks that depend on external state.
   `kind`: `test`, `typecheck`, `lint`, `build`, `measurement`, `runtime` or `command` (default).
 - `requirements`: acceptance criteria for single-pass and staged plans, each `{id, text, method?}`.

@@ -33,11 +33,13 @@ A good stage leaves the declared checks green and is small enough to read in one
 ## How a stage runs
 
 - **Its own mode.** The mode is computed per stage from the stage's assessment, so a data migration can run as
-  ultra and the form after it as medium. Expensive models work where the risk is.
+  ultra and the form after it as medium. Routes follow that stage's assessment and configured mode table.
 - **Fresh workers.** Writers and reviewers of a stage start with a clean context. They are given the whole
   brief, the stage's goal and requirements, what the earlier stages delivered (their summaries and the
   contracts their writers left), and the list of later stages, which are not theirs to do.
-- **Its own review.** Reviewers see the stage's change only, measured from where the previous stage ended.
+- **Its own review.** Reviewers see the stage's change, measured from where the previous stage ended.
+  Reviewer independence still excludes models that authored earlier stages or failed partial attempts;
+  starting a new stage does not erase the task's author history.
 - **Kept on acceptance.** The stage's reviews, findings, decisions and check receipts are archived with the
   task, so the history of one stage is not overwritten by the next.
 
@@ -82,8 +84,8 @@ Reviewing an existing change (`/dev review`) has no size limit.
 
 ## What it costs
 
-- More reviews in number — one per stage and one for the whole — but each is small, findings arrive early,
-  and a correction round touches one stage instead of everything.
+- Each stage has its own review, with a whole-change review when the integration rule above requires it.
+  Stage reviews bound the diff under consideration; the integration review still covers the entire change.
 - Stages run one after another. Work that would have run as parallel streams of one task takes longer when it
   is put into separate stages; streams inside a stage still run in parallel.
 

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -15,6 +16,18 @@ import { compare } from '../lib/compare.mjs';
 
 const check = fileURLToPath(new URL('../bin/check.mjs', import.meta.url));
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Test packages use the same complete inventory contract as actual Figma exports.
+function sealTestPackage(dir) {
+  const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json')));
+  fs.writeFileSync(path.join(dir, 'brief.md'), `Test design ${manifest.versionTag}\n`);
+  if (!fs.existsSync(path.join(dir, 'data', 'nodes.json'))) fs.writeFileSync(path.join(dir, 'data', 'nodes.json'), '{}');
+  const hash = (data) => crypto.createHash('sha256').update(data).digest('hex');
+  const files = Object.fromEntries(['brief.md', 'data/nodes.json', 'data/spec.json', 'frame.png'].map((name) =>
+    [name, hash(fs.readFileSync(path.join(dir, name)))]));
+  const digest = hash(Object.keys(files).sort().map((name) => `${name}:${files[name]}`).join('\n'));
+  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ ...manifest, files, digest }));
+}
 
 test('layout measurements do not hide unpainted root geometry or an absent border', async (t) => {
   const spec = { frame: { width: 200, height: 100 }, nodes: [
@@ -63,6 +76,28 @@ test('explicit CSS mappings keep overlapping artwork distinct and expose real of
     });
     const pixels = await page.evaluate(diffImages, pictures);
     assert.ok(pixels.ratio >= 0.5, 'missing half of the image must not be cropped out of the difference');
+  } finally {
+    await browser.close();
+  }
+});
+
+test('modern CSS colours remain measurable as painted sRGB boxes', async () => {
+  const browser = await openBrowser();
+  try {
+    const page = await browser.newPage();
+    await page.setContent('<main id="root"><div id="oklch" style="width:40px;height:40px;background:oklch(0.5 0 0)"></div><div id="p3" style="width:40px;height:40px;background:color(display-p3 1 0 0 / 0.5)"></div></main>');
+    const seen = await page.evaluate(readPage, '#root');
+    const grey = seen.boxes.find((box) => box.where === 'div#oklch');
+    assert.equal(grey.painted, true);
+    assert.ok(grey.background.r >= 98 && grey.background.r <= 100);
+    assert.equal(grey.background.r, grey.background.g);
+    assert.equal(grey.background.g, grey.background.b);
+    const red = seen.boxes.find((box) => box.where === 'div#p3');
+    assert.equal(red.painted, true);
+    assert.equal(red.background.r, 255);
+    assert.equal(red.background.g, 0);
+    assert.equal(red.background.b, 0);
+    assert.ok(Math.abs(red.background.a - 0.5) < 0.01);
   } finally {
     await browser.close();
   }
@@ -150,7 +185,7 @@ process.on('SIGTERM',()=>server.close(()=>process.exit(0)));
 `);
   fs.writeFileSync(path.join(dir, '.agentgate.json'), JSON.stringify({ design: { stand: { command: [process.execPath, 'server.mjs'], ready: url, ready_timeout_s: 5 } } }));
   fs.writeFileSync(path.join(screen, 'screen.json'), JSON.stringify({ url: '/page', root: '#old', viewport: '400x300' }));
-  fs.writeFileSync(path.join(pkg, 'manifest.json'), JSON.stringify({ digest: 'design-v1', screen: { width: 400, height: 300 } }));
+  fs.writeFileSync(path.join(pkg, 'manifest.json'), JSON.stringify({ versionTag: 'design-v1', screen: { width: 400, height: 300 } }));
   fs.writeFileSync(path.join(pkg, 'data', 'spec.json'), JSON.stringify({ frame: { name: 'Panel', width: 200, height: 100 }, nodes: [
     { id: 'panel', ref: 'panel', name: 'Panel', box: [0, 0, 200, 100], fills: [{ color: '#112233' }], radius: 0 },
   ] }));
@@ -179,7 +214,9 @@ process.on('SIGTERM',()=>server.close(()=>process.exit(0)));
     assert.equal(fs.existsSync(path.join(screen, 'fixtures')), false, 'layout created fixtures despite not recording');
   }
   async function run(args, expected) {
-    const child = spawn(process.execPath, [check, screen, '--root', '#panel', '--url', '/page', ...args], { cwd: dir });
+    sealTestPackage(pkg);
+    const defaults = [...(args.includes('--root') ? [] : ['--root', '#panel']), ...(args.includes('--url') ? [] : ['--url', '/page'])];
+    const child = spawn(process.execPath, [check, screen, ...defaults, ...args], { cwd: dir });
     let output = '';
     child.stdout.on('data', (data) => { output += data; });
     child.stderr.on('data', (data) => { output += data; });
@@ -205,16 +242,16 @@ process.on('SIGTERM',()=>server.close(()=>process.exit(0)));
   fs.writeFileSync(pageFile, html(240));
   await run(['--baseline', baseline], 1);
   fs.writeFileSync(pageFile, html(220));
-  fs.writeFileSync(path.join(pkg, 'manifest.json'), JSON.stringify({ digest: 'design-v2' }));
+  fs.writeFileSync(path.join(pkg, 'manifest.json'), JSON.stringify({ versionTag: 'design-v2' }));
   await run(['--baseline', baseline], 1);
   await run(['--baseline', path.join(dir, 'missing.json')], 1);
-  await run(['--root', '#missing'], 2);
+  assert.match(await run(['--root', '#missing'], 2), /no element matches #missing/);
   const blockedOut = path.join(dir, 'not-a-directory');
   fs.writeFileSync(blockedOut, 'file');
   await run(['--out', blockedOut], 2);
 
   fs.writeFileSync(pageFile, mobileHTML);
-  fs.writeFileSync(path.join(pkg, 'manifest.json'), JSON.stringify({ digest: 'mobile-v1', screen: { width: 390, height: 844 } }));
+  fs.writeFileSync(path.join(pkg, 'manifest.json'), JSON.stringify({ versionTag: 'mobile-v1', screen: { width: 390, height: 844 } }));
   fs.writeFileSync(path.join(pkg, 'data', 'spec.json'), JSON.stringify({ frame: { name: 'Mobile content', width: 390, height: 100 }, nodes: [
     { id: 'shell', ref: 'shell', name: 'Content including padding', box: [0, 0, 390, 100], fills: [{ color: '#112233' }], radius: 0 },
   ] }));
@@ -232,7 +269,7 @@ process.on('SIGTERM',()=>server.close(()=>process.exit(0)));
   const mapping = path.join(dir, 'ambiguous-map.json');
   fs.writeFileSync(mapping, JSON.stringify({ select: { shell: 'main, section' } }));
   await run(['--root', '#shell', '--device', 'mobile', '--map', mapping, '--write-baseline', baseline], 2);
-  fs.writeFileSync(path.join(pkg, 'manifest.json'), JSON.stringify({ digest: 'tablet-v1', screen: { width: 768, height: 1024 } }));
+  fs.writeFileSync(path.join(pkg, 'manifest.json'), JSON.stringify({ versionTag: 'tablet-v1', screen: { width: 768, height: 1024 } }));
   fs.writeFileSync(path.join(pkg, 'data', 'spec.json'), JSON.stringify({ frame: { name: 'Tablet content', width: 768, height: 100 }, nodes: [
     { id: 'shell', ref: 'shell', name: 'Content including padding', box: [0, 0, 768, 100], fills: [{ color: '#112233' }], radius: 0 },
   ] }));

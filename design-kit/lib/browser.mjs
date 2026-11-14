@@ -4,18 +4,19 @@ import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { writeJSON } from './files.mjs';
 
 const require = createRequire(import.meta.url);
 
 // The Figma session is a browser profile owned by this tool. Nobody exports or passes cookies: the user signs
 // in once in a window, and every later run reuses the profile. agentgate hides `private/` from its workers.
-export const figmaHome = process.env.AGENTGATE_FIGMA_HOME || path.join(os.homedir(), '.local', 'share', 'agentgate', 'private', 'figma');
+export const figmaHome = process.env.AGENTGATE_FIGMA_HOME || path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'), 'agentgate', 'private', 'figma');
 export const profileDir = path.join(figmaHome, 'profile');
 const sessionFile = path.join(figmaHome, 'session.json');
 
 export function playwright() {
   const candidates = [process.env.PLAYWRIGHT_CORE, 'playwright-core',
-    path.join(os.homedir(), '.local', 'share', 'agentgate', 'playwright-mcp', 'node_modules', 'playwright-core')];
+    path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'), 'agentgate', 'playwright-mcp', 'node_modules', 'playwright-core')];
   for (const candidate of candidates.filter(Boolean)) {
     try {
       return require(candidate);
@@ -36,7 +37,7 @@ export function readSession() {
 
 export function writeSession(session) {
   fs.mkdirSync(figmaHome, { recursive: true, mode: 0o700 });
-  fs.writeFileSync(sessionFile, JSON.stringify(session, null, 2) + '\n', { mode: 0o600 });
+  writeJSON(sessionFile, session);
 }
 
 // Figma draws on WebGL; a headless browser has no GPU, so it renders in software.
@@ -76,5 +77,15 @@ export async function openProfile({ headless, channel }) {
 // Plain headless browser for pages that are not Figma: the implementation under check.
 export async function openBrowser() {
   const { chromium } = playwright();
-  return chromium.launch({ headless: true, channel: 'chromium' });
+  const executablePath = process.env.AGENTGATE_BROWSER_EXECUTABLE;
+  if (executablePath) return chromium.launch({ headless: true, executablePath });
+  try {
+    return await chromium.launch({ headless: true, channel: 'chromium' });
+  } catch (error) {
+    if (!/Executable doesn't exist|not found|not installed/i.test(String(error))) throw error;
+    for (const system of ['/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome']) {
+      if (fs.existsSync(system)) return chromium.launch({ headless: true, executablePath: system });
+    }
+    throw new Error('Chromium was not found. Install the browser tooling or set AGENTGATE_BROWSER_EXECUTABLE to your Chromium executable.');
+  }
 }

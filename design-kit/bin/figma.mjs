@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 // figma — a Figma session owned by this tool, and design packages pulled through it.
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { openProfile, readSession, writeSession, figmaHome } from '../lib/browser.mjs';
 import { probe, exportNode, exportAssets, listFrames, readVariables } from '../lib/figma-page.mjs';
-import { assetName, brief, buildSpec, detail } from '../lib/outline.mjs';
+import { detail } from '../lib/outline.mjs';
+import { parseArgs, wantsHelp, numberOption } from '../lib/cli.mjs';
+import { figmaTarget as target, figmaTransport } from '../lib/figma-target.mjs';
+import { FigmaAPI } from '../lib/figma-api.mjs';
+import { exportPackage, verifyPackage } from '../lib/package.mjs';
 
 const usage = `usage:
   figma login                         sign in to Figma in a browser window, once; the session stays in this tool's profile
@@ -15,27 +18,17 @@ const usage = `usage:
         [--node <id>]                 another node of the same file instead of the one in the URL
         [--scales 2]                  extra PNG scales of the node, for tools
         [--no-assets]                 do not export icons and pictures separately
+        [--transport api|browser]     documented REST API or browser session (default: api when FIGMA_ACCESS_TOKEN is set)
   figma node <dir> <handle> [--depth 3]   everything about one layer of a package and its inside
   figma import-cookies <file>         for a machine without a display: seed the profile from a browser cookie export
 
-The profile lives in ${figmaHome} (AGENTGATE_FIGMA_HOME overrides it).`;
+REST uses FIGMA_ACCESS_TOKEN with file_content:read; tokens are never saved in a package.
+Browser export uses Figma's internal scene graph and may change; no fallback occurs after an API error.
+The browser profile lives in ${figmaHome} (AGENTGATE_FIGMA_HOME overrides it).`;
 
 const fail = (message, code = 1) => {
   throw Object.assign(new Error(message), { exitCode: code });
 };
-
-function parse(argv) {
-  const flags = {};
-  const rest = [];
-  for (let index = 0; index < argv.length; index++) {
-    const value = argv[index];
-    if (!value.startsWith('--')) rest.push(value);
-    else if (value === '--json') flags.json = true;
-    else if (value.startsWith('--no-')) flags[value.slice(5)] = false;
-    else flags[value.slice(2)] = argv[++index];
-  }
-  return { flags, rest };
-}
 
 // Figma keeps the signed-in address in a cookie of its own; nothing else is read from the profile.
 async function signedIn(context) {
@@ -64,18 +57,21 @@ async function login() {
     fail('signing in needs a display: run `figma login` on a desktop, or seed the profile with `figma import-cookies`');
   }
   const { context, channel } = await openProfile({ headless: false, channel: readSession()?.channel });
-  const page = context.pages()[0] || await context.newPage();
-  await page.goto('https://www.figma.com/login', { waitUntil: 'domcontentloaded' }).catch(() => {});
-  console.error('A browser window is open. Sign in to Figma there; this command finishes by itself.');
-  const deadline = Date.now() + 10 * 60 * 1000;
   let who = null;
-  while (Date.now() < deadline && !who) {
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    if (context.pages().length === 0) break;
-    const current = context.pages()[context.pages().length - 1];
-    if (!/\/login|\/signup|accounts\.google|\/oauth/.test(current.url())) who = await signedIn(context).catch(() => null);
+  try {
+    const page = context.pages()[0] || await context.newPage();
+    await page.goto('https://www.figma.com/login', { waitUntil: 'domcontentloaded', timeout: 60000 });
+    console.error('A browser window is open. Sign in to Figma there; this command finishes by itself.');
+    const deadline = Date.now() + 10 * 60 * 1000;
+    while (Date.now() < deadline && !who) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      if (context.pages().length === 0) break;
+      const current = context.pages()[context.pages().length - 1];
+      if (!/\/login|\/signup|accounts\.google|\/oauth/.test(current.url())) who = await signedIn(context).catch(() => null);
+    }
+  } finally {
+    await context.close().catch(() => {});
   }
-  await context.close().catch(() => {});
   if (!who) fail('nobody signed in');
   writeSession({ channel, email: who.email, signedInAt: new Date().toISOString() });
   console.log(JSON.stringify({ signed_in: who.email || true, expires: who.expires }, null, 2));
@@ -102,26 +98,16 @@ async function importCookies(file) {
     return out;
   });
   const { context, channel } = await openProfile({ headless: true, channel: readSession()?.channel });
-  await context.addCookies(cookies);
-  const who = await verify(context).finally(() => context.close());
+  let who;
+  try {
+    await context.addCookies(cookies);
+    who = await verify(context);
+  } finally {
+    await context.close().catch(() => {});
+  }
   if (!who) fail('these cookies do not hold a working Figma session');
   writeSession({ channel, email: who.email, signedInAt: new Date().toISOString() });
   console.log(JSON.stringify({ signed_in: who.email || true, expires: who.expires, next: `delete ${file}: the session now lives in the profile` }, null, 2));
-}
-
-function target(url, node) {
-  let parsed;
-  try {
-    parsed = new URL(url);
-  } catch {
-    fail(`not a URL: ${url}`, 2);
-  }
-  const key = /^\/(?:design|file|proto|board)\/([A-Za-z0-9]+)/.exec(parsed.pathname)?.[1];
-  const id = (node || parsed.searchParams.get('node-id') || '').replace(/^(\d+)-(\d+)$/, '$1:$2');
-  if (!/(^|\.)figma\.com$/.test(parsed.hostname) || !key || !/^\d+:\d+$/.test(id)) {
-    fail('this takes a Figma file URL with a node: copy the link to the frame ("Copy link to selection")', 2);
-  }
-  return { key, id, url: `https://www.figma.com/design/${key}/?node-id=${id.replace(':', '-')}` };
 }
 
 // Opens the file at a node and waits until the application can answer for it.
@@ -148,86 +134,52 @@ async function withNode(url, node, work) {
 
 async function frames(url, flags) {
   if (!url) fail(usage, 2);
-  await withNode(url, null, async (page, where) => {
-    const depth = Number(flags.depth ?? 1);
-    if (!Number.isInteger(depth) || depth < 0 || depth > 6) fail('depth must be an integer from 0 to 6', 2);
-    const listed = await page.evaluate(listFrames, { nodeId: where.id, depth });
-    if (flags.json) {
-      console.log(JSON.stringify({ source: where.url, ...listed }));
-      return;
+  const depth = numberOption(flags.depth ?? 1, 'depth', { min: 0, max: 6, integer: true });
+  const transport = figmaTransport(flags.transport);
+  const where = target(url, flags.node);
+  const print = (listed) => {
+    if (flags.json) console.log(JSON.stringify({ source: where.url, transport, ...listed }));
+    else {
+      console.log(`page “${listed.page}” — pull one with: figma pull <url> --node <id> --out <dir>`);
+      for (const row of listed.rows) console.log(`${'  '.repeat(row.level)}${row.id}  ${row.name}  ${row.width}×${row.height}  ${row.type}`);
+      if (listed.truncated) console.log('Catalogue truncated; select a narrower node.');
     }
-    console.log(`page “${listed.page}” — pull one with: figma pull <url> --node <id> --out <dir>`);
-    for (const row of listed.rows) console.log(`${'  '.repeat(row.level)}${row.id}  ${row.name}  ${row.width}×${row.height}${row.type === 'frame' ? '' : '  ' + row.type}`);
-  });
+  };
+  if (transport === 'api') {
+    const api = new FigmaAPI();
+    print(api.catalogue(await api.document(where), depth));
+  } else await withNode(url, flags.node, async (page) => print(await page.evaluate(listFrames, { nodeId: where.id, depth })));
 }
-
-const sha256 = (data) => crypto.createHash('sha256').update(data).digest('hex');
 
 async function pull(url, flags) {
   if (!url || !flags.out) fail(usage, 2);
-  const out = path.resolve(flags.out);
-  if (fs.existsSync(out) && fs.readdirSync(out).length > 0 && !fs.existsSync(path.join(out, 'manifest.json'))) {
-    fail(`${out} holds something else: a package is written to an empty directory or over an earlier package`, 2);
-  }
-  const scales = [...new Set([1, ...String(flags.scales || '').split(',').map(Number).filter((scale) => scale > 1 && scale <= 4)])];
-  await withNode(url, flags.node, async (page, where, state) => {
-    const data = await page.evaluate(exportNode, { nodeId: where.id, scales, svg: false });
-    if (!data.rest.document.absoluteBoundingBox) {
-      // A link copied from the page list or from a section points at something that has no picture of its own.
-      const listed = await page.evaluate(listFrames, where.id);
-      fail(`node ${where.id} is a ${String(data.rest.document.type).toLowerCase()} (“${data.rest.document.name}”), not a frame. Pull one of its frames with --node:\n` +
-        listed.rows.slice(0, 12).map((row) => `  ${row.id}  ${row.name}  ${row.width}×${row.height}`).join('\n'));
-    }
-    const raw = JSON.stringify(data.rest);
-    const variables = await page.evaluate(readVariables, [...new Set(raw.match(/VariableID:\d+:\d+/g) || [])]);
-    const spec = buildSpec(data.rest, variables);
-
-    for (const stale of ['assets', 'data']) fs.rmSync(path.join(out, stale), { recursive: true, force: true });
-    fs.mkdirSync(path.join(out, 'assets'), { recursive: true });
-    fs.mkdirSync(path.join(out, 'data'), { recursive: true });
-    const files = {};
-    const write = (name, content) => {
-      fs.writeFileSync(path.join(out, name), content);
-      files[name] = sha256(content);
-    };
-    if (flags.assets !== false) {
-      const wanted = spec.nodes.filter((node) => node.asset).slice(0, 300);
-      const written = new Map();
-      for (let index = 0; index < wanted.length; index += 25) {
-        const batch = wanted.slice(index, index + 25);
-        const rendered = await page.evaluate(exportAssets, { rootId: where.id, requests: batch.map((node) => ({ id: node.id, format: node.asset.format })) });
-        for (const node of batch) {
-          if (!rendered[node.id]) continue;
-          const bytes = Buffer.from(rendered[node.id], 'base64');
-          const digest = sha256(bytes);
-          // The same icon used ten times is one file.
-          if (!written.has(digest)) {
-            written.set(digest, `assets/${assetName(node)}`);
-            write(written.get(digest), bytes);
-          }
-          node.asset.file = written.get(digest);
-        }
+  const transport = figmaTransport(flags.transport);
+  const where = target(url, flags.node);
+  const scales = [...new Set([1, ...(flags.scales === undefined ? [] : flags.scales.split(',').map((value) => numberOption(value, 'scale', { min: 1, max: 4 })))])];
+  let result;
+  if (transport === 'api') {
+    const api = new FigmaAPI();
+    const document = await api.document(where);
+    const data = await api.export(where, document, scales);
+    result = await exportPackage({ destination: flags.out, where, state: document.state, data, scales,
+      transport, includeAssets: !flags['no-assets'],
+      renderAssets: (requests) => api.assets(where, requests, document.file.version) });
+  } else {
+    result = await withNode(url, flags.node, async (page, selected, state) => {
+      const data = await page.evaluate(exportNode, { nodeId: selected.id, scales, svg: false });
+      if (!data.rest.document.absoluteBoundingBox) {
+        const listed = await page.evaluate(listFrames, { nodeId: selected.id, depth: 2 });
+        fail(`node ${selected.id} is a ${String(data.rest.document.type).toLowerCase()}, not a frame. Choose a child with --node:\n` +
+          listed.rows.slice(0, 12).map((row) => `  ${row.id}  ${row.name}  ${row.width}×${row.height}`).join('\n'), 2);
       }
-    }
-    for (const scale of scales) write(scale === 1 ? 'frame.png' : `data/frame@${scale}x.png`, Buffer.from(data.png[scale], 'base64'));
-    if (data.context) write('context.png', Buffer.from(data.context, 'base64'));
-    else fs.rmSync(path.join(out, 'context.png'), { force: true });
-    write('data/nodes.json', raw);
-    write('data/variables.json', JSON.stringify(variables));
-    write('data/spec.json', JSON.stringify(spec));
-    const text = brief(spec, `Figma “${state.file}”, node ${where.id}, file version ${state.version}`, flags.out);
-    write('brief.md', text);
-    const manifest = { tool: 'agentgate-design 0.1', source: { url: where.url, file: state.file, key: where.key, node: where.id, version: state.version },
-      frame: spec.frame, screen: data.screen, pulled_at: new Date().toISOString(),
-      // What the package holds, apart from when it was pulled: a contract pins this.
-      digest: sha256(Object.keys(files).sort().map((name) => `${name}:${files[name]}`).join('\n')), files };
-    fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
-    console.log(JSON.stringify({ package: flags.out, frame: spec.frame, layers: spec.nodes.length,
-      assets: Object.keys(files).filter((name) => name.startsWith('assets/')).length,
-      // What a worker will carry in its context for reading the brief.
-      brief: { file: path.join(flags.out, 'brief.md'), lines: text.split('\n').length, tokens_about: Math.round(Buffer.byteLength(text) / 3.2) },
-      digest: manifest.digest }, null, 2));
-  });
+      const raw = JSON.stringify(data.rest);
+      const variables = await page.evaluate(readVariables, [...new Set(raw.match(/VariableID:\d+:\d+/g) || [])]);
+      return exportPackage({ destination: flags.out, where: selected, state, data, scales, variables,
+        transport, includeAssets: !flags['no-assets'],
+        renderAssets: (requests) => page.evaluate(exportAssets, { rootId: selected.id, requests }) });
+    });
+  }
+  console.log(JSON.stringify(result, null, 2));
 }
 
 function node(dir, handle, flags) {
@@ -238,23 +190,32 @@ function node(dir, handle, flags) {
   } catch {
     fail(`${dir} is not a design package`, 2);
   }
-  const text = detail(spec, handle, flags.depth === undefined ? 3 : Number(flags.depth));
+  const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'));
+  verifyPackage(dir, manifest);
+  const text = detail(spec, handle, numberOption(flags.depth ?? 3, 'depth', { min: 0, max: 20, integer: true }));
   if (!text) fail(`no layer ${handle} in ${dir}`);
   process.stdout.write(text);
 }
 
-const [command, ...argv] = process.argv.slice(2);
-const { flags, rest } = parse(argv);
-if (command === '--help' || command === 'help' || command === '-h') {
-  console.log(usage);
-  process.exit(0);
+async function main() {
+  const [command, ...argv] = process.argv.slice(2);
+  if (!command || command === 'help' || wantsHelp([command, ...argv])) { console.log(usage); return; }
+  const grammars = {
+    login: {}, status: {}, 'import-cookies': {},
+    frames: { booleans: ['json'], values: ['depth', 'node', 'transport'] },
+    pull: { booleans: ['no-assets'], values: ['out', 'node', 'scales', 'transport'] },
+    node: { values: ['depth'] },
+  };
+  if (!Object.hasOwn(grammars, command)) fail(`unknown command: ${command}\n${usage}`, 2);
+  const { flags, rest } = parseArgs(argv, grammars[command]);
+  const counts = { login: 0, status: 0, 'import-cookies': 1, frames: 1, pull: 1, node: 2 };
+  if (rest.length !== counts[command]) fail(`${command} expects ${counts[command]} positional arguments\n${usage}`, 2);
+  const commands = { login, status, frames: () => frames(rest[0], flags), pull: () => pull(rest[0], flags),
+    node: () => node(rest[0], rest[1], flags), 'import-cookies': () => importCookies(rest[0]) };
+  await commands[command]();
 }
-const commands = { login, status, frames: () => frames(rest[0], flags), pull: () => pull(rest[0], flags),
-  node: async () => node(rest[0], rest[1], flags), 'import-cookies': () => importCookies(rest[0]) };
-Promise.resolve().then(() => {
-  if (!commands[command]) fail(usage, 2);
-  return commands[command]();
-}).catch((error) => {
+
+main().catch((error) => {
   console.error(`figma: ${error.message || error}`);
   process.exitCode = error.exitCode || 1;
 });

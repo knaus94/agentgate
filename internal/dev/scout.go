@@ -45,14 +45,18 @@ var scoutSchema = object(map[string]any{"summary": text,
 
 const scoutTimeout = 600
 
-func scoutPath(resolved *Resolved, rules []reviewRule) string {
+func scoutPath(resolved *Resolved, rules []reviewRule) (string, error) {
 	plan := resolved.Plan
-	parts := map[string]any{"brief": plan.Brief, "requirements": plan.Requirements, "files": plan.Files(), "context": plan.Context, "route": resolved.ModeConfig().Scout}
+	source, err := repositoryDigest()
+	if err != nil {
+		return "", err
+	}
+	parts := map[string]any{"brief": plan.Brief, "requirements": plan.Requirements, "files": plan.Files(), "context": plan.Context, "route": resolved.ModeConfig().Scout, "source": source}
 	if len(rules) > 0 {
 		parts["review_rules"] = rules
 	}
 	key := digest(parts)
-	return filepath.Join(checkoutDir(""), "scout", key[:32], "pack.json")
+	return filepath.Join(checkoutDir(""), "scout", key[:32], "pack.json"), nil
 }
 
 // scout returns the path of the task's context pack, gathering it on first use. The pack is keyed by the
@@ -68,10 +72,16 @@ func scout(resolved *Resolved, subs *substitutions) (string, string) {
 	if err != nil {
 		return "", err.Error()
 	}
-	path := scoutPath(resolved, rules)
+	path, err := scoutPath(resolved, rules)
+	if err != nil {
+		return "", err.Error()
+	}
 	dir := filepath.Dir(path)
-	if _, err := os.Stat(path); err == nil {
-		return path, ""
+	if raw, err := os.ReadFile(path); err == nil {
+		var pack contextPack
+		if json.Unmarshal(raw, &pack) == nil && strings.TrimSpace(pack.Summary) != "" && len(pack.Files) > 0 {
+			return path, ""
+		}
 	}
 	packet := filepath.Join(dir, "packet.json")
 	if err := writePacket(packet, map[string]any{"brief": plan.Brief, "requirements": plan.Requirements, "files": plan.Files(), "streams": plan.Streams, "context": plan.Context, "review_rules": rules}); err != nil {

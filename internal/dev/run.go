@@ -2,6 +2,7 @@ package dev
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,8 +25,15 @@ func Execute(action string, run func() (any, error)) (any, error) {
 		return nil, err
 	}
 	defer unlock()
+	gate, err := LoadCurrent()
+	if err != nil {
+		return nil, err
+	}
+	if err := gate.recoverInterrupted(); err != nil {
+		return nil, err
+	}
 	gateID := ""
-	if gate := Current(); gate != nil {
+	if gate != nil {
 		gateID = gate.ID
 	}
 	if err := ops.Begin(home(), action, gateID); err != nil {
@@ -33,12 +41,11 @@ func Execute(action string, run func() (any, error)) (any, error) {
 	}
 	// An isolated task is driven from inside its worktree; the user's checkout is only where it was started.
 	defer leave()
-	if err := Current().enter(); err != nil && action != "land" {
-		ops.End(err)
-		return nil, err
+	if err := gate.enter(); err != nil && action != "land" {
+		return nil, errors.Join(err, ops.End(err))
 	}
 	value, err := run()
-	ops.End(err)
+	err = errors.Join(err, ops.End(err))
 	if ops.IsCancelled(err) {
 		if gate := Current(); gate != nil && gate.active() && gate.Phase != "held" {
 			gate.holdNow(err.Error())
@@ -58,6 +65,10 @@ func parallel(n, limit int, job func(index int) error) []error {
 			defer wait.Done()
 			slots <- struct{}{}
 			defer func() { <-slots }()
+			if err := ops.Checkpoint(); err != nil {
+				errs[index] = err
+				return
+			}
 			errs[index] = job(index)
 		}()
 	}
@@ -85,8 +96,23 @@ type substitutions struct {
 	list []provider.Substitution
 }
 
+// A session belongs to the actual model and account that produced it, including
+// a quota fallback. Continue it only while that route remains permitted by the
+// current configuration; never move a session ID between providers or models.
+func permittedContinuation(cfg *config.Config, wanted, previous config.Route) bool {
+	for _, route := range append([]config.Route{wanted}, cfg.Alternates(wanted)...) {
+		if route.Model == previous.Model && route.Provider == previous.Provider && route.Alias == previous.Alias {
+			return true
+		}
+	}
+	return false
+}
+
 // invoke runs one lane on its route or a declared alternate and records which one answered.
 func (s *substitutions) invoke(cfg *config.Config, call provider.Call, skip func(config.Route) bool) (provider.Result, config.Route, error) {
+	if err := ops.Checkpoint(); err != nil {
+		return provider.Result{}, call.Route, err
+	}
 	result, used, err := provider.RunRouted(cfg, call, skip)
 	if err == nil && used.SubstitutedFrom != "" {
 		s.mu.Lock()

@@ -35,7 +35,18 @@ jobs:
           npm ci --prefix design-kit --ignore-scripts --no-audit --no-fund
           node design-kit/node_modules/playwright-core/cli.js install --with-deps chromium
           node --test --test-concurrency=1 design-kit/tests/*.test.mjs
-      - name: Build
-        run: go build ./cmd/agentgate
       - name: Installer syntax
-        run: sh -n scripts/install.sh
+        run: |
+          sh -n scripts/install.sh
+          sh -n scripts/install-local.sh
+      - name: Complete archive and offline installation
+        run: |
+          make package VERSION=0.0.0-ci
+          scratch="$(mktemp -d)"
+          unzip -q dist/agentgate-0.0.0-ci.zip -d "$scratch"
+          cd "$scratch/agentgate-0.0.0-ci"
+          sha256sum --quiet -c SHA256SUMS
+          sh scripts/install-local.sh --prefix "$scratch/local bin" --no-integrations
+          "$scratch/local bin/agentgate" --version
+          go build -buildvcs=false -o "$scratch/from-source" ./cmd/agentgate
+          "$scratch/from-source" help

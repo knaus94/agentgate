@@ -112,16 +112,21 @@ installed. `worker_mcp` hands chosen roles chosen tools all the same.
 | `roles` | who gets it: `scout` (default), `architect`, `writer`, `reviewer`, `consultant`, `designer` |
 | `hint` | when to use it; the worker is told this together with the tool names |
 | `refresh` | a command run in the checkout once per operation, before the server's first use, to bring its index up to date |
-| `writable` | directories of the checkout the server has to write (a cache); read-only workers get them writable |
+| `writable` | existing cache subdirectories inside the checkout; read-only workers receive write access only to accepted grants |
 
 The default role is the scout alone: it maps the code once, and what it learns reaches the writers and the
 reviewers through the context pack. Heavy and ultra have no scout by default, so name `architect` for a tool
 the design pass should have. Give a tool to reviewers when "who else calls this" is the question they keep asking;
 give writers a tool only when they cannot work without it.
 
-Two things to know. The sandbox is read-only for everyone but writers, so a server that builds its index on
-demand needs `writable` for its cache directory, or a `refresh` that builds it beforehand. And `refresh` runs
-outside the sandbox, like the repository's own scripts.
+The checkout is read-only for non-writers except for explicit writable grants. A server that builds its
+index on demand therefore needs a preexisting cache directory under `writable`, or a `refresh` that builds
+the index beforehand. Grants cannot name the whole checkout, escape it, include Git metadata, or follow
+symlinks in any path component. A missing directory is not created automatically; a refused grant is
+reported to the worker.
+
+`refresh` runs outside the sandbox with the authority of a local command. A failed refresh makes that optional
+server unavailable for the operation and tells workers to read source instead of trusting a stale index.
 
 ## Ready examples
 
@@ -130,6 +135,6 @@ outside the sandbox, like the repository's own scripts.
 - **`graphify.json`** — the [graphify](https://github.com/Graphify-Labs/graphify) code graph. Install it
   (`uv tool install "graphifyy[mcp]"`), build the graph once without any model call
   (`graphify extract . --code-only`), keep `graphify-out/` out of git. The extension refreshes the graph
-  before use (about two seconds once it is cached) and copies it into isolated worktrees.
+  before use and copies it into isolated worktrees.
 - **`nx.json`** — the Nx project graph through the workspace's own `nx mcp`: projects, targets, dependencies.
   Nx writes its graph cache, so the extension opens `.nx/workspace-data` for writing.

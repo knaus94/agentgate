@@ -58,7 +58,7 @@ func (d DesignRef) digest() string {
 		screen, _ := os.ReadFile(filepath.Join(d.Screen, "screen.json"))
 		exceptions = append(exceptions, screen...)
 	}
-	return digest(map[string]any{"package": manifest.Digest, "map": string(exceptions), "url": d.URL, "root": d.Root, "viewport": d.Viewport, "device": d.Device,
+	return digest(map[string]any{"package": manifest.Digest, "package_files": d.packageEvidence(), "map": string(exceptions), "url": d.URL, "root": d.Root, "viewport": d.Viewport, "device": d.Device,
 		"evidence": d.reviewSnapshot()})
 }
 
@@ -221,6 +221,11 @@ func (r *Resolved) validateDesign() error {
 		if _, err := os.Stat(filepath.Join(design.Package, "data", "spec.json")); err != nil && (made || design.Figma == "") {
 			return fmt.Errorf("design %q is not a package written by `agentgate figma pull`", design.Package)
 		}
+		if fileExists(filepath.Join(design.Package, "data", "spec.json")) {
+			if err := verifyDesignPackage(design.Package); err != nil {
+				return err
+			}
+		}
 		if design.Stream == "" && len(plan.Streams) == 1 {
 			design.Stream = plan.Streams[0].Name
 		}
@@ -229,8 +234,8 @@ func (r *Resolved) validateDesign() error {
 		}
 		if design.Screen != "" {
 			// the screen's own files say where it is shown; the check reads them
-		} else if strings.HasPrefix(design.URL, "http") {
-			if _, err := standOrigins([]string{strings.SplitN(design.URL, "/", 4)[0] + "//" + strings.SplitN(design.URL, "/", 4)[2]}); err != nil {
+		} else if parsed, parseErr := url.Parse(design.URL); parseErr == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != "" && parsed.User == nil {
+			if _, err := standOrigins([]string{parsed.Scheme + "://" + parsed.Host}); err != nil {
 				return err
 			}
 		} else if !strings.HasPrefix(design.URL, "file://") {
@@ -277,6 +282,9 @@ func (g *Gate) prepareDesigns(measureBefore bool) error {
 			if err := ops.Run(cmd, seconds(layoutTimeout)); err != nil {
 				return fmt.Errorf("the design %s could not be pulled: %s", design.Figma, lastLine(strings.TrimSpace(out.String())))
 			}
+		}
+		if err := verifyDesignPackage(design.Package); err != nil {
+			return err
 		}
 		if !measureBefore {
 			continue

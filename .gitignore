@@ -3,3 +3,5 @@
 *.test
 *.out
 /design-kit/node_modules/
+__pycache__/
+*.pyc

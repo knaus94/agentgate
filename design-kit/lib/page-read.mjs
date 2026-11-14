@@ -20,11 +20,36 @@ export function readPage(input) {
   const origin = rootSelector ? root.getBoundingClientRect() : { left: -window.scrollX, top: -window.scrollY };
   const round = (value) => Math.round(value * 100) / 100;
   const box = (rect) => [round(rect.left - origin.left), round(rect.top - origin.top), round(rect.width), round(rect.height)];
+  const colours = new Map();
+  let colourCanvas;
   const rgba = (value) => {
-    const match = /rgba?\(([^)]+)\)/.exec(value || '');
-    if (!match) return null;
-    const [r, g, b, a] = match[1].split(/[\s,/]+/).filter(Boolean).map(Number);
-    return { r, g, b, a: a === undefined ? 1 : a };
+    if (!value) return null;
+    if (colours.has(value)) return colours.get(value);
+    let colour = null;
+    const match = /^rgba?\(([^)]+)\)$/.exec(value);
+    if (match) {
+      const parts = match[1].split(/[\s,/]+/).filter(Boolean);
+      const numbers = parts.map((part, index) => part.endsWith('%')
+        ? parseFloat(part) * (index === 3 ? 0.01 : 2.55) : Number(part));
+      if ((numbers.length === 3 || numbers.length === 4) && numbers.every(Number.isFinite)) {
+        const [r, g, b, a = 1] = numbers;
+        colour = { r, g, b, a };
+      }
+    }
+    // Modern computed styles can retain oklch(), lab() or color(). Let the same
+    // browser convert them to the screenshot's sRGB space instead of guessing.
+    if (!colour && CSS.supports('color', value)) {
+      colourCanvas ||= Object.assign(document.createElement('canvas'), { width: 1, height: 1 }).getContext('2d', { willReadFrequently: true });
+      if (colourCanvas) {
+        colourCanvas.clearRect(0, 0, 1, 1);
+        colourCanvas.fillStyle = value;
+        colourCanvas.fillRect(0, 0, 1, 1);
+        const [r, g, b, a] = colourCanvas.getImageData(0, 0, 1, 1).data;
+        colour = { r, g, b, a: a / 255 };
+      }
+    }
+    colours.set(value, colour);
+    return colour;
   };
   const px = (value) => (value.endsWith('px') ? round(parseFloat(value)) : undefined);
   const describe = (element) => {
