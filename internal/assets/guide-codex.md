@@ -14,6 +14,9 @@ You are a Codex session. Everything above applies; these points are specific to 
 - **Operations take minutes.** `architecture`, `launch`, `review` and `fix` run model workers. Give the command
   a timeout that covers the mode's limits (`agentgate modes` lists them), wait for it, and do not start a
   second `agentgate` command while one is running: it would be rejected, not queued.
+  Wait on the returned process handle using the longest supported interval that still permits timely updates
+  (usually about 30 seconds). Do not spend repeated turns tuning a clamped wait value or polling unchanged
+  status; use completion notifications when the client provides them.
 - **The workers are agentgate's.** Do not use your own sub-agents, `codex review` or plan mode for this task.
   You read the diffs and make the decisions.
 - **User questions.** Prefer the native interactive input tool exposed by this session. If it is unavailable

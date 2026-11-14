@@ -9,10 +9,10 @@ make check
 npm ci --prefix design-kit --ignore-scripts --no-audit --no-fund
 node design-kit/node_modules/playwright-core/cli.js install chromium
 make design-browser
-make package VERSION=0.14.1
+make package VERSION=0.15.0
 ```
 
-The output is `dist/agentgate-0.14.1.zip` plus its `.sha256` file. It includes source, documentation,
+The output is `dist/agentgate-0.15.0.zip` plus its `.sha256` file. It includes source, documentation,
 static Linux amd64/arm64 binaries, `scripts/install-local.sh`, `RELEASE.json` and a full `SHA256SUMS` inventory.
 The packager uses an explicit file list and fixed ZIP timestamps; Git metadata, node_modules, private
 profiles and build caches are excluded. `SOURCE_DATE_EPOCH` can supply the release timestamp.
@@ -20,8 +20,8 @@ profiles and build caches are excluded. `SOURCE_DATE_EPOCH` can supply the relea
 Extract and validate before distribution:
 
 ```sh
-unzip dist/agentgate-0.14.1.zip
-cd agentgate-0.14.1
+unzip dist/agentgate-0.15.0.zip
+cd agentgate-0.15.0
 sha256sum -c SHA256SUMS
 sh scripts/install-local.sh --prefix "$HOME/.local/bin" --no-integrations
 ```
@@ -61,7 +61,7 @@ file and atomic rename. The new binary then refreshes installed lead integration
 Finish or explicitly stop active operations before changing their executable. Check release-specific
 migration notes; forward/backward state compatibility is not a blanket guarantee for every future version.
 
-The installer supports `AGENTGATE_VERSION=v0.14.1`, `AGENTGATE_BIN=/some/bin`, and an authorized
+The installer supports `AGENTGATE_VERSION=v0.15.0`, `AGENTGATE_BIN=/some/bin`, and an authorized
 `AGENTGATE_BASE_URL` release mirror. A pinned install is an explicit selection and can choose an older
 version; the normal `update` command cannot accidentally downgrade a newer local archive.
 
@@ -70,7 +70,7 @@ version; the normal `update` command cannot accidentally downgrade a newer local
 The module path remains `github.com/knaus94/agentgate`. Override the release repository in linker flags:
 
 ```sh
-go build -trimpath -buildvcs=false -ldflags '-X github.com/knaus94/agentgate/internal/update.Repo=you/agentgate -X github.com/knaus94/agentgate/internal/update.Version=0.14.1' ./cmd/agentgate
+go build -trimpath -buildvcs=false -ldflags '-X github.com/knaus94/agentgate/internal/update.Repo=you/agentgate -X github.com/knaus94/agentgate/internal/update.Version=0.15.0' ./cmd/agentgate
 ```
 
 The release workflow derives the linker symbol path from `go list -m` and sets the repository from

@@ -108,6 +108,11 @@ apply to it; `finish` accepts the stage and opens the next one — `launch` agai
 - Reviewers see the stage's own change, measured from where the stage before it ended.
 - Between stages you may revise the stages still ahead: change them in the plan and say what and why in
   `update`. Accepted stages are frozen.
+- If the current stage was wrongly assigned future behavior, have prepare correct the whole plan and use
+  `replan --plan <name>` before accepting it. Keep every original requirement unchanged and covered; give
+  intermediate results their own criteria. A held task needs explicit resume first. Replan retains writer
+  sessions, findings and snapshots and requires fresh review; it neither accepts the stage nor runs writers.
+  Never waive a partial requirement just to finish a stage. `covers` means full delivery, not contribution.
 - Go on to the next stage without asking, unless the request has `--step` (the tool then holds after every
   stage: report and wait for the user), a decision is missing, or what you learned makes the plan wrong.
 - After the last stage — in heavy and ultra, or with three or more stages — the whole change gets one more
@@ -230,8 +235,9 @@ screenshots do not establish all responsive behavior. The lead follows these rec
 If the measurement contract is wrong, use `prepare` with notes and the current task context, then
 `agentgate replan --plan <name>` with a concrete update reason. It preserves the gate, original source snapshot,
 findings and writer sessions, regenerates managed checks and invalidates review. It starts no workers or
-stand and never rebaselines already-written code. A held task must first be explicitly resumed; a staged
-plan is revised at its existing between-stage boundary. Never edit gate state or recreate the task.
+stand and never rebaselines already-written code. A held task must first be explicitly resumed. For a staged
+task submit the whole plan; accepted stages stay frozen, and the current stage must retain its identity,
+writer streams and owned files. Never edit gate state or recreate the task.
 
 Layout differences return to writers through `fix`; product exceptions need the user's decision and a reason.
 Do not broaden tolerances, replace a content root with the shell, or ignore most of the design to pass a check.

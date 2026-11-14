@@ -154,7 +154,7 @@ func Launch(cfg *config.Config, plan *Plan) (any, error) {
 			return nil, err
 		}
 	default:
-		return nil, fmt.Errorf("the task is %s; finish it or use `fix` for accepted findings", gate.Phase)
+		return nil, fmt.Errorf("the task is %s; use `replan` for an amended contract before acceptance, `fix` for accepted code findings, or `finish` when verification passes", gate.Phase)
 	}
 	if resolved, err = gate.present(cfg, resolved); err != nil {
 		return nil, err

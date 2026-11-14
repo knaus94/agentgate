@@ -77,6 +77,10 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 		"review_rule_catalogue": reviewRuleCatalogue(cfg)}
 	if gate != nil && gate.active() {
 		packet["current_plan"], packet["phase"], packet["check_failures"] = gate.Plan, gate.Phase, gate.failing()
+		if gate.Epic != nil {
+			packet["current_plan"], packet["current_stage"] = gate.Epic, gate.Plan
+			packet["stage_index"], packet["accepted_stages"], packet["integration"] = gate.StageIndex, gate.StageRecords, gate.Integration
+		}
 		packet["hold_reason"] = gate.HoldReason
 		packet["design_context"] = gate.designContext()
 	}
@@ -171,9 +175,23 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		if !plan.staged() && strings.TrimSpace(answer.Pack.Summary) != "" && len(answer.Pack.Files) > 0 && resolved.ModeConfig().Scout != "" {
+		contextPlan := resolved
+		if plan.staged() {
+			contextPlan = resolved.Stages[0]
+			if gate != nil && gate.active() && gate.Epic != nil && !gate.Integration && plan.Request == gate.Epic.Request && gate.StageIndex < len(plan.Stages) {
+				contextPlan, err = Resolve(cfg, plan.stageView(gate.StageIndex, gate.StageRecords))
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+		if strings.TrimSpace(answer.Pack.Summary) != "" && len(answer.Pack.Files) > 0 && contextPlan.ModeConfig().Scout != "" {
 			answer.Pack.Route = used
-			packPath, err := scoutPath(resolved, rules)
+			contextRules, err := loadReviewRules(cfg, contextPlan.Plan.Files())
+			if err != nil {
+				return nil, err
+			}
+			packPath, err := scoutPath(contextPlan, contextRules)
 			if err != nil {
 				return nil, err
 			}

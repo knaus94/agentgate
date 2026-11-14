@@ -188,16 +188,18 @@ type Gate struct {
 	Foreign       []string                `json:"foreign_changes,omitempty"`
 	Substitutions []provider.Substitution `json:"substitutions,omitempty"`
 	Final         *Final                  `json:"final,omitempty"`
-	Worktree      string                  `json:"worktree,omitempty"`      // an isolated task works here, not in Cwd
-	Branch        string                  `json:"branch,omitempty"`        // the branch of that worktree
-	Landed        string                  `json:"landed,omitempty"`        // how an isolated task was closed: apply, commit, branch, drop
-	Conflicts     []string                `json:"conflicts,omitempty"`     // files left with merge markers by catching up with the checkout
-	Epic          *Plan                   `json:"epic,omitempty"`          // staged tasks: the whole plan; Plan is the present stage
-	StageIndex    int                     `json:"stage_index,omitempty"`   // staged tasks: which stage is the present one
-	StageRecords  []StageRecord           `json:"stage_records,omitempty"` // staged tasks: the accepted stages
-	EpicBaseline  Snapshot                `json:"epic_baseline,omitempty"` // staged tasks: every file as the task found it
-	Integration   bool                    `json:"integration,omitempty"`   // staged tasks: the pass over the whole change is on
-	Signals       []Signal                `json:"slop_signals,omitempty"`  // mechanical hits on the lines the task added, as of the last review
+	Worktree      string                  `json:"worktree,omitempty"`         // an isolated task works here, not in Cwd
+	Branch        string                  `json:"branch,omitempty"`           // the branch of that worktree
+	Landed        string                  `json:"landed,omitempty"`           // how an isolated task was closed: apply, commit, branch, drop
+	Conflicts     []string                `json:"conflicts,omitempty"`        // files left with merge markers by catching up with the checkout
+	Epic          *Plan                   `json:"epic,omitempty"`             // staged tasks: the whole plan; Plan is the present stage
+	StageIndex    int                     `json:"stage_index,omitempty"`      // staged tasks: which stage is the present one
+	StageRecords  []StageRecord           `json:"stage_records,omitempty"`    // staged tasks: the accepted stages
+	EpicBaseline  Snapshot                `json:"epic_baseline,omitempty"`    // staged tasks: every file as the task found it
+	EpicHead      string                  `json:"epic_head_before,omitempty"` // origin for files admitted after the first stage
+	EpicManifest  map[string]string       `json:"epic_manifest,omitempty"`
+	Integration   bool                    `json:"integration,omitempty"`  // staged tasks: the pass over the whole change is on
+	Signals       []Signal                `json:"slop_signals,omitempty"` // mechanical hits on the lines the task added, as of the last review
 	Reported      bool                    `json:"completion_reported,omitempty"`
 	CreatedAt     int64                   `json:"created_at"`
 }

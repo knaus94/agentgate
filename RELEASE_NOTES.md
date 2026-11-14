@@ -1,7 +1,25 @@
-# AgentGate 0.14.1 — interactive clarification and planning fixes
+# AgentGate 0.15.0 — safe staged-plan amendments
 
 Исходная база: `knaus94/agentgate`, коммит `d1185635e89587683acfe90b047a29e0c70e7c72` (0.13.0).
 Версия включает исходники и автономный установочный архив; результаты выпускной проверки приведены ниже.
+
+## Исправления 0.15.0
+
+Текущая отревьюенная, но ещё не принятая стадия теперь допускает поправку через replan полного плана.
+Прежние требования сохраняются неизменными и остаются покрыты будущими стадиями; промежуточные результаты
+получают отдельные критерии. Старое ревью после поправки не годится для finish. Сессии и результаты работы,
+замечания и проверки не сбрасываются. Held требует явного resume; интеграционная приёмка не переписывает
+принятые стадии.
+
+Новые файлы генератора не становятся собственной baseline. Снимки текущей стадии и всей задачи восстанавливаются
+раздельно, с сохранением исходного Git/dirty-file origin между стадиями. Для legacy-задач на первой стадии
+origin берётся из её исходных данных; позднее отсутствие необходимых исторических данных означает отказ,
+а не попытку угадать прежние bytes. Это расширение формата состояния объясняет minor-версию.
+
+Исправлен переход незавершённого раунда после replan и потеря подготовленного контекста для staged-задач.
+Проверены регрессии частичных требований, frozen stages, исходных tracked/new/dirty файлов, продолжения
+и сохранения сессий. CLI/Bubblewrap-сценарий воспроизвёл полный цикл поправки без платных модельных вызовов.
+Реальная пользовательская задача остаётся на паузе; её состояние вручную не менялось.
 
 ## Исправления 0.14.1
 
@@ -26,7 +44,7 @@
 ## Установка
 
 ```sh
-cd agentgate-0.14.1
+cd agentgate-0.15.0
 sh scripts/install-local.sh --lead both
 agentgate setup doctor
 agentgate config validate
@@ -98,7 +116,7 @@ state; продолжение/ответ исполнителю перепров
 
 ## English overview
 
-This archive delivers the refactored 0.14.1 source and Linux binaries, based on the commit above. It keeps
+This archive delivers the refactored 0.15.0 source and Linux binaries, based on the commit above. It keeps
 the local CLI/provider integration model and reorganizes the code around lifecycle, evidence, execution,
 configuration and presentation boundaries. The most consequential changes prevent stale/failing evidence
 from authorizing completion, protect unrelated Git changes, preserve interrupted rounds and credential

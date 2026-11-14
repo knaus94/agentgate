@@ -244,7 +244,13 @@ func TestReplanCanRepairABlockedCorrectionAfterExplicitResume(t *testing.T) {
 	f.do("resume", func() (any, error) { return Resume(f.cfg, Current()) })
 	f.do("replan", func() (any, error) { return Replan(f.cfg, Current(), plan) })
 	after := Current()
-	if after.ID != before.ID || digest(after.Baseline) != digest(before.Baseline) || len(after.accepted()) != 1 || after.Phase != "awaiting-review" {
+	if after.ID != before.ID || digest(after.Baseline) != digest(before.Baseline) || len(after.accepted()) != 1 || after.Phase != "held" || after.ResumePhase != "correcting" {
 		t.Fatal("measurement repair reset the task or waived an unfinished finding")
 	}
+	f.model = nil
+	f.do("answer", func() (any, error) {
+		return Answer(f.cfg, Current(), AnswerInput{Stream: "core", Answer: "Use the corrected measurement contract"})
+	})
+	f.review()
+	f.finish()
 }

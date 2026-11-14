@@ -96,6 +96,10 @@ model behavior scenario (`visual.enabled: true`), while automated rendered layou
   and repair the verification contract without moving its original baseline or weakening checks to pass.
 - For a large task use requirements and stages instead of top-level streams: each stage has name, goal,
   covers (requirement ids), streams, and optional checks/assessment. Keep accepted stages unchanged.
+  `covers` means the stage fully delivers that requirement, not merely contributes to it. Give intermediate
+  deliverables their own observable criteria; assign end-to-end behavior to the stage that actually completes
+  it. Keep the original overall requirements when correcting coverage. `current_plan` is the whole staged
+  plan; `current_stage` and `accepted_stages` identify its current boundary and frozen results.
 - context_pack is the concise scout map: summary; files [{path,role,symbols}]; callers
   [{symbol,path,line,note}]; invariants, conventions, unknowns. Name sources instead of copying them. It will
   be reused by the writer so a second scout does not repeat this work.

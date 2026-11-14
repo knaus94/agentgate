@@ -507,6 +507,7 @@ func (g *Gate) nextWithReceipts(cfg *config.Config, blocked bool, current map[st
 		}
 		if quality := g.qualityStatus(cfg); quality != nil && len(quality["problems"].([]string)) > 0 {
 			return "Quality criteria are not satisfied: inspect quality.problems, collect missing evidence or fix accepted findings, then review again. " +
+				"If future behavior was assigned to the current stage by mistake, prepare an amended whole plan retaining the original requirements and apply it with replan; do not waive the criterion. " +
 				"Use review {recheck: true} to reconsider unchanged evidence. Hold when a required proof source is unavailable."
 		}
 		return "Everything required is current: `finish` with a summary."

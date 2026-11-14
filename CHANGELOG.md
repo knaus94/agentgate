@@ -2,6 +2,17 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.15.0
+
+- `replan` can amend the current unaccepted stage using the whole saved plan. Accepted stages, original
+  requirements, writer identities, owned files, findings and receipts remain; fresh review is mandatory.
+  Correcting coverage no longer requires finishing an impossible stage or recreating the task.
+- Added outputs retain real stage/task before-images from snapshots or Git. Whole-task Git/dirty-file origin
+  is persisted across stages; unknown original dirty bytes are refused rather than replaced by current output.
+- An unfinished round remains resumable after a metadata amendment; blocked writers retain their answer path.
+- Staged preparation reuses its context pack for the first/current stage and exposes the whole plan plus
+  accepted-stage boundaries. Instructions define `covers` as complete delivery and discourage excessive polling.
+
 ## 0.14.1
 
 - Lead instructions prefer native interactive questions in Claude Code and Codex, with bounded batches,

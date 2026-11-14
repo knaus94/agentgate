@@ -95,3 +95,25 @@ A `plan` request may describe the same stages as future implementation. Preparat
 its brief without starting writers or checks. The request remains read-only: after explicit implementation
 authorization, update its action and save again before launch. Do not remove stages merely because planning
 itself does not write application code.
+
+## Amend the current stage
+
+A reviewed stage is not an accepted stage. If coverage mistakenly requires later runtime behavior now,
+correct the saved whole plan and use `agentgate replan --plan <name>` with an `update` reason. Resume a held
+task explicitly first. The tool preserves its identity, source snapshots, writer sessions, findings and
+check history, invalidates review and requires a fresh assessment. It starts no writer or check.
+
+The amendment must retain every original requirement's id, text and evidence method and cover it somewhere
+in the plan. Current stage/stream identities and owned files remain; accepted stages cannot change. Add
+separate intermediate criteria instead of marking an end-to-end requirement complete at a foundation stage.
+`covers` means complete delivery at the stage boundary, not a contribution to the eventual result.
+
+Added generated files keep a before-image from recorded snapshots or the original Git tree. Current-stage
+and whole-task baselines are distinct. Original uncommitted bytes that cannot be recovered cause a refusal,
+not a new baseline of finished code. New tasks retain the whole-task Git/dirty-file origin across stages;
+legacy tasks can establish that origin only before accepting their first stage. Unversioned files without
+a recorded preimage are presented in full, rather than assumed unchanged.
+
+An unfinished writer round retains the ability to continue after a metadata amendment; BLOCKED writers still
+need `answer` in their existing sessions. Stream assignments cannot change through replan while that round is
+unfinished. The integration pass cannot rewrite already accepted stages.

@@ -31,7 +31,7 @@ Structured inputs are read from `--file <path>` or `--file -` (stdin); commands 
 | `hold` | `{reason, cancelled?}` | park the task |
 | `resume`, `continue`, `stop`, `status` | — | resume a hold, retry unfinished streams, cancel and observe |
 | `prepare` | `{request, name?, context?, notes?, refresh_designs?}` | read-only worker drafts and saves the plan; reuses an active task's selected packages unless refresh_designs is true |
-| `replan` | complete plan with `update` | replace an idle single-pass task contract while preserving its original baseline |
+| `replan` | complete plan with `update` | amend an idle task or its unaccepted current stage while preserving original evidence |
 | `watch [--all] [--once] [--json] [--no-color]` | — | the user's interactive panel; `--once` prints text, `--json` a structured snapshot |
 
 Setup: `doctor`, `install [--lead claude|codex|both] [--zed] [--uninstall]`, `update [--check]`, `modes`,
@@ -156,7 +156,11 @@ covered by a stage. Each stage has `name`, `goal`, `covers`, `streams`, and opti
 - Continuation of an unfinished task: the complete plan again plus `update` (what changed and why).
   At `awaiting-review` or `reviewed`, apply it with `replan`; `plan save` only saves the file. Replan keeps
   every owned file and all findings, invalidates review and regenerates managed design checks. It cannot
-  resume a hold, change write authority or capture a new baseline. Staged plans use their between-stage flow.
+  resume a hold or change write authority. For staged tasks provide the whole plan: accepted stages and
+  original requirements are immutable; current stage/stream identities and owned files stay. Coverage may
+  move to a later stage, with distinct intermediate criteria. Added outputs use original snapshots/Git bytes,
+  never the implemented bytes as their own baseline; unknown original dirty bytes refuse the amendment.
+  An unfinished round retains its continuation/answer path and cannot change streams through replan.
 - `review` and `clean`: `base_ref` (default `HEAD`) is where the reviewed diff starts.
 - Timeouts: `writer_timeout_s`, `reviewer_timeout_s`, 120–7200; default is the mode's ceiling, else 1200.
 - Architecture revision: add `revise: "<receipt id>"` and `revise_blockers: ["id"]` to the same plan.

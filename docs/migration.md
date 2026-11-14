@@ -74,3 +74,17 @@ module path when the package is not installed in the normal toolkit location.
 `--keep` deliberately keeps newly started stand processes alive and prints their PIDs/log path. Normal
 runs clean up only their own stand and fixture subprocesses. An already running unhealthy stand is an error;
 the checker will not start a second server on the same port or stop a server it does not own.
+
+## 0.14.x to 0.15: staged amendments
+
+A stage with a review is not frozen until accepted. To correct mistaken coverage, keep the whole task's
+requirements and current writer ownership, save the amended full plan with `update`, explicitly resume if
+held, then run `replan --plan <name>` and a fresh `review`. Use `finish` only after that assessment passes.
+Do not recreate the task or rewrite private state. A blocked writer still needs an answer; unfinished
+stream assignments cannot be changed by the metadata-only replan path.
+
+New state records retain `epic_head_before` and `epic_manifest` for late file admission. Existing states
+remain readable. On a legacy first stage the origin can be established from its original stage data;
+after accepted stages, missing historical data for previously uncaptured files is not guessed. Known snapshots
+remain usable. An unrecoverable dirty before-image is a concrete limitation, never permission to rebaseline
+implemented code.

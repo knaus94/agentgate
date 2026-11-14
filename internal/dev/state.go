@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -361,6 +362,7 @@ func begin(resolved *Resolved) (gate *Gate, err error) {
 	gate.Dispositions, gate.Resolutions, gate.Baselines = map[string]Disposition{}, map[string]string{}, map[string]int{}
 	if len(whole.Stages) > 0 {
 		gate.Epic = whole.Plan
+		gate.EpicHead, gate.EpicManifest = gate.HeadBefore, maps.Clone(gate.Manifest)
 		if gate.EpicBaseline, err = capture(whole.Plan.Files()); err != nil {
 			return nil, err
 		}
