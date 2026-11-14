@@ -28,7 +28,7 @@ const usage = `usage:
         [--write-baseline <f>]  record the differences the page has now, and exit 0
         [--baseline <f>]        fail only for differences that are not in that record
 
-exit: 0 the page matches (or only unchanged baseline differences remain), 1 it differs, 2 nothing could be compared`;
+exit: 0 measurements pass (visual acceptance is separate), 1 measured differences, 2 verification could not run`;
 
 const fail = (message, code = 2) => {
   throw Object.assign(new Error(message), { exitCode: code });
@@ -140,12 +140,12 @@ async function main() {
       return;
     }
     if (seen.error) fail(`${seen.error} at ${page.url()}`);
-    const measurement = { device, viewport: { width, height }, documentWidth: seen.documentWidth,
+    const measurement = { device, viewport: { width, height }, referenceScreen: manifest.screen, documentWidth: seen.documentWidth,
       horizontalOverflow: seen.horizontalOverflow, root: { selector: flags.root || 'html', ...seen.root } };
-    const measurementLine = `measurement: ${device} ${width}x${height}; document width ${measurement.documentWidth}; root ${measurement.root.selector} ${seen.root.width}x${seen.root.height}; padding ${seen.root.padding.join('/')}; horizontal overflow ${measurement.horizontalOverflow}`;
+    const measurementLine = `measurement: ${device} ${width}x${height}; document width ${measurement.documentWidth}; root ${measurement.root.selector} ${seen.root.width}x${seen.root.height} at ${seen.root.x},${seen.root.y}; padding ${seen.root.padding.join('/')}; horizontal overflow ${measurement.horizontalOverflow}`;
     console.log(measurementLine);
     const result = compare(spec, seen, map, limits);
-    if (result.compared === 0 && flags['write-baseline']) {
+    if (result.contentCompared === 0 && flags['write-baseline']) {
       // Nothing is built yet: every difference the finished screen has will be a new one.
       fs.writeFileSync(flags['write-baseline'], JSON.stringify({ contract, known: [] }) + '\n');
       console.log(`design baseline: the page shows nothing of “${spec.frame.name}” yet`);
@@ -171,7 +171,8 @@ async function main() {
       result.issues = result.issues.filter((issue) => !known.has(keyOf(issue)));
     }
 
-    const shot = flags.root ? await page.locator(flags.root).first().screenshot() : await page.screenshot({ fullPage: true });
+    const contextShot = await page.screenshot({ fullPage: true });
+    const shot = flags.root ? await page.locator(flags.root).first().screenshot() : contextShot;
     const blank = await context.newPage();
     const data = (bytes) => `data:image/png;base64,${bytes.toString('base64')}`;
     const pictures = await blank.evaluate(diffImages, { design: data(fs.readFileSync(path.join(dir, 'frame.png'))), actual: data(shot),
@@ -185,6 +186,7 @@ async function main() {
       save('marked.png', pictures.marked);
       save('diff.png', pictures.diff);
       fs.writeFileSync(path.join(flags.out, 'actual.png'), shot);
+      fs.writeFileSync(path.join(flags.out, 'page.png'), contextShot);
       fs.writeFileSync(path.join(flags.out, 'report.json'), JSON.stringify({ url: page.url(), package: manifest.digest, measurement, pixels: pictures.ratio, ...result }, null, 1));
       written = { marked: path.join(flags.out, 'marked.png'), diff: path.join(flags.out, 'diff.png') };
     }

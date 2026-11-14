@@ -10,6 +10,72 @@ import (
 	"github.com/knaus94/agentgate/internal/provider"
 )
 
+func TestDesignAcceptanceRequiresEvidenceBeyondMeasurements(t *testing.T) {
+	f := newFixture(t)
+	layoutFixture(t)
+	plan := f.plan("-m implement the page")
+	plan.Design = []DesignRef{screenFixture(t)}
+	f.launch(plan)
+	f.review()
+	input, err := Current().qualityInputs(f.cfg)
+	must(t, err)
+	if input == nil || len(input.Rules) == 0 {
+		t.Fatal("passing measurements were accepted without independent design criteria")
+	}
+	changeQuality(f, func(report *QualityReport) {
+		for i := range report.Rules {
+			if strings.HasSuffix(report.Rules[i].ID, ".appearance") {
+				report.Rules[i].Status = "block"
+				report.Rules[i].Evidence = "The frame dimensions match, but the artwork is cropped differently"
+			}
+		}
+	})
+	f.do("review", func() (any, error) { return ReviewTask(f.cfg, Current(), ReviewInput{Recheck: true}) })
+	f.fails("finish", "artwork is cropped", func() (any, error) { return Finish(f.cfg, Current(), FinishInput{Summary: "measurement PASS"}) })
+	changeQuality(f, func(report *QualityReport) { report.Rules[0].Status = "not_applicable" })
+	f.fails("review", "must be assessed", func() (any, error) { return ReviewTask(f.cfg, Current(), ReviewInput{Recheck: true}) })
+	f.model = nil
+	f.review()
+	gate := Current()
+	must(t, os.Remove(gate.Plan.Design[0].reviewFiles()["page_context_picture"]))
+	f.fails("finish", "task contract changed", func() (any, error) { return Finish(f.cfg, Current(), FinishInput{Summary: "old context"}) })
+	input, err = gate.qualityInputs(f.cfg)
+	must(t, err)
+	if !slices.ContainsFunc(input.Rules, func(rule reviewRule) bool {
+		return strings.HasSuffix(rule.ID, ".placement") && strings.Contains(rule.Unavailable, "page.png")
+	}) {
+		t.Fatal("a cropped screenshot was allowed to prove placement in the shell")
+	}
+	f.review()
+	f.finish()
+}
+
+func TestLegacyDesignContextRefreshDoesNotRebaselineImplementedCode(t *testing.T) {
+	f := newFixture(t)
+	dir := layoutFixture(t)
+	plan := f.plan("-m implement the page")
+	plan.Design = []DesignRef{screenFixture(t)}
+	f.launch(plan)
+	gate := Current()
+	design := &gate.Plan.Design[0]
+	design.Figma = "https://www.figma.com/design/fixture/example?node-id=1-1"
+	manifest := filepath.Join(design.Package, "manifest.json")
+	write(t, manifest, `{"source":{"key":"fixture","node":"1:1"},"frame":{"id":"1:1"},"screen":{"width":400,"height":300}}`)
+	if design.imported() {
+		t.Fatal("a legacy crop without screen context was considered sufficient evidence")
+	}
+	must(t, gate.prepareDesigns(false))
+	if !strings.Contains(fileText(t, filepath.Join(dir, "calls")), "layout new") ||
+		strings.Count(fileText(t, filepath.Join(dir, "baselines")), "baseline") != 1 {
+		t.Fatal("refresh must import context without capturing the implemented page as its baseline")
+	}
+	write(t, manifest, `{"source":{"key":"fixture","node":"1:1"},"frame":{"id":"1:1"},"screen":{"id":"2:1"}}`)
+	write(t, filepath.Join(design.Package, "context.png"), "parent picture")
+	if !design.imported() {
+		t.Fatal("a complete contextual package would be imported again on every review")
+	}
+}
+
 func layoutFixture(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -24,6 +90,14 @@ for arg do
   fi
 done
 if [ -f "$LAYOUT_TEST_DIR/setup" ]; then echo 'cannot observe root' >&2; exit 2; fi
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--out" ]; then
+    shift
+    mkdir -p "$1"
+    for name in actual.png page.png diff.png report.md report.json; do printf '%s\n' 'fixture evidence' > "$1/$name"; done
+  fi
+  shift
+done
 exit 0
 `)
 	must(t, os.Chmod(command, 0o755))
@@ -39,7 +113,9 @@ func screenFixture(t *testing.T) DesignRef {
 	must(t, os.MkdirAll(filepath.Join(dir, "package", "data"), 0o755))
 	write(t, filepath.Join(dir, "screen.json"), `{"url":"/page","root":"#old"}`)
 	write(t, filepath.Join(dir, "package", "data", "spec.json"), `{}`)
-	write(t, filepath.Join(dir, "package", "manifest.json"), `{"digest":"fixture"}`)
+	write(t, filepath.Join(dir, "package", "manifest.json"), `{"digest":"fixture","frame":{"id":"1:1"},"screen":{"id":"1:1"}}`)
+	write(t, filepath.Join(dir, "package", "frame.png"), "fixture picture")
+	write(t, filepath.Join(dir, "package", "brief.md"), "The screen and its shell")
 	return DesignRef{Screen: dir, Root: "#page", URL: "/page", Stream: "core"}
 }
 

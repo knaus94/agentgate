@@ -210,6 +210,8 @@ async function pull(url, flags) {
       }
     }
     for (const scale of scales) write(scale === 1 ? 'frame.png' : `data/frame@${scale}x.png`, Buffer.from(data.png[scale], 'base64'));
+    if (data.context) write('context.png', Buffer.from(data.context, 'base64'));
+    else fs.rmSync(path.join(out, 'context.png'), { force: true });
     write('data/nodes.json', raw);
     write('data/variables.json', JSON.stringify(variables));
     write('data/spec.json', JSON.stringify(spec));

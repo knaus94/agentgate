@@ -10,7 +10,9 @@ A design package is a directory: `brief.md`, `frame.png`, `assets/`, `manifest.j
 
 ## Writing
 
-1. Read `brief.md` once and look at `frame.png` once. That is the whole design.
+1. Read `brief.md` and inspect `frame.png`, plus the supplied context picture when the package is a section.
+   The crop describes its contents; the context also defines placement and spacing to the shell. Revisit the
+   relevant region when correcting a finding.
 2. `⟨Name: variant⟩` is a component instance. Find the project's component of that name and use it with the
    matching props. Build one only when the project has none; then ask for its inside:
    `agentgate figma node <package> <handle>`. Ask for one layer at a time, not for the tree.
@@ -21,6 +23,8 @@ A design package is a directory: `brief.md`, `frame.png`, `assets/`, `manifest.j
 5. Icons and pictures come from `assets/`, unless the project already has the same icon. Add no icon package
    and draw no placeholder. An icon whose colour follows its text or its state is inline SVG with
    `currentColor`, not an `<img>`: an image cannot be recoloured.
+   Preserve the artwork's composition and crop. Matching its CSS box with `object-fit: cover`, a mask or an
+   altered aspect ratio can still cut off the subject; choose those rules from the design's visible result.
 6. The brief shows one state with sample data. Words and numbers that come from data stay data. States the
    brief does not show (loading, empty, error, disabled) follow the project's existing screens; say in
    `deviations` which ones you added and from where.
@@ -38,6 +42,9 @@ A mock-up is one still frame. These are yours to get right, and no number in the
 - Elements by meaning: `<button>` for an action, `<a>` for navigation, never a `<div>` with a click handler;
   headings in order; a `<label>` or `aria-label` on every control, `aria-label` on an icon-only button,
   `alt` on a picture and `aria-hidden` on a decorative icon.
+- An input remains an input or the project's equivalent. Unavailable backend data affects its approved
+  empty/disabled/read-only state, not its semantics, border or focus treatment. Do not replace it by a span
+  or remove a local interaction unless the accepted product contract explicitly requires that change.
 - Focus: every interactive element shows `:focus-visible`; never remove an outline without a replacement.
 - States: hover, active, focus and disabled. Take them from the component's variants in the brief when it
   lists them, otherwise from the project's same control; do not invent a look.
@@ -65,3 +72,5 @@ checks have run; say layout is pending, never that it passed without a gate rece
 missing decision or inability to implement, not because the gate-owned layout phase has not run yet.
 The reviewer checks the design against the page. A check of the resting state does not prove hover, focus,
 pressed or disabled states; identify which states you built and which existing component defines them.
+Report the actual viewport/state coverage. Reference desktop/mobile screenshots alone do not establish
+behavior at intermediate widths; implement the project's responsive rules and use only the agreed checks.

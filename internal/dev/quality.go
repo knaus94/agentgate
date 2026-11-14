@@ -44,6 +44,7 @@ type reviewRule struct {
 	Files        []string          `json:"files"`
 	Instructions map[string]string `json:"instructions"` // snapshot of each declared instruction file
 	Unavailable  string            `json:"unavailable,omitempty"`
+	Required     bool              `json:"required,omitempty"` // applicable by construction; cannot be waived as not_applicable
 }
 
 type qualityCheck struct {
@@ -133,6 +134,7 @@ func (g *Gate) qualityInputs(cfg *config.Config) (*qualityInputs, error) {
 	if err != nil {
 		return nil, err
 	}
+	rules = append(rules, g.designRules()...)
 	if len(g.Plan.Requirements) == 0 && len(rules) == 0 {
 		return nil, nil
 	}
@@ -200,6 +202,9 @@ func (g *Gate) validateQuality(report *QualityReport, input *qualityInputs) erro
 			return fmt.Errorf("invalid review rule result %q", result.ID)
 		}
 		seen[result.ID] = true
+		if input.Rules[index].Required && result.Status == "not_applicable" {
+			return fmt.Errorf("review rule %q must be assessed; missing evidence is unavailable", result.ID)
+		}
 		if input.Rules[index].Unavailable != "" && result.Status != "unavailable" {
 			return fmt.Errorf("review rule %q is unavailable and cannot be approved", result.ID)
 		}

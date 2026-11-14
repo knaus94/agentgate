@@ -31,6 +31,16 @@ model behavior scenario (`visual.enabled: true`), while automated rendered layou
 
 ## Responsive measurement
 
+- Preserve the user's requested fidelity and behavior in requirements. "No overflow" and a matching column
+  count do not replace "matches Figma". Keep shell-to-content spacing, artwork/crop and control semantics in
+  acceptance even when the shell itself is outside the write scope.
+- For a responsive range, inspect the existing breakpoints and propose a bounded matrix with reference
+  widths plus relevant intermediate/breakpoint boundaries. Describe what each row proves (reflow, readable
+  text, usable controls, artwork clipping), not just document width. Ask for authorization of these exact
+  scenarios. If only reference widths were authorized, record that limit; do not claim the range is verified.
+- Missing API/data does not change the kind of control drawn in the design. Specify an input's approved
+  disabled/read-only/empty state and its local behavior separately from backend integration. Do not turn an
+  input into static text or waive its border/geometry because the value is unavailable.
 - Viewport and device are separate. For a phone/tablet reference use device mobile and its intended CSS
   viewport; a narrow desktop context still has desktop scrollbar gutters and no touch. Tablets use mobile
   with their own viewport. Keep desktop for desktop references, including narrow desktop windows.
@@ -54,7 +64,8 @@ model behavior scenario (`visual.enabled: true`), while automated rendered layou
   a made-up backend contract. Drawn sample data is not real user data.
 - Select corresponding Figma content nodes and implementation roots. A section/page is a catalogue, not an
   exportable screen. Reused app shell is outside a page-content task: select its content node instead of
-  ignoring most of a full-screen design. Include the requested states/widths; ask when the scope is ambiguous.
+  ignoring most of a full-screen design. The package also retains the parent screen for placement review;
+  selecting content must not remove its gap to the header from acceptance. Include the requested states/widths.
 - Do not pull or parse Figma data. The tool imports the plan's selected nodes at launch; writers receive the
   brief/assets and reviewers see the pictures. Do not introduce arbitrary tolerances or exception maps.
 - Do not put generated layout commands or baseline paths in checks. The gate owns them. A new page's root

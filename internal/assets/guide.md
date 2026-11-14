@@ -199,6 +199,11 @@ implement the code; they run only their declared source checks. The gate owns la
 lifecycle, baseline files and output paths. `review` measures, then an independent reviewer checks pictures
 and behavior. A missing tool prerequisite is `checks_failed.setup`, not a CSS defect for a writer to guess at.
 
+A layout PASS covers measured properties only. Built-in design rules require the existing reviewer to
+assess artwork/crop, placement in the shell, control semantics and coverage/exceptions. Missing required
+evidence prevents finish. Report the tested widths/states and accepted differences precisely: two endpoint
+screenshots do not establish all responsive behavior. The lead follows these receipts, not the pictures.
+
 If the measurement contract is wrong, use `prepare` with notes and the current task context, then
 `agentgate replan --plan <name>` with a concrete update reason. It preserves the gate, original source snapshot,
 findings and writer sessions, regenerates managed checks and invalidates review. It starts no workers or

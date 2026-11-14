@@ -44,6 +44,13 @@ export function compare(spec, page, map = {}, limits = defaults) {
 
   // 1. Texts are found by their words; among equal ones, the nearest to where the design puts it.
   const found = new Map(); // layer id -> { element, shift, sameWords }
+  const root = nodes.find((node) => !node.parent && !node.text && spec.frame &&
+    (node.id === spec.frame.id || (node.box[2] === spec.frame.width && node.box[3] === spec.frame.height)));
+  if (root && page.root) {
+    const element = page.boxes.find((box) => box.root) || { where: 'root', radius: [],
+      box: [0, 0, page.root.width, page.root.height] };
+    found.set(root.id, { element, shift: [0, 0] });
+  }
   const usedText = new Set();
   const nearest = (node, at, accept) => page.texts.map((text, index) => ({ text, index }))
     .filter(({ text, index }) => !usedText.has(index) && accept(text))
@@ -69,7 +76,7 @@ export function compare(spec, page, map = {}, limits = defaults) {
   };
   const usedAssets = new Set();
   for (const node of nodes) {
-    if (node.text) continue;
+    if (node.text || found.has(node.id)) continue;
     if (!(node.asset || (node.fills || []).length > 0 || node.stroke)) {
       skipped.unpainted++;
       continue;
@@ -155,8 +162,9 @@ export function compare(spec, page, map = {}, limits = defaults) {
     if (fill && actual.background && fill.opacity >= 1 && actual.background.a >= 1 && colourGap(fill.color, actual.background) > limits.colour) {
       report(node, actual, 'colour', `background ${fill.color} → ${hexOf(actual.background)}`, 35);
     }
-    if (node.stroke && typeof node.stroke.weight === 'number' && actual.border && Math.abs(actual.border.width - node.stroke.weight) > 0.5) {
-      report(node, actual, 'border', `border ${node.stroke.weight} → ${actual.border.width}`, 20);
+    if (node.stroke && typeof node.stroke.weight === 'number') {
+      const width = actual.border?.width || 0;
+      if (Math.abs(width - node.stroke.weight) > 0.5) report(node, actual, 'border', `border ${node.stroke.weight} → ${width}`, 20);
     }
   }
 
@@ -188,14 +196,15 @@ export function compare(spec, page, map = {}, limits = defaults) {
   issues.sort((a, b) => b.weight - a.weight);
   const matchedWords = new Set([...usedText].map((index) => page.texts[index].content));
   const extra = page.texts.filter((text, index) => text.kind === 'run' && !usedText.has(index) && !matchedWords.has(text.content));
-  return { issues, compared: found.size, total: spec.nodes.length, skipped, extra: extra.length };
+  const contentCompared = found.size - (root && nodes.length > 1 && found.has(root.id) ? 1 : 0);
+  return { issues, compared: found.size, contentCompared, total: spec.nodes.length, skipped, extra: extra.length };
 }
 
 export function summary(result, pixels, pictures, limit = 20) {
   const kinds = {};
   for (const issue of result.issues) kinds[issue.kind] = (kinds[issue.kind] || 0) + 1;
   const counts = Object.entries(kinds).map(([kind, count]) => `${count} ${kind}`).join(', ');
-  const lines = [`design check: ${result.issues.length ? 'FAIL' : 'PASS'} — ${result.issues.length ? `${result.issues.length} ${result.known === undefined ? '' : 'new '}differences (${counts})` : result.known === undefined ? 'no differences' : 'no new differences'}` +
+  const lines = [`layout measurements: ${result.issues.length ? 'FAIL' : 'PASS'} — ${result.issues.length ? `${result.issues.length} ${result.known === undefined ? '' : 'new '}differences (${counts})` : result.known === undefined ? 'no measured differences' : 'no new measured differences'}` +
     ` · compared ${result.compared} of ${result.total} layers` + (pixels === undefined ? '' : ` · ${(pixels * 100).toFixed(1)}% of pixels differ`)];
   result.issues.slice(0, limit).forEach((issue, index) => {
     lines.push(`${String(index + 1).padStart(2)} ‹${issue.ref}› ${issue.layer}${issue.element ? ` → ${issue.element}` : ''}: ${issue.text}`);
@@ -207,6 +216,7 @@ export function summary(result, pixels, pictures, limit = 20) {
   if (result.extra) notes.push(`${result.extra} texts on the page are not in the design`);
   if (result.known) notes.push(`${result.known} differences were there before the task and are not listed`);
   if (notes.length) lines.push(`not compared: ${notes.join('; ')}`);
+  lines.push('visual acceptance: pending independent review of artwork/cropping, controls, shell placement and declared responsive coverage; measurement PASS is not design approval');
   if (pictures) lines.push(`pictures: ${pictures.marked} (numbered as above), ${pictures.diff}`);
   return lines.join('\n') + '\n';
 }

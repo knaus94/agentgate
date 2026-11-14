@@ -59,7 +59,33 @@ func (d DesignRef) digest() string {
 		exceptions = append(exceptions, screen...)
 	}
 	return digest(map[string]any{"package": manifest.Digest, "map": string(exceptions), "url": d.URL, "root": d.Root, "viewport": d.Viewport, "device": d.Device,
-		"render": entry(filepath.Join(d.dir(), "last", "actual.png"))})
+		"evidence": d.reviewSnapshot()})
+}
+
+func (d DesignRef) reviewFiles() map[string]string {
+	last := filepath.Join(d.dir(), "last")
+	context := filepath.Join(d.Package, "context.png")
+	var manifest struct {
+		Frame  struct{ ID string }
+		Screen struct{ ID string }
+	}
+	raw, _ := os.ReadFile(filepath.Join(d.Package, "manifest.json"))
+	_ = json.Unmarshal(raw, &manifest)
+	if manifest.Frame.ID != "" && manifest.Frame.ID == manifest.Screen.ID {
+		context = filepath.Join(d.Package, "frame.png")
+	}
+	return map[string]string{"brief": filepath.Join(d.Package, "brief.md"), "design_picture": filepath.Join(d.Package, "frame.png"),
+		"design_context_picture": context, "page_context_picture": filepath.Join(last, "page.png"),
+		"page_picture": filepath.Join(last, "actual.png"), "differences_picture": filepath.Join(last, "diff.png"),
+		"check_report": filepath.Join(last, "report.md"), "measurement": filepath.Join(last, "report.json")}
+}
+
+func (d DesignRef) reviewSnapshot() map[string]string {
+	out := map[string]string{}
+	for name, path := range d.reviewFiles() {
+		out[name] = entry(path)
+	}
+	return out
 }
 
 // dir is where the measurements of one design in one checkout are kept: what was there before the task, and
@@ -110,7 +136,10 @@ func (d DesignRef) imported() bool {
 	if d.Figma == "" {
 		return true
 	}
-	var manifest struct{ Source struct{ Key, Node string } }
+	var manifest struct {
+		Source struct{ Key, Node string }
+		Screen struct{ ID string }
+	}
 	raw, err := os.ReadFile(filepath.Join(d.Package, "manifest.json"))
 	if err != nil || json.Unmarshal(raw, &manifest) != nil {
 		return false
@@ -121,7 +150,8 @@ func (d DesignRef) imported() bool {
 	}
 	parts := strings.Split(strings.Trim(link.Path, "/"), "/")
 	return len(parts) >= 2 && manifest.Source.Key == parts[1] &&
-		manifest.Source.Node == strings.ReplaceAll(link.Query().Get("node-id"), "-", ":")
+		manifest.Source.Node == strings.ReplaceAll(link.Query().Get("node-id"), "-", ":") && manifest.Screen.ID != "" &&
+		(manifest.Screen.ID == manifest.Source.Node || fileExists(filepath.Join(d.Package, "context.png")))
 }
 
 // Older saved plans contain expanded layout commands without an owner marker. Recognize only the gate's
@@ -270,9 +300,10 @@ func (g *Gate) designFor(stream string) any {
 			continue
 		}
 		out = append(out, map[string]any{"brief": filepath.Join(design.Package, "brief.md"), "picture": filepath.Join(design.Package, "frame.png"),
-			"assets":       filepath.Join(design.Package, "assets"),
-			"verification": "The gate runs layout and sends measured differences back to this stream. Do not start the stand or edit its baselines, maps or tolerances.",
-			"layer":        "agentgate figma node " + design.Package + " <handle>"})
+			"context_picture": design.reviewFiles()["design_context_picture"],
+			"assets":          filepath.Join(design.Package, "assets"),
+			"verification":    "The gate runs layout and sends measured differences back to this stream. Do not start the stand or edit its baselines, maps or tolerances.",
+			"layer":           "agentgate figma node " + design.Package + " <handle>"})
 	}
 	if out == nil {
 		return nil
@@ -297,13 +328,55 @@ func (g *Gate) designReview() ([]map[string]any, []string) {
 	var out []map[string]any
 	var dirs []string
 	for _, design := range g.Plan.Design {
-		last := filepath.Join(design.dir(), "last")
-		out = append(out, map[string]any{"brief": filepath.Join(design.Package, "brief.md"), "design_picture": filepath.Join(design.Package, "frame.png"),
-			"page_picture": filepath.Join(last, "actual.png"), "differences_picture": filepath.Join(last, "diff.png"),
-			"check_report": filepath.Join(last, "report.md"), "exceptions": design.Map, "stream": design.Stream})
-		dirs = append(dirs, design.dir())
+		item := map[string]any{"id": design.reviewID(), "exceptions": design.Map, "stream": design.Stream}
+		for name, path := range design.reviewFiles() {
+			item[name] = path
+		}
+		out = append(out, item)
+		pkg, _ := filepath.Abs(design.Package)
+		dirs = append(dirs, design.dir(), pkg)
 	}
 	return out, dirs
+}
+
+func (d DesignRef) reviewID() string {
+	return "design." + filepath.Base(d.dir())
+}
+
+// Reuse the existing quality assessment: measurements alone cannot accept a design, even on a plan that
+// omitted requirements. These rules are judged by the same independent reviewer, not another worker.
+func (g *Gate) designRules() []reviewRule {
+	criteria := []struct {
+		name, instruction string
+		files             []string
+	}{
+		{"appearance", "Open design_picture, page_picture and differences_picture. Inspect artwork identity, crop, aspect ratio, clipping, masks, borders, shadows and text. Matching boxes do not prove matching pixels. Explain the visible pixel differences with concrete regions and accepted reasons; a measurement PASS or pixel percentage alone proves nothing. Report defects as findings. Missing/unreadable pictures mean unavailable.", []string{"brief", "design_picture", "page_picture", "differences_picture", "check_report"}},
+		{"placement", "Open design_context_picture and page_context_picture. Compare the selected content in its shell: header-to-title gap, outer padding, width and relationship to adjacent sections. Use referenceScreen.root and measurement.root coordinates when available; cite expected and observed geometry. Preserving the shell does not waive its spacing to the new content. A cropped root image alone cannot prove placement. Missing context means unavailable.", []string{"design_context_picture", "page_context_picture", "measurement"}},
+		{"controls", "Inspect the scoped code and the design's controls. An input stays an input (or the project's equivalent), with its border, label, focus and approved disabled/read-only state. Missing backend data never authorizes replacing it by a span or removing a local interaction. Distinguish data unavailability from control semantics. Cite the actual implementation and the accepted behavior; if there are no controls, state that after inspection.", []string{"brief", "design_picture"}},
+		{"coverage", "Read check_report, measurement and exceptions. Account for ignored subtrees and baseline differences; changed representation or unavailable data is not a blanket waiver of geometry, border or semantics. Prefer dynamic text mapping over ignoring a control subtree. Name exactly the observed devices, widths and states. Endpoint screenshots and no overflow do not prove responsive behavior between them. For a requested responsive range, require the agreed intermediate/breakpoint observations; absent required evidence means unavailable. Do not run extra browsers or widen authorization.", []string{"check_report", "measurement"}},
+	}
+	var out []reviewRule
+	for _, design := range g.Plan.Design {
+		var files []string
+		for _, stream := range g.Plan.Streams {
+			if stream.Name == design.Stream {
+				files = stream.Files
+			}
+		}
+		paths := design.reviewFiles()
+		for _, criterion := range criteria {
+			rule := reviewRule{ID: design.reviewID() + "." + criterion.name, Mode: "blocking", Files: files, Required: true,
+				Instructions: map[string]string{"builtin/design": "Assess design packet " + design.reviewID() + ". " + criterion.instruction}}
+			for _, name := range criterion.files {
+				if info, err := os.Stat(paths[name]); err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
+					rule.Unavailable = "Missing design evidence: " + paths[name] + "; refresh the design package/check through the gate, never approve measurements alone."
+					break
+				}
+			}
+			out = append(out, rule)
+		}
+	}
+	return out
 }
 
 func (g *Gate) designDigests() []string {

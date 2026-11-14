@@ -20,6 +20,7 @@ Needs Node 20+ and `playwright-core` with a Chromium (the browser tooling of age
 |---|---|---|
 | `brief.md` | workers | the layers as intent: layout rules, type, colour, tokens. About 2 thousand tokens for a page section |
 | `frame.png` | workers | the picture of the node |
+| `context.png` | workers | the parent screen for placement review when the node is a section |
 | `assets/` | workers | icons as SVG, pictures as PNG |
 | `manifest.json` | the lead | source, file version and a digest of the content, to pin in a plan |
 | `data/` | tools only | the node tree in Figma's REST format and its normalised form |
@@ -34,6 +35,11 @@ narrower node when it is too many.
 them to the design without any markup in the code: a text by its words, a box by where it lies. It reports
 position (against the matched parent, so a moved panel is one line), size, font, colour, radius and what is
 absent. Run it as a declared check of the task; the stand it opens is the project's business.
+
+Measurement PASS is not visual approval. The gate's existing reviewer separately assesses appearance/crop,
+placement in the shell, controls and coverage through mandatory design review rules. Output includes the
+cropped `actual.png` and full `page.png`; root geometry is measured even without a fill. Pixel comparison
+retains missing/extra image area instead of clipping to the smaller screenshot.
 
 A map file names what must not be judged: `{"ignore": {"<handle>": "why"}, "dynamic": ["<handle>"]}`.
 

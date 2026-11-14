@@ -10,11 +10,29 @@ import test from 'node:test';
 import { openBrowser } from '../lib/browser.mjs';
 import { listFrames, exportNode } from '../lib/figma-page.mjs';
 import { serveFixtures } from '../lib/fixtures.mjs';
-import { readPage } from '../lib/page-read.mjs';
+import { readPage, diffImages } from '../lib/page-read.mjs';
 import { compare } from '../lib/compare.mjs';
 
 const check = fileURLToPath(new URL('../bin/check.mjs', import.meta.url));
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test('layout measurements do not hide unpainted root geometry or an absent border', async (t) => {
+  const spec = { frame: { width: 200, height: 100 }, nodes: [
+    { id: 'root', ref: 'root', name: 'Content', box: [0, 0, 200, 100] },
+    { id: 'field', ref: 'field', parent: 'root', name: 'Promo field', box: [0, 0, 200, 50],
+      fills: [{ color: '#112233', opacity: 1 }], stroke: { weight: 1, paints: [{ color: '#FFFFFF', opacity: 1 }] } },
+  ] };
+  const page = { root: { width: 200, height: 124 }, texts: [], boxes: [
+    { where: 'span', tag: 'span', painted: true, box: [0, 0, 200, 50], background: { r: 17, g: 34, b: 51, a: 1 }, border: null },
+  ] };
+  const result = compare(spec, page);
+  await t.test('the selected root still has a measurable height without a fill', () => {
+    assert.ok(result.issues.some((issue) => issue.ref === 'root' && issue.kind === 'size'));
+  });
+  await t.test('a missing border differs from the reference border', () => {
+    assert.ok(result.issues.some((issue) => issue.ref === 'field' && issue.kind === 'border'));
+  });
+});
 
 test('explicit CSS mappings keep overlapping artwork distinct and expose real offsets', async () => {
   const browser = await openBrowser();
@@ -31,6 +49,20 @@ test('explicit CSS mappings keep overlapping artwork distinct and expose real of
     assert.ok(result.issues.some((issue) => issue.ref === 'front' && issue.kind === 'position'));
     const ambiguous = await page.evaluate(readPage, { root: '#root', select: { front: 'img' } });
     assert.match(ambiguous.error, /more than one/);
+    const pictures = await page.evaluate(() => {
+      const png = (width, height) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        const context = canvas.getContext('2d');
+        context.fillStyle = '#112233'; context.fillRect(0, 0, width, height);
+        return canvas.toDataURL();
+      };
+      return {
+        design: png(100, 100), actual: png(100, 50), crop: { x: 0, y: 0, width: 100, height: 100 }, marks: [],
+      };
+    });
+    const pixels = await page.evaluate(diffImages, pictures);
+    assert.ok(pixels.ratio >= 0.5, 'missing half of the image must not be cropped out of the difference');
   } finally {
     await browser.close();
   }
@@ -50,6 +82,25 @@ test('section catalogues expose content nodes without trying to render a section
     const exported = await exportNode({ nodeId: '1:1', scales: [1] });
     assert.equal(exported.rest.document.type, 'SECTION');
     assert.deepEqual(exported.png, {});
+    const renders = [];
+    for (const [node, parent, bounds] of [
+      [frame, section, { x: 100, y: 200, width: 1200, height: 900 }],
+      [content, frame, { x: 120, y: 328, width: 800, height: 600 }],
+    ]) {
+      node.parentNode = parent;
+      node.absoluteBoundingBox = bounds;
+      node.getRestfulJSON = () => ({ document: { id: node.guid, absoluteBoundingBox: bounds } });
+      node.loadImagesAndExport = async ({ exportSettings }) => {
+        renders.push({ id: node.guid, absolute: exportSettings[0].useAbsoluteBounds });
+        return new TextEncoder().encode(node.guid);
+      };
+    }
+    const selected = await exportNode({ nodeId: content.guid, scales: [1] });
+    assert.equal(selected.rest.document.id, content.guid);
+    assert.equal(selected.screen.id, frame.guid);
+    assert.deepEqual(selected.screen.root, { x: 20, y: 128, width: 800, height: 600 });
+    assert.equal(atob(selected.context), frame.guid);
+    assert.deepEqual(renders, [{ id: content.guid, absolute: true }, { id: frame.guid, absolute: true }]);
   } finally {
     delete globalThis.window;
   }
@@ -146,6 +197,7 @@ process.on('SIGTERM',()=>server.close(()=>process.exit(0)));
   await run(['--baseline', baseline, '--out', out], 0);
   assert.equal(JSON.parse(fs.readFileSync(path.join(out, 'report.json'))).issues.length, 0);
   assert.ok(fs.statSync(path.join(out, 'actual.png')).size > 0);
+  assert.ok(fs.statSync(path.join(out, 'page.png')).size > 0);
   fs.writeFileSync(pageFile, html(220));
   await run(['--baseline', baseline], 1);
   await run(['--write-baseline', baseline], 0);
@@ -175,7 +227,7 @@ process.on('SIGTERM',()=>server.close(()=>process.exit(0)));
   assert.equal(measurement.root.width, 390);
   assert.deepEqual(measurement.root.padding, [0, 12, 0, 12]);
   // A narrow child is not equivalent to the padded frame, even in a correctly emulated mobile browser.
-  const wrongRoot = await run(['--viewport', '390x844', '--device', 'mobile'], 2);
+  const wrongRoot = await run(['--viewport', '390x844', '--device', 'mobile'], 1);
   assert.match(wrongRoot, /root #panel 366x100/);
   const mapping = path.join(dir, 'ambiguous-map.json');
   fs.writeFileSync(mapping, JSON.stringify({ select: { shell: 'main, section' } }));

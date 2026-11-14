@@ -35,6 +35,23 @@ questions and authorization, not exports, CSS inspection or screenshot compariso
 and source checks; the gate owns layout commands, baseline files and stand lifecycle. It sends measured
 failures back through `fix`, and an independent reviewer checks pictures.
 
+`layout measurements: PASS` means only that the measured properties pass, including any unchanged baseline
+differences. The existing reviewer must also assess four built-in blocking rules per design: appearance
+(including crop), placement in the shell, control semantics, and exceptions/viewport/state coverage. This
+applies even without plan requirements. Missing pictures or other required evidence prevent completion;
+these rules cannot be waived as `not_applicable`. No extra reviewer is started.
+
+Packages retain the parent screen as `context.png`; layout saves the full implementation as `page.png` next
+to the cropped `actual.png`. Their coordinates and pictures preserve the header-to-content relationship.
+Figma references are exported at the node's absolute bounds so overflow cannot shift the comparison's origin
+([Figma export settings](https://developers.figma.com/docs/plugins/api/ExportSettings/)). Older linked packages
+without screen context are reimported by the gate; this never captures a new implementation baseline.
+
+For a requested responsive range, preparation proposes reference widths and relevant intermediate/breakpoint
+observations from the repository's layout rules. Only approved scenarios run. Two endpoint screenshots and
+no overflow do not establish behavior throughout the range. Missing backend data changes the approved
+empty/disabled/read-only state of a control, not whether it remains an input or button.
+
 Use `replan --plan <name>` with an update reason to correct an idle task's measurement contract. This retains
 its original source snapshot and findings; it regenerates managed layout checks and invalidates review.
 No new baseline is captured after implementation. An absent/mismatched baseline makes all differences count.
@@ -61,6 +78,7 @@ run and must be repaired before asking a writer to change CSS.
 |---|---|---|
 | `brief.md` | the writer, the reviewer | the layers as intent: layout rules, type, colour, design tokens |
 | `frame.png` | the writer, the reviewer | the picture of the node |
+| `context.png` | the writer, the reviewer | the parent screen when the selected node is a section |
 | `assets/` | the writer | icons as SVG, pictures as PNG |
 | `manifest.json` | the gate | source, file version and a digest of the content: a design pulled again makes earlier reviews stale |
 | `data/` | tools only | the node tree in Figma's REST format |

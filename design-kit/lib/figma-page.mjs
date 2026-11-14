@@ -45,8 +45,8 @@ export async function exportNode({ nodeId, scales, svg }) {
     }
     return btoa(text);
   };
-  const render = async (settings) => base64(await node.loadImagesAndExport({
-    exportSettings: [{ suffix: '', contentsOnly: true, useAbsoluteBounds: false, colorProfile: 'DOCUMENT', useBicubicSampler: true, ...settings }],
+  const render = async (settings, target = node) => base64(await target.loadImagesAndExport({
+    exportSettings: [{ suffix: '', contentsOnly: true, useAbsoluteBounds: true, colorProfile: 'DOCUMENT', useBicubicSampler: true, ...settings }],
   }));
   // A page or a section has no box and no picture of its own: only its description is returned, to say so.
   if (!node.size || !node.absoluteBoundingBox || ['CANVAS', 'SECTION', 'DOCUMENT'].includes(node.type)) {
@@ -55,10 +55,16 @@ export async function exportNode({ nodeId, scales, svg }) {
   // The frame the node sits in is the width the screen was drawn for: the implementation is opened at that size.
   let top = node;
   while (top.parentNode && !['CANVAS', 'SECTION', 'DOCUMENT'].includes(top.parentNode.type)) top = top.parentNode;
-  const out = { rest: node.getRestfulJSON(), png: {}, screen: { width: Math.round(top.size.x), height: Math.round(top.size.y) } };
+  const rest = node.getRestfulJSON();
+  const box = rest.document.absoluteBoundingBox;
+  const origin = top === node ? box : top.getRestfulJSON().document.absoluteBoundingBox;
+  const out = { rest, png: {}, screen: { id: top.guid, name: top.name,
+    width: Math.round(top.size.x), height: Math.round(top.size.y),
+    root: { x: Math.round(box.x - origin.x), y: Math.round(box.y - origin.y), width: Math.round(box.width), height: Math.round(box.height) } } };
   for (const scale of scales) {
     out.png[scale] = await render({ imageType: 'PNG', constraint: { type: 'CONTENT_SCALE', value: scale } });
   }
+  if (top !== node) out.context = await render({ imageType: 'PNG', constraint: { type: 'CONTENT_SCALE', value: 1 } }, top);
   if (svg) {
     out.svg = await render({ imageType: 'SVG', constraint: { type: 'CONTENT_SCALE', value: 1 }, svgIDMode: 'ALWAYS', svgOutlineText: false, svgDataName: true });
   }

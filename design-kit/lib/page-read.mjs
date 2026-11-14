@@ -98,7 +98,7 @@ export function readPage(input) {
   const boxes = [];
   const media = new Set(['IMG', 'SVG', 'CANVAS', 'VIDEO', 'INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'PICTURE']);
   // The root is a layer of the design like any other.
-  for (const element of [...(rootSelector ? [root] : []), ...root.querySelectorAll('*')]) {
+  for (const element of [root, ...root.querySelectorAll('*')]) {
     if (element.closest('svg') && element.tagName.toLowerCase() !== 'svg') continue;
     const rect = element.getBoundingClientRect();
     if (rect.width < 1 || rect.height < 1 || !shown(element)) continue;
@@ -108,8 +108,9 @@ export function readPage(input) {
     const painted = (background && background.a > 0) || style.backgroundImage !== 'none' || border > 0 || style.boxShadow !== 'none' ||
       media.has(element.tagName.toUpperCase());
     const layout = style.display.includes('flex') || style.display.includes('grid');
-    if (!painted && !layout && !selected.has(element)) continue;
+    if (!painted && !layout && !selected.has(element) && element !== root) continue;
     boxes.push({ box: box(rect), where: describe(element), painted, tag: element.tagName.toLowerCase(),
+      root: element === root,
       refs: selected.get(element),
       background: background && background.a > 0 ? background : undefined, image: style.backgroundImage !== 'none' || undefined,
       border: border > 0 ? { width: border, color: rgba(style.borderTopColor) } : undefined,
@@ -129,14 +130,15 @@ export function readPage(input) {
   const rootStyle = getComputedStyle(root);
   return { texts, boxes, documentWidth: document.documentElement.clientWidth,
     horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-    root: { width: round(rootRect.width), height: round(Math.max(rootRect.height, root.scrollHeight || 0)),
+    root: { x: round(rootRect.left + window.scrollX), y: round(rootRect.top + window.scrollY),
+      width: round(rootRect.width), height: round(rootRect.height),
       padding: [rootStyle.paddingTop, rootStyle.paddingRight, rootStyle.paddingBottom, rootStyle.paddingLeft].map((value) => px(value) ?? 0) } };
 }
 
 // Motion makes two runs differ: it is stopped before anything is measured.
 export const still = `*, *::before, *::after { animation: none !important; transition: none !important; caret-color: transparent !important; scroll-behavior: auto !important; }`;
 
-// Two pictures of the same size, compared pixel by pixel in a canvas; returns the share that differs and a picture of where.
+// Compare at native size, retaining areas present in only one picture.
 export async function diffImages({ design, actual, crop, marks }) {
   const load = (source) => new Promise((resolve, reject) => {
     const image = new Image();
@@ -145,17 +147,18 @@ export async function diffImages({ design, actual, crop, marks }) {
     image.src = source;
   });
   const [left, right] = await Promise.all([load(design), load(actual)]);
-  const width = Math.min(crop.width, right.width);
-  const height = Math.min(crop.height, right.height);
-  const canvas = (image, x, y) => {
+  const width = Math.ceil(Math.max(crop.width, right.width));
+  const height = Math.ceil(Math.max(crop.height, right.height));
+  const canvas = (image, x, y, clipWidth = width, clipHeight = height) => {
     const element = document.createElement('canvas');
     element.width = width;
     element.height = height;
     const context = element.getContext('2d', { willReadFrequently: true });
-    context.drawImage(image, x, y, width, height, 0, 0, width, height);
+    context.beginPath(); context.rect(0, 0, clipWidth, clipHeight); context.clip();
+    context.drawImage(image, -x, -y);
     return { element, context, data: context.getImageData(0, 0, width, height) };
   };
-  const a = canvas(left, crop.x, crop.y);
+  const a = canvas(left, crop.x, crop.y, crop.width, crop.height);
   const b = canvas(right, 0, 0);
   const out = a.context.createImageData(width, height);
   let different = 0;
@@ -166,7 +169,10 @@ export async function diffImages({ design, actual, crop, marks }) {
     // Perceived difference; small ones are antialiasing, not layout.
     const delta = 0.299 * dr * dr + 0.587 * dg * dg + 0.114 * db * db;
     const grey = 0.1 * (0.299 * b.data.data[index] + 0.587 * b.data.data[index + 1] + 0.114 * b.data.data[index + 2]) + 20;
-    if (delta > 900) {
+    const x = index / 4 % width;
+    const y = Math.floor(index / 4 / width);
+    const missing = (x < crop.width && y < crop.height) !== (x < right.width && y < right.height);
+    if (missing || delta > 900) {
       different++;
       out.data.set([255, 40, 40, 255], index);
     } else {
@@ -190,7 +196,7 @@ export async function diffImages({ design, actual, crop, marks }) {
     pen.fillText(label, mark.box[0] + 3, Math.max(11, mark.box[1] - 4));
   }
   return { ratio: different / (width * height), width, height, diff, marked: b.element.toDataURL('image/png'), designCrop: (() => {
-    const copy = canvas(left, crop.x, crop.y);
+    const copy = canvas(left, crop.x, crop.y, crop.width, crop.height);
     return copy.element.toDataURL('image/png');
   })() };
 }

@@ -15,6 +15,9 @@ screens by states, roles and viewports.
    cite its saved basename. Use snapshots to find controls, then act on them directly.
 4. Compare with the scenario's expected result. Check console and network when relevant, and tell known stand
    limits and older defects apart from regressions.
+   Report only what these scenarios establish. No overflow at two widths does not prove intermediate
+   responsive behavior, matching Figma, correct artwork crop or a usable input. If the expected result asks
+   for those properties, observe them explicitly; otherwise state the coverage limit in the summary.
 5. For each `recheck` finding, reproduce it and add a `resolutions` entry with a fresh screenshot.
 
 Findings state what was observed, what was expected, the user impact and the smallest remedy.

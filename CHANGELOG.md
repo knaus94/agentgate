@@ -2,6 +2,20 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.12.0
+
+- Design acceptance uses the existing review-rule mechanism for appearance/crop, placement in the shell,
+  control semantics and coverage/exceptions. Passing measurements alone cannot complete a design task;
+  missing evidence blocks it. The same reviewer assesses these rules, with no additional agent.
+- Figma exports use absolute node bounds and retain the parent screen for placement review. Layout saves
+  both the selected root and full page, including root coordinates. Changes to these artifacts invalidate
+  earlier acceptance. Older linked packages without context are reimported without replacing task baselines.
+- Measurement now includes unpainted root dimensions and absent borders. Pixel comparison keeps missing
+  or extra image area instead of silently cropping both sides to the smaller picture. Output distinguishes
+  measurement PASS from independent visual acceptance.
+- Preparation and implementation instructions preserve input semantics when API data is unavailable and
+  scope responsive claims to the observed widths/states, including agreed breakpoint checks.
+
 ## 0.11.0
 
 - Phone and tablet comparisons have an explicit `device: mobile` mode, separate from CSS viewport size.

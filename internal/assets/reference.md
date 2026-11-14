@@ -165,6 +165,11 @@ The first reviewer receives `quality {requirements, rules, checks, browser}` and
 alongside `reports`. In light mode `review` returns the same inputs to the lead; supply the object as
 `lead_review.quality`. Other lanes keep their ordinary report schema. No additional agent is started.
 
+Plans with `design` always add built-in blocking `design.<id>.appearance|placement|controls|coverage` rules.
+Their `required: true` means they cannot be waived as `not_applicable`. Missing evidence is `unavailable`.
+The design packet supplies cropped and full-context pictures and the measurement report. A layout command's
+exit 0 proves measured properties only; these independent judgements are still required before finish.
+
 ```json
 {
   "requirements": [{

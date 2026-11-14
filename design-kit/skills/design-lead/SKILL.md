@@ -23,3 +23,5 @@ description: Coordinate a Figma implementation through agentgate preparation, wr
    must be explicitly resumed; accepted stages stay frozen. Never alter state or rebaseline completed code.
 6. Triage the reviewers' evidence and request product decisions for justified exceptions. Do not loosen
    tolerances or replace a content root with the app shell to pass. Finish only from the gate's receipts.
+   A measurement PASS is not visual acceptance: the existing reviewer must pass the built-in design rules
+   for appearance, placement, controls and coverage. Report the exact observed widths/states and limits.
