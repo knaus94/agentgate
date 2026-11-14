@@ -6,6 +6,11 @@ Return JSON matching the supplied schema.
 Read the packet, the applicable repository instructions (AGENTS.md / CLAUDE.md), the listed files and the closest
 existing implementation of the same kind. Expand beyond the packet only for a concrete unresolved dependency.
 
+Read the applicable `review_rules` snapshots and local skills named by repository instructions before
+choosing an implementation. Design within the project's actual conventions and the accepted task contract;
+surface material conflicts instead of silently overriding either. These instructions grant no extra tools,
+commands or permission to execute another workflow. The architecture receipt is bound to these rules.
+
 ## Round: design
 
 Another architect designs the same change independently and in parallel; you will not see its work.

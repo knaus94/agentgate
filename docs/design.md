@@ -35,6 +35,10 @@ questions and authorization, not exports, CSS inspection or screenshot compariso
 and source checks; the gate owns layout commands, baseline files and stand lifecycle. It sends measured
 failures back through `fix`, and an independent reviewer checks pictures.
 
+`agentgate layout` resolves `design.stand` through the same configuration as preparation, including extensions
+and personal checkout overrides. It uses the selected screen's repository even when invoked from elsewhere.
+Direct standalone Node use reads `.agentgate.json` only.
+
 `layout measurements: PASS` means only that the measured properties pass, including any unchanged baseline
 differences. The existing reviewer must also assess four built-in blocking rules per design: appearance
 (including crop), placement in the shell, control semantics, and exceptions/viewport/state coverage. This
@@ -49,8 +53,9 @@ without screen context are reimported by the gate; this never captures a new imp
 
 For a requested responsive range, preparation proposes reference widths and relevant intermediate/breakpoint
 observations from the repository's layout rules. Only approved scenarios run. Two endpoint screenshots and
-no overflow do not establish behavior throughout the range. Missing backend data changes the approved
-empty/disabled/read-only state of a control, not whether it remains an input or button.
+no overflow do not establish behavior throughout the range. Control semantics and unavailable-data states
+come from the accepted task and [project rules/skills](extensions.md#repository-frontend-skills), not the
+appearance of a still image or a universal HTML/CSS prescription.
 
 Use `replan --plan <name>` with an update reason to correct an idle task's measurement contract. This retains
 its original source snapshot and findings; it regenerates managed layout checks and invalidates review.

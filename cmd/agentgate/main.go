@@ -474,8 +474,15 @@ func configCommand(rest []string) (any, int, error) {
 			return nil, 0, err
 		}
 	case "extensions":
-		return map[string]any{"directories": config.ExtensionDirs(), "loaded": config.Extensions(),
-			"note": "One *.json file per integration. Objects merge into the configuration; lists add their items. Remove or rename a file to switch it off."}, 0, nil
+		info := map[string]any{"directories": config.ExtensionDirs(), "loaded": config.Extensions(),
+			"note": "Each level loads extensions before its explicit config: user, repository, then personal checkout config last. Extension lists add items; explicit config lists replace them. rule_sources lists definitions in precedence order."}
+		cfg, err := config.Load()
+		if err != nil {
+			info["configuration_error"] = err.Error()
+		} else {
+			info["review_rules"], info["rule_sources"] = cfg.ReviewRules, cfg.ReviewRuleSources
+		}
+		return info, 0, nil
 	case "show":
 	default:
 		return nil, 0, errors.New("usage: agentgate config show|path|init|set <key> <value>|unset <key>|extensions|profiles|profile <name>")
@@ -533,6 +540,12 @@ func runTool(script string, args []string) int {
 		return 1
 	}
 	cmd := exec.Command("node", append([]string{filepath.Join(dir, "bin", script)}, args...)...)
+	self, err := os.Executable()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "agentgate: "+err.Error())
+		return 1
+	}
+	cmd.Env = append(os.Environ(), "AGENTGATE_EXECUTABLE="+self)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
 		var exit *exec.ExitError

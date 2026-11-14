@@ -79,7 +79,8 @@ func (r *Receipt) save() error {
 
 // fingerprint binds an architecture receipt to the contract, not to file contents:
 // source drift after a long pass must not throw the design away.
-func (r *Resolved) fingerprint() string {
+func (r *Resolved) fingerprint(rules []reviewRule) string {
+	parts := map[string]any{"brief": r.Plan.Brief, "files": r.Plan.Files(), "ui": r.Plan.UI, "mode": r.Mode}
 	if r.Plan.staged() {
 		// The design of a staged task is bound to what is asked and to the shape of the split, not to the
 		// file lists of stages that are still ahead and may be revised.
@@ -87,13 +88,33 @@ func (r *Resolved) fingerprint() string {
 		for _, stage := range r.Plan.Stages {
 			names = append(names, stage.Name)
 		}
-		return digest(map[string]any{"brief": r.Plan.Brief, "requirements": r.Plan.Requirements, "stages": names, "ui": r.Plan.UI, "mode": r.Mode})
+		delete(parts, "files")
+		parts["stages"] = names
 	}
-	parts := map[string]any{"brief": r.Plan.Brief, "files": r.Plan.Files(), "ui": r.Plan.UI, "mode": r.Mode}
 	if len(r.Plan.Requirements) > 0 {
 		parts["requirements"] = r.Plan.Requirements
 	}
+	if len(rules) > 0 {
+		// Future staged file lists may change without changing the instructions themselves.
+		policies := map[string]any{}
+		for _, rule := range rules {
+			policies[rule.ID] = map[string]any{"mode": rule.Mode, "scope": r.Config.ReviewRules[rule.ID].Files,
+				"instructions": rule.Instructions, "unavailable": rule.Unavailable}
+		}
+		parts["review_rules"] = policies
+	}
 	return digest(parts)
+}
+
+func (r *Resolved) checkArchitectureContract(fingerprint string) error {
+	rules, err := loadReviewRules(r.Config, r.Plan.Files())
+	if err != nil {
+		return err
+	}
+	if fingerprint != r.fingerprint(rules) {
+		return errors.New("the brief, files, ui, mode or project rules changed since the architecture pass; run it again")
+	}
+	return nil
 }
 
 var designSchema = object(map[string]any{"summary": text, "design": text, "open_questions": list(text),
@@ -119,14 +140,18 @@ func Architecture(cfg *config.Config, plan *Plan) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	rules, err := loadReviewRules(cfg, plan.Files())
+	if err != nil {
+		return nil, err
+	}
 	timeout := seconds(mode.ArchitectureTimeoutS)
 	if timeout == 0 {
 		timeout = seconds(timeoutDefault)
 	}
-	receipt := &Receipt{ID: newID(), Kind: "architecture", Fingerprint: resolved.fingerprint(), Mode: resolved.Mode}
+	receipt := &Receipt{ID: newID(), Kind: "architecture", Fingerprint: resolved.fingerprint(rules), Mode: resolved.Mode}
 	receipt.Dir = filepath.Join(designsDir(), receipt.ID)
 	subs := &substitutions{}
-	packet := map[string]any{"brief": plan.Brief, "requirements": plan.Requirements, "files": plan.Files(), "streams": plan.allStreams(), "context": plan.Context, "ui": ui}
+	packet := map[string]any{"brief": plan.Brief, "requirements": plan.Requirements, "files": plan.Files(), "streams": plan.allStreams(), "context": plan.Context, "ui": ui, "review_rules": rules}
 	if plan.staged() {
 		packet["requirements"], packet["stages"] = plan.Requirements, plan.Stages
 	}
@@ -218,6 +243,9 @@ func Architecture(cfg *config.Config, plan *Plan) (any, error) {
 		receipt.Lanes = append(receipt.Lanes, critiques...)
 	}
 	receipt.Substitutions = subs.list
+	if err := resolved.checkArchitectureContract(receipt.Fingerprint); err != nil {
+		return nil, err
+	}
 	return receipt, receipt.save()
 }
 
@@ -257,6 +285,9 @@ func revise(resolved *Resolved, receipt *Receipt, run func(string, string, confi
 		return nil, err
 	}
 	receipt.Lanes, receipt.Revised = append(previous.Lanes, lane), true
+	if err := resolved.checkArchitectureContract(receipt.Fingerprint); err != nil {
+		return nil, err
+	}
 	return receipt, receipt.save()
 }
 
@@ -283,8 +314,8 @@ func (r *Resolved) requireArchitecture() error {
 	if err != nil {
 		return err
 	}
-	if receipt.Fingerprint != r.fingerprint() {
-		return errors.New("the brief, files, ui or mode changed since the architecture pass; run it again")
+	if err := r.checkArchitectureContract(receipt.Fingerprint); err != nil {
+		return err
 	}
 	if receipt.accepted(accepted.Base) == nil {
 		return fmt.Errorf("architecture.base %q names no design of that receipt", accepted.Base)

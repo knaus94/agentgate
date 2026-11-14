@@ -2,6 +2,22 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.13.0
+
+- Project rules and local skill criteria reach preparation, architecture, discovery and scoped UI design,
+  in addition to writers/reviewers. Preparation reports applied rules, scopes, instruction files and definition
+  sources; missing required files produce a visible BLOCKED result before saving an executable plan.
+- Changed project rules invalidate accepted architecture and cached discovery. The existing review-rule
+  mechanism remains responsible for acceptance; no skill manager, dependencies or extra workers are added.
+  Older architecture receipts with applicable project rules need a fresh pass to establish this binding.
+- Configuration precedence is now user extensions/config, repository extensions/config, then personal
+  checkout config, above the built-in table/profile. **Explicit config lists replace extension defaults**;
+  extension lists still append. `config extensions` reports effective rules and their source chain.
+- Layout resolves its stand through the same CLI configuration, including personal overrides, for the
+  selected screen's repository; JavaScript does not implement another configuration merge.
+- The built-in design skill describes package handling and verification. Components, CSS techniques, tokens
+  and control semantics follow the project's rules and accepted task, without prescriptions derived from one UI.
+
 ## 0.12.0
 
 - Design acceptance uses the existing review-rule mechanism for appearance/crop, placement in the shell,

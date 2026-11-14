@@ -3,9 +3,41 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
+
+func TestConfigurationLevelsIncludeTheirExtensionsBeforeExplicitSettings(t *testing.T) {
+	isolate(t)
+	paths := []string{filepath.Join(filepath.Dir(UserPath()), "extensions", "ui.json"), UserPath(),
+		filepath.Join(RepoDir(), "extensions", "ui.json"), ProjectFile, PersonalFile}
+	var sources []string
+	for i, path := range paths {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		body := `{"review_rules":{"ui":{"instructions":["policy-` + string(rune('a'+i)) + `.md"]}}}`
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		sources = append(sources, path)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"policy-" + string(rune('a'+i)) + ".md"}
+		if i == 2 {
+			want = []string{"policy-b.md", "policy-c.md"}
+		} // extensions append; explicit files replace
+		if !slices.Equal(cfg.ReviewRules["ui"].Instructions, want) {
+			t.Fatalf("settings at %s lost precedence: %v", path, cfg.ReviewRules["ui"].Instructions)
+		}
+		if !slices.Equal(cfg.ReviewRuleSources["ui"], sources) {
+			t.Fatalf("rule sources lost their precedence order: %v", cfg.ReviewRuleSources["ui"])
+		}
+	}
+}
 
 func isolate(t *testing.T) string {
 	t.Helper()
@@ -196,8 +228,18 @@ func TestExtensionsPlugInWithoutEditingTheConfiguration(t *testing.T) {
 	if len(cfg.WorkerMCP) != 2 || cfg.WorkerMCP["graph"].RefreshTimeoutS != 300 || strings.Join(cfg.WorkerMCP["docs"].RolesOrDefault(), ",") != "scout" {
 		t.Fatalf("each file adds its server; a server without roles is the scout's: %+v", cfg.WorkerMCP)
 	}
-	if got := strings.Join(cfg.Worktree.Copy, ","); got != "env/.env.local,docs-cache,graph-out" {
-		t.Fatalf("lists of extensions add to the list that is there, without repeats: %s", got)
+	if got := strings.Join(cfg.Worktree.Copy, ","); got != "env/.env.local" {
+		t.Fatalf("an explicit personal list replaces extension defaults: %s", got)
+	}
+	if err := os.Remove(PersonalFile); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(cfg.Worktree.Copy, ","); got != "docs-cache,graph-out,env/.env.local" {
+		t.Fatalf("extension lists still add their items: %s", got)
 	}
 	if len(cfg.Accounts) != 0 || cfg.MaxParallel == 99 {
 		t.Fatal("an extension never brings an account, and a file that is not *.json is off")

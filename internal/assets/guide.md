@@ -24,6 +24,11 @@ for scope and decisions. The preparation worker reads module docs and analogous 
 user only for its unresolved product, data, security or authorization decisions, with a recommendation, all at once. `--grill` forces clarification, `--no-grill` skips optional questions but
 never an approval. Silence is not agreement.
 
+Preparation reports applicable `review_rules` with their scopes, instruction paths, definition sources and
+missing files. Use this summary to resolve setup problems; do not repeat the worker's skill discovery.
+Repository skills describe implementation conventions; the accepted task defines behavior and exceptions.
+The built-in design workflow does not impose a component library, CSS approach or inferred control behavior.
+
 The prepared plan contains the brief, requirements, non-goals, invariants and disjoint streams. Approve or
 return corrections through prepare.notes; do not rewrite the worker's technical plan yourself. For an exact
 light edit whose scope is already known, a short lead-authored plan remains sufficient.

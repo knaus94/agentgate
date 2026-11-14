@@ -45,9 +45,13 @@ var scoutSchema = object(map[string]any{"summary": text,
 
 const scoutTimeout = 600
 
-func scoutPath(resolved *Resolved) string {
+func scoutPath(resolved *Resolved, rules []reviewRule) string {
 	plan := resolved.Plan
-	key := digest(map[string]any{"brief": plan.Brief, "requirements": plan.Requirements, "files": plan.Files(), "context": plan.Context, "route": resolved.ModeConfig().Scout})
+	parts := map[string]any{"brief": plan.Brief, "requirements": plan.Requirements, "files": plan.Files(), "context": plan.Context, "route": resolved.ModeConfig().Scout}
+	if len(rules) > 0 {
+		parts["review_rules"] = rules
+	}
+	key := digest(parts)
 	return filepath.Join(checkoutDir(""), "scout", key[:32], "pack.json")
 }
 
@@ -60,13 +64,17 @@ func scout(resolved *Resolved, subs *substitutions) (string, string) {
 		return "", ""
 	}
 	plan := resolved.Plan
-	path := scoutPath(resolved)
+	rules, err := loadReviewRules(resolved.Config, plan.Files())
+	if err != nil {
+		return "", err.Error()
+	}
+	path := scoutPath(resolved, rules)
 	dir := filepath.Dir(path)
 	if _, err := os.Stat(path); err == nil {
 		return path, ""
 	}
 	packet := filepath.Join(dir, "packet.json")
-	if err := writePacket(packet, map[string]any{"brief": plan.Brief, "requirements": plan.Requirements, "files": plan.Files(), "streams": plan.Streams, "context": plan.Context}); err != nil {
+	if err := writePacket(packet, map[string]any{"brief": plan.Brief, "requirements": plan.Requirements, "files": plan.Files(), "streams": plan.Streams, "context": plan.Context, "review_rules": rules}); err != nil {
 		return "", err.Error()
 	}
 	tools, toolDirs, toolNote := workerTools(resolved.Config, "scout")

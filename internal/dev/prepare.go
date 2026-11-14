@@ -73,7 +73,8 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 		}
 	}
 	packet := map[string]any{"request": input.Request, "context": context, "notes": input.Notes,
-		"design_settings": map[string]any{"screens": cfg.Design.Screens, "stand": stand}}
+		"design_settings":       map[string]any{"screens": cfg.Design.Screens, "stand": stand},
+		"review_rule_catalogue": reviewRuleCatalogue(cfg)}
 	if gate != nil && gate.active() {
 		packet["current_plan"], packet["phase"], packet["check_failures"] = gate.Plan, gate.Phase, gate.failing()
 		packet["hold_reason"] = gate.HoldReason
@@ -134,7 +135,8 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 		}
 		if answer.Status == "BLOCKED" && strings.TrimSpace(answer.Summary) != "" {
 			return map[string]any{"status": "BLOCKED", "summary": answer.Summary, "questions": answer.Questions,
-				"setup": answer.Setup, "route": used, "dir": dir, "next": "Resolve only the reported decisions or technical prerequisites, then prepare again with notes. " +
+				"review_rule_catalogue": packet["review_rule_catalogue"],
+				"setup":                 answer.Setup, "route": used, "dir": dir, "next": "Resolve only the reported decisions or technical prerequisites, then prepare again with notes. " +
 					"The blocker is recorded here; do not parse private worker files to discover it. No implementation has started."}, nil
 		}
 		plan := &Plan{}
@@ -153,18 +155,26 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 			packet["invalid_plan"], packet["validation_error"] = answer.PlanJSON, err.Error()
 			continue
 		}
+		rules, err := loadReviewRules(cfg, plan.Files())
+		if err != nil {
+			return map[string]any{"status": "BLOCKED", "summary": err.Error(), "questions": []string{},
+				"setup":        []string{"Make the named project instructions readable, then prepare again."},
+				"review_rules": reviewRuleSummary(cfg, rules), "route": used, "dir": dir,
+				"next": "Required project instructions are unavailable. Restore the named files; no executable plan was saved."}, nil
+		}
 		saved, err := PlanSave(cfg, plan, input.Name)
 		if err != nil {
 			return nil, err
 		}
 		if !plan.staged() && strings.TrimSpace(answer.Pack.Summary) != "" && len(answer.Pack.Files) > 0 && resolved.ModeConfig().Scout != "" {
 			answer.Pack.Route = used
-			if err := writePacket(scoutPath(resolved), answer.Pack); err != nil {
+			if err := writePacket(scoutPath(resolved, rules), answer.Pack); err != nil {
 				return nil, err
 			}
 		}
 		return map[string]any{"status": "READY", "summary": answer.Summary, "saved": saved, "setup": answer.Setup,
-			"checks": plan.Checks, "route": used, "dir": dir, "substitutions": subs.list,
+			"review_rules": reviewRuleSummary(cfg, rules),
+			"checks":       plan.Checks, "route": used, "dir": dir, "substitutions": subs.list,
 			"next": "Review the brief for product scope and authorization. Approve the listed checks/stand as required; launch the saved plan, " +
 				"or replan an active task. Do not repeat repository discovery, parse design data or inspect layout yourself."}, nil
 	}

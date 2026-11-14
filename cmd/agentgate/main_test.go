@@ -111,6 +111,41 @@ func (s *sandbox) run(stdin string, args ...string) (string, string, int) {
 	return stdout.String(), stderr.String(), code
 }
 
+func TestLayoutUsesTheSelectedRepositorysEffectiveStandConfiguration(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node is required for the design-tool integration")
+	}
+	s := newSandbox(t)
+	// Invoke the real stand reader through the CLI's Node environment, without launching a browser/server.
+	probe := "#!" + node + `
+const { pathToFileURL } = await import('node:url');
+const { projectDesign } = await import(new URL('../lib/stand.mjs', pathToFileURL(process.argv[2])));
+console.log(JSON.stringify(projectDesign(process.argv[3])));
+`
+	if err := os.WriteFile(filepath.Join(s.repo, "bin", "node"), []byte(probe), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	other := t.TempDir()
+	screen := filepath.Join(other, ".agentgate", "screen")
+	for _, dir := range []string{filepath.Join(other, ".git"), screen} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(other, ".agentgate.json"), []byte(`{"design":{"stand":{"command":["shared-server"],"ready":"http://127.0.0.1:3000"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(other, ".agentgate", "config.json"), []byte(`{"design":{"stand":{"command":["personal-server"],"ready":"http://127.0.0.1:4000"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result := s.ok("", "layout", screen)
+	stand := result["stand"].(map[string]any)
+	if stand["ready"] != "http://127.0.0.1:4000" || stand["command"].([]any)[0] != "personal-server" {
+		t.Fatalf("layout did not use the target checkout's personal override: %v", stand)
+	}
+}
+
 func (s *sandbox) ok(stdin string, args ...string) map[string]any {
 	s.t.Helper()
 	stdout, stderr, code := s.run(stdin, args...)

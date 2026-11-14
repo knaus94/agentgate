@@ -165,6 +165,13 @@ The first reviewer receives `quality {requirements, rules, checks, browser}` and
 alongside `reports`. In light mode `review` returns the same inputs to the lead; supply the object as
 `lead_review.quality`. Other lanes keep their ordinary report schema. No additional agent is started.
 
+Preparation receives `review_rule_catalogue` (paths/scopes/modes/sources, not all skill bodies) and returns
+`review_rules` metadata for the resolved scope, including unavailable instructions. Required missing files
+produce a structured BLOCKED response before saving a runnable plan. Architects, scouts and scoped UI
+designers receive the applicable instruction snapshots too. Policy changes invalidate architecture and
+discovery reuse as well as review. Local skills remain ordinary files linked through repository instructions;
+review rules consume their declared criteria without executing their workflows.
+
 Plans with `design` always add built-in blocking `design.<id>.appearance|placement|controls|coverage` rules.
 Their `required: true` means they cannot be waived as `not_applicable`. Missing evidence is `unavailable`.
 The design packet supplies cropped and full-context pictures and the measurement report. A layout command's
@@ -245,8 +252,10 @@ resolved or rejected with evidence.
 
 ## Configuration
 
-Built-in table, then `~/.config/agentgate/config.json`, then `.agentgate.json` in the repository; objects
-merge key by key. `agentgate config show` prints the effective result.
+Built-in table/profile, then user extensions and user config, repository extensions and `.agentgate.json`,
+then the personal `.agentgate/config.json`. Extensions add list items; explicit configs replace lists;
+objects merge key by key. `config show` prints effective settings. `config extensions` also prints effective
+review rules and `rule_sources` (definition files in precedence order).
 
 ```json
 {

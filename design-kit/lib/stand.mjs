@@ -8,12 +8,16 @@ import { serveFixtures } from './fixtures.mjs';
 
 const json = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
 
-// The project's file says how its front end starts; <screen>/screen.json says where the screen is.
+// The CLI owns configuration precedence. Standalone Node use retains the project-file fallback.
 export function projectDesign(from) {
-  const file = path.join(repository(from), '.agentgate.json');
-  const design = fs.existsSync(file) ? json(file).design : null;
+  const root = repository(from);
+  const file = path.join(root, '.agentgate.json');
+  const config = process.env.AGENTGATE_EXECUTABLE
+    ? JSON.parse(execFileSync(process.env.AGENTGATE_EXECUTABLE, ['config', 'show'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }))
+    : fs.existsSync(file) ? json(file) : {};
+  const design = config.design;
   if (!design || !design.stand) {
-    throw new Error(`${file} does not say how the front end starts: add "design": {"stand": {"command": […], "ready": "http://localhost:<port>"}}`);
+    throw new Error(`no design.stand is configured for ${root}: add "design": {"stand": {"command": […], "ready": "http://localhost:<port>"}} to ${file} or its local settings`);
   }
   return design;
 }

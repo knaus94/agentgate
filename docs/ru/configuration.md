@@ -2,11 +2,16 @@
 
 [English](../configuration.md)
 
-Три слоя, каждый следующий переопределяет предыдущий по ключам:
+Настройки читаются в следующем порядке; последующие уровни переопределяют предыдущие по ключам:
 
-1. встроенная таблица ([internal/assets/config.json](../../internal/assets/config.json))
-2. `~/.config/agentgate/config.json` — ваша, на этой машине
-3. `.agentgate.json` в репозитории — проектная
+1. встроенная таблица ([internal/assets/config.json](../../internal/assets/config.json)) и выбранный профиль
+2. `~/.config/agentgate/extensions/*.json`, затем `~/.config/agentgate/config.json`
+3. `.agentgate/extensions/*.json`, затем проектный `.agentgate.json`
+4. `.agentgate/config.json` — личные настройки этого checkout
+
+Расширения читаются по имени файла и дополняют списки без повторов. Обычные конфиги заменяют списки целиком:
+например, личный `worktree.copy` или `instructions` задаёт полный нужный список. Объекты сливаются по ключам.
+Порядок общий для всех настроек, а не только правил фронтенда.
 
 `agentgate config show` печатает итог слияния, `agentgate modes` — его же таблицей.
 Почему значения по умолчанию такие — в [Почему именно эти модели](model-selection.md).

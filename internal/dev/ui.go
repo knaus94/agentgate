@@ -101,7 +101,15 @@ func Design(cfg *config.Config, input DesignInput) (any, error) {
 	}
 	receipt := &Receipt{ID: newID(), Kind: "ui"}
 	receipt.Dir = filepath.Join(designsDir(), receipt.ID)
-	packet := map[string]any{"task": input.Task, "brief": input.Brief, "usage_context": input.UsageContext, "files": files, "context": context}
+	rules, err := loadReviewRules(cfg, files)
+	if err != nil {
+		return nil, err
+	}
+	packet := map[string]any{"task": input.Task, "brief": input.Brief, "usage_context": input.UsageContext, "files": files, "context": context,
+		"review_rules": rules}
+	if len(files) == 0 {
+		packet["review_rule_catalogue"] = reviewRuleCatalogue(cfg)
+	}
 	if input.Revise != "" {
 		previous, err := loadReceipt(input.Revise, "ui")
 		if err != nil {

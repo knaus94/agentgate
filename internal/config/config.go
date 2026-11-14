@@ -124,6 +124,7 @@ type Config struct {
 	PlansHome         string                `json:"plans_home"` // synced directory that holds the .agentgate of each repository
 	WorkerMCP         map[string]WorkerMCP  `json:"worker_mcp"`
 	ReviewRules       map[string]ReviewRule `json:"review_rules,omitempty"`
+	ReviewRuleSources map[string][]string   `json:"-"`       // definition sources in precedence order, derived at load time
 	Profile           string                `json:"profile"` // a named alternative mode table laid under the user's settings, e.g. "codex"
 	Leads             []string              `json:"leads"`   // which CLIs the lead command is installed into: claude, codex
 	Worktree          Worktree              `json:"worktree"`
@@ -251,6 +252,15 @@ func Load() (*Config, error) {
 	if err := json.Unmarshal(assets.Config, &merged); err != nil {
 		return nil, fmt.Errorf("built-in config: %w", err)
 	}
+	sources := map[string][]string{}
+	record := func(path string, layer map[string]any) {
+		if rules, ok := layer["review_rules"].(map[string]any); ok {
+			for name := range rules {
+				sources[name] = append(sources[name], path)
+			}
+		}
+	}
+	record("builtin", merged)
 	// The profile is chosen in the user's file and laid under it: a profile replaces the default table, and
 	// the user's own settings still win over the profile.
 	if user, err := readUser(); err == nil {
@@ -260,9 +270,23 @@ func Load() (*Config, error) {
 				return nil, err
 			}
 			merge(merged, layer)
+			record("profile:"+name, layer)
 		}
 	}
-	for _, path := range []string{UserPath(), projectFile(), personalFile()} {
+	extensions := Extensions()
+	dirs := ExtensionDirs()
+	for _, level := range []struct{ file, dir string }{{UserPath(), dirs[0]}, {projectFile(), dirs[1]}, {personalFile(), ""}} {
+		for _, extension := range extensions {
+			if filepath.Dir(extension.File) != level.dir {
+				continue
+			}
+			if extension.Error != "" {
+				return nil, fmt.Errorf("%s: %s", extension.File, extension.Error)
+			}
+			extend(merged, extension.layer)
+			record(extension.File, extension.layer)
+		}
+		path := level.file
 		raw, err := os.ReadFile(path)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
@@ -278,18 +302,14 @@ func Load() (*Config, error) {
 			delete(layer, "accounts") // a repository does not choose whose subscription pays for its work
 		}
 		merge(merged, layer)
-	}
-	for _, extension := range Extensions() {
-		if extension.Error != "" {
-			return nil, fmt.Errorf("%s: %s", extension.File, extension.Error)
-		}
-		extend(merged, extension.layer)
+		record(path, layer)
 	}
 	raw, _ := json.Marshal(merged)
 	cfg := &Config{}
 	if err := json.Unmarshal(raw, cfg); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
+	cfg.ReviewRuleSources = sources
 	return cfg, cfg.validate()
 }
 

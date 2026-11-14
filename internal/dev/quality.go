@@ -45,6 +45,7 @@ type reviewRule struct {
 	Instructions map[string]string `json:"instructions"` // snapshot of each declared instruction file
 	Unavailable  string            `json:"unavailable,omitempty"`
 	Required     bool              `json:"required,omitempty"` // applicable by construction; cannot be waived as not_applicable
+	Sources      []string          `json:"sources,omitempty"`
 }
 
 type qualityCheck struct {
@@ -86,9 +87,10 @@ func loadReviewRules(cfg *config.Config, files []string) ([]reviewRule, error) {
 	}
 	sort.Strings(names)
 	var rules []reviewRule
+	var failures []error
 	for _, name := range names {
 		spec := cfg.ReviewRules[name]
-		rule := reviewRule{ID: name, Mode: spec.Mode, Instructions: map[string]string{}}
+		rule := reviewRule{ID: name, Mode: spec.Mode, Instructions: map[string]string{}, Sources: cfg.ReviewRuleSources[name]}
 		if rule.Mode == "" {
 			rule.Mode = "blocking"
 		}
@@ -118,7 +120,7 @@ func loadReviewRules(cfg *config.Config, files []string) ([]reviewRule, error) {
 			if err != nil {
 				rule.Unavailable = fmt.Sprintf("review rule %q: %s: %v", name, path, err)
 				if rule.Mode == "blocking" {
-					return nil, errors.New(rule.Unavailable)
+					failures = append(failures, errors.New(rule.Unavailable))
 				}
 				break
 			}
@@ -126,7 +128,46 @@ func loadReviewRules(cfg *config.Config, files []string) ([]reviewRule, error) {
 		}
 		rules = append(rules, rule)
 	}
-	return rules, nil
+	return rules, errors.Join(failures...)
+}
+
+// Before discovery the scope is unknown: advertise instruction paths and globs, without loading unrelated
+// skills. After discovery the same catalogue describes only the rules actually applied to the plan.
+func reviewRuleCatalogue(cfg *config.Config) []map[string]any {
+	var names []string
+	for name := range cfg.ReviewRules {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := []map[string]any{}
+	for _, name := range names {
+		rule := cfg.ReviewRules[name]
+		mode := rule.Mode
+		if mode == "" {
+			mode = "blocking"
+		}
+		var paths []string
+		for _, path := range rule.Instructions {
+			paths = append(paths, config.ExpandHome(path))
+		}
+		out = append(out, map[string]any{"id": name, "mode": mode, "scope": rule.Files,
+			"instructions": paths, "sources": cfg.ReviewRuleSources[name]})
+	}
+	return out
+}
+
+func reviewRuleSummary(cfg *config.Config, rules []reviewRule) []map[string]any {
+	out := []map[string]any{}
+	for _, info := range reviewRuleCatalogue(cfg) {
+		for _, rule := range rules {
+			if info["id"] == rule.ID {
+				info["files"], info["unavailable"] = rule.Files, rule.Unavailable
+				out = append(out, info)
+				break
+			}
+		}
+	}
+	return out
 }
 
 func (g *Gate) qualityInputs(cfg *config.Config) (*qualityInputs, error) {

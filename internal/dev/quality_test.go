@@ -29,6 +29,38 @@ func changeQuality(f *fixture, change func(*QualityReport)) {
 	}
 }
 
+func TestProjectRulesReachArchitectureAndInvalidateItsAcceptance(t *testing.T) {
+	f := newFixture(t)
+	path := "ui-policy.md"
+	write(t, path, "Use the existing field component.")
+	f.cfg.ReviewRules = map[string]config.ReviewRule{"ui": {Instructions: []string{path}, Files: []string{"a.*"}}}
+	plan := f.plan("-h change the UI contract")
+	f.model = func(kind string, packet map[string]any, _ provider.Call) (string, error) {
+		if kind == "architecture" || kind == "writer" {
+			raw, _ := json.Marshal(packet["review_rules"])
+			if !strings.Contains(string(raw), fileText(t, path)) {
+				t.Fatalf("%s did not receive the current project policy", kind)
+			}
+		}
+		return "", nil
+	}
+	receipt := f.do("architecture", func() (any, error) { return Architecture(f.cfg, plan) })
+	plan.Architecture = &Accepted{ID: receipt["id"].(string), Acceptance: "Use the project components"}
+	write(t, path, "Use the existing field component and its read-only variant.")
+	f.fails("launch", "project rules changed", func() (any, error) { return Launch(f.cfg, plan) })
+	if f.count("writer") != 0 {
+		t.Fatal("a writer started under stale architectural policy")
+	}
+	receipt = f.do("architecture", func() (any, error) { return Architecture(f.cfg, plan) })
+	if f.count("architecture") != 4 {
+		t.Fatal("the changed policy reused old architecture work")
+	}
+	plan.Architecture.ID = receipt["id"].(string)
+	f.launch(plan)
+	f.review()
+	f.finish()
+}
+
 func TestQualityRequirementsBlockCompletionAndCanBeReconsidered(t *testing.T) {
 	f := newFixture(t)
 	plan := f.plan("-m implement the criterion")

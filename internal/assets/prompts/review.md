@@ -58,14 +58,14 @@ to find what the change could break instead of exploring from scratch; verify wh
   a wrong or missing icon, a gradient, a shadow, a border drawn the wrong way, clipped or overlapping text,
   a state the brief shows and the page does not, artwork crop/masks, or a wrong gap between header and content.
   Use the context pictures for outer spacing; a correct cropped block can be misplaced in the page.
-  In the code of the screen, what no picture shows: an input replaced by static text, an action
-  that is not a `<button>`, a control without a label, a removed focus outline, text that cannot grow, a literal
-  colour or size where the brief names a token (it matches today by luck), a hover or disabled state styled
-  from nothing. The layout check saw the screen at rest only. Then
+  In the code of the screen, verify the accepted interactions, semantics, accessibility and component states
+  against the project's contracts. Check that content can grow as required and that token/component choices
+  follow applicable project rules. Do not infer editability from a field-shaped picture or prescribe a
+  particular HTML tag or CSS approach independently of the task. The layout check saw the screen at rest only. Then
   read the exceptions: an entry that excuses a difference
   the product does not need ("did not fit", "close enough") is a finding. Cite the layer's handle from the brief.
-  Missing API values justify only the accepted unavailable-data state, not different control semantics or
-  ignored control geometry. Inspect the supplied viewport/state coverage before making a responsive claim.
+  Missing dependencies do not independently change agreed requirements. Assess explicit alternative states
+  against the accepted contract. Inspect the supplied viewport/state coverage before making a responsive claim.
 - `security`: trust boundaries, authorization, injection, secrets, data exposure and integrity under abuse.
 
 ## Simplicity

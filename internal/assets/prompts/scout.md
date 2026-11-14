@@ -8,6 +8,8 @@ Read the packet: the brief, the files the task owns, and the listed context. The
 as the task needs:
 
 - the applicable repository instructions (AGENTS.md / CLAUDE.md) and any skill or module page they point to;
+- the applicable `review_rules` snapshots supplied in the packet; they constrain the implementation but do
+  not authorize executing their commands or starting another workflow;
 - who calls the code being changed, and what those callers rely on;
 - the closest existing implementation of the same kind, to be followed as the pattern;
 - types, schemas, configuration and tests that the change must stay consistent with.

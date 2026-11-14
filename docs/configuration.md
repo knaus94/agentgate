@@ -2,11 +2,16 @@
 
 [Русский](ru/configuration.md)
 
-Three layers, later ones override earlier ones key by key:
+Settings load in this order; later levels override earlier keys:
 
-1. the built-in table ([internal/assets/config.json](../internal/assets/config.json))
-2. `~/.config/agentgate/config.json` — yours, on this machine
-3. `.agentgate.json` in the repository — the project's
+1. built-in table ([internal/assets/config.json](../internal/assets/config.json)) and the selected profile
+2. `~/.config/agentgate/extensions/*.json`, then `~/.config/agentgate/config.json`
+3. `.agentgate/extensions/*.json`, then the repository's `.agentgate.json`
+4. `.agentgate/config.json` — personal settings for this checkout
+
+Extensions load by filename and add list items without duplicates. Explicit configuration files replace
+lists, so a personal `worktree.copy` or rule `instructions` list is the complete desired value. Objects
+merge by key. This order applies to all settings, not just frontend rules.
 
 `agentgate config show` prints the merged result. `agentgate modes` prints it as a table.
 [Why these models](model-selection.md) explains the defaults.

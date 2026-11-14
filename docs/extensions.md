@@ -20,10 +20,18 @@ An extension holds ordinary configuration keys. Objects merge into the configura
 their items to the list that is already there, so two extensions can each bring a file for the worktree
 without knowing about each other. `about` is a note for people. An extension cannot define accounts.
 
+At each level, extensions load before its explicit config: user extensions/config, repository
+extensions/config, then the personal checkout config. Explicit lists replace extension defaults.
+`config extensions` also reports effective review rules and their definition sources in precedence order;
+the source list is a definition history, not per-field provenance. See [configuration](configuration.md).
+
 ## Project review rules
 
 `review_rules` adds local review instructions to the existing review pass. Writers receive the same
 applicable rules; the first reviewer assesses them alongside acceptance criteria. Light mode uses the lead.
+Preparation sees a scoped catalogue before discovery and reports applied rules after it. Architects, scouts
+and scoped UI designers receive the same instruction snapshots. Changed applicable policies invalidate an
+accepted architecture and the cached discovery as well as review.
 
 ```json
 {
@@ -50,6 +58,30 @@ Adding, changing or removing an applicable rule requires a fresh review. Instruc
 tests, servers or permissions. Rules do not add model processes: an existing lane owns their assessment.
 Substantive defects still use ordinary findings and triage; an advisory rule cannot downgrade a defect found
 under a built-in review axis. The JSON result and evidence formats are in `agentgate reference`.
+
+## Repository frontend skills
+
+Keep team instructions in Git, for example `.agents/skills/client-ui/SKILL.md`, and register their acceptance
+criteria in `.agentgate.json`:
+
+```json
+{"review_rules":{"client-ui":{
+  "instructions":[".agents/skills/client-ui/SKILL.md"],
+  "files":["apps/client/src/**"],
+  "mode":"blocking"
+}}}
+```
+
+Choose the real paths of your repository. A short declarative skill can be both the implementation guide
+and review criteria. For a procedural skill, point `instructions` at its acceptance reference instead and
+link the skill from the relevant `AGENTS.md`. Declare every reference that defines acceptance; these files
+are snapshotted, while scripts/workflows run only when the assignment authorizes them. No skill registry or
+automatic installation is involved. Personal additions can use `.agentgate/config.json` and absolute or `~/`
+instruction paths; versioned relative paths are easier to share and reproduce in a worktree.
+
+The built-in design skill governs package/evidence handling. Component choice, CSS techniques, tokens,
+breakpoints and control behavior come from project rules and the accepted task. A still image does not
+establish interactivity. A material conflict needs a decision, not a silently imposed global preference.
 
 ## Tools for workers
 

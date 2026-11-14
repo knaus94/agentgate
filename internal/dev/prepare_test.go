@@ -7,12 +7,21 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/knaus94/agentgate/internal/config"
 	"github.com/knaus94/agentgate/internal/provider"
 )
 
 func TestPreparationDraftsWithoutWritingAndReusesDiscovery(t *testing.T) {
 	f := newFixture(t)
 	plan := f.plan("-l the worker must not change the requested mode")
+	policy := ".agents/skills/client-ui/SKILL.md"
+	must(t, os.MkdirAll(filepath.Dir(policy), 0o755))
+	write(t, policy, "Use the project's field components.")
+	f.cfg.ReviewRules = map[string]config.ReviewRule{
+		"ui":        {Instructions: []string{policy}, Files: []string{"a.*"}},
+		"unrelated": {Instructions: []string{"missing-backend.md"}, Files: []string{"server/**"}},
+	}
+	f.cfg.ReviewRuleSources = map[string][]string{"ui": {".agentgate.json"}}
 	f.cfg.Design.Stand = json.RawMessage(`{"command":["yarn","dev"],"ready":"http://127.0.0.1:4200","cookies":[{"value":"private-cookie"}],"env":{"TOKEN":"private-value"}}`)
 	var attempts int
 	f.model = func(kind string, packet map[string]any, call provider.Call) (string, error) {
@@ -26,6 +35,11 @@ func TestPreparationDraftsWithoutWritingAndReusesDiscovery(t *testing.T) {
 		raw, _ := json.Marshal(packet)
 		if strings.Contains(string(raw), "private-cookie") || strings.Contains(string(raw), "private-value") {
 			t.Fatal("stand credentials reached the preparation worker")
+		}
+		catalogue, _ := json.Marshal(packet["review_rule_catalogue"])
+		if !strings.Contains(string(catalogue), policy) || !strings.Contains(string(catalogue), "a.*") ||
+			strings.Contains(string(catalogue), "field components") {
+			t.Fatal("discovery needs scoped instruction paths, not the bodies of every skill")
 		}
 		proposal, _ := json.Marshal(plan)
 		if attempts == 1 {
@@ -42,6 +56,11 @@ func TestPreparationDraftsWithoutWritingAndReusesDiscovery(t *testing.T) {
 	if result["status"] != "READY" || attempts != 2 || fileText(t, "a.txt") != "before\n" || Current() != nil {
 		t.Fatalf("preparation executed work: %v", result)
 	}
+	rules := result["review_rules"].([]any)
+	if len(rules) != 1 || rules[0].(map[string]any)["id"] != "ui" ||
+		rules[0].(map[string]any)["sources"].([]any)[0] != ".agentgate.json" {
+		t.Fatalf("preparation must report the applied rules and their sources: %v", rules)
+	}
 	path, err := PlanFile("prepared")
 	must(t, err)
 	var saved Plan
@@ -56,6 +75,27 @@ func TestPreparationDraftsWithoutWritingAndReusesDiscovery(t *testing.T) {
 	}
 	f.review()
 	f.finish()
+}
+
+func TestPreparationReportsMissingInstructionsForTheDiscoveredScope(t *testing.T) {
+	f := newFixture(t)
+	plan := f.plan("-m implement the UI")
+	f.cfg.ReviewRules = map[string]config.ReviewRule{"ui": {Instructions: []string{"missing-skill.md"}, Files: []string{"a.*"}}}
+	f.model = func(kind string, _ map[string]any, _ provider.Call) (string, error) {
+		if kind != "prepare" {
+			return "", nil
+		}
+		proposal, _ := json.Marshal(plan)
+		answer, _ := json.Marshal(map[string]any{"status": "READY", "summary": "scoped the UI", "questions": []string{}, "setup": []string{}, "plan_json": string(proposal), "context_pack": map[string]any{}})
+		return string(answer), nil
+	}
+	result := f.do("prepare", func() (any, error) { return Prepare(f.cfg, PrepareInput{Request: plan.Request, Name: "missing-rules"}) })
+	if result["status"] != "BLOCKED" || !strings.Contains(result["summary"].(string), "missing-skill.md") || len(result["review_rules"].([]any)) != 1 {
+		t.Fatalf("missing applicable instructions need a visible setup blocker: %v", result)
+	}
+	if _, err := os.Stat(filepath.Join(PlansDir, "missing-rules", "plan.json")); !os.IsNotExist(err) {
+		t.Fatal("an executable plan was saved without its required project rules")
+	}
 }
 
 func TestPreparationKeepsMissingDecisionsAndToolFailuresOutOfTheLead(t *testing.T) {
