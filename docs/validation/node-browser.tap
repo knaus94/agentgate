@@ -28,7 +28,7 @@ not ok 2 - explicit CSS mappings keep overlapping artwork distinct and expose re
   error: |-
     browserType.launch: Target page, context or browser has been closed
     Browser logs:
-    
+
     <launching> /usr/bin/chromium --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,HttpsUpgrades,HttpsFirstBalancedModeAutoEnable,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,AvoidCorsURLLoaderRestartOnRedirect,TcpPortRandomizationWin,OptimizationHints,NetworkTimeServiceQuerying,AimEnabled,PreconnectToSearch,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface,SkipListAccountsWithoutGaiaCookies --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --enable-unsafe-swiftshader --edge-skip-compat-layer-relaunch --disable-stack-profiler --disable-infobars --disable-sync --do-not-de-elevate --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/tmp/playwright_chromiumdev_profile-S8jCau --remote-debugging-pipe --no-startup-window
     <launched> pid=24
     [pid=24][err] /usr/bin/chromium: 9: [: 5225713664: unexpected operator
@@ -47,7 +47,7 @@ not ok 2 - explicit CSS mappings keep overlapping artwork distinct and expose re
       - [pid=24] starting temporary directories cleanup
       - [pid=24] finished temporary directories cleanup
       - [pid=24] <gracefully close end>
-    
+
   code: 'ERR_TEST_FAILURE'
   stack: |-
     openBrowser (<build-workspace>/agentgate/design-kit/lib/browser.mjs:81:39)
@@ -63,7 +63,7 @@ not ok 3 - modern CSS colours remain measurable as painted sRGB boxes
   error: |-
     browserType.launch: Target page, context or browser has been closed
     Browser logs:
-    
+
     <launching> /usr/bin/chromium --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,HttpsUpgrades,HttpsFirstBalancedModeAutoEnable,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,AvoidCorsURLLoaderRestartOnRedirect,TcpPortRandomizationWin,OptimizationHints,NetworkTimeServiceQuerying,AimEnabled,PreconnectToSearch,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface,SkipListAccountsWithoutGaiaCookies --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --enable-unsafe-swiftshader --edge-skip-compat-layer-relaunch --disable-stack-profiler --disable-infobars --disable-sync --do-not-de-elevate --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/tmp/playwright_chromiumdev_profile-HTd3FD --remote-debugging-pipe --no-startup-window
     <launched> pid=47
     [pid=47][err] /usr/bin/chromium: 9: [: 5225713664: unexpected operator
@@ -82,7 +82,7 @@ not ok 3 - modern CSS colours remain measurable as painted sRGB boxes
       - [pid=47] starting temporary directories cleanup
       - [pid=47] finished temporary directories cleanup
       - [pid=47] <gracefully close end>
-    
+
   code: 'ERR_TEST_FAILURE'
   stack: |-
     openBrowser (<build-workspace>/agentgate/design-kit/lib/browser.mjs:81:39)
@@ -110,7 +110,7 @@ not ok 6 - real layout lifecycle: new page, overrides, baseline drift, errors an
   error: |-
     browserType.launch: Target page, context or browser has been closed
     Browser logs:
-    
+
     <launching> /usr/bin/chromium --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,HttpsUpgrades,HttpsFirstBalancedModeAutoEnable,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,AvoidCorsURLLoaderRestartOnRedirect,TcpPortRandomizationWin,OptimizationHints,NetworkTimeServiceQuerying,AimEnabled,PreconnectToSearch,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface,SkipListAccountsWithoutGaiaCookies --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --enable-unsafe-swiftshader --edge-skip-compat-layer-relaunch --disable-stack-profiler --disable-infobars --disable-sync --do-not-de-elevate --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/tmp/playwright_chromiumdev_profile-NNqvKL --remote-debugging-pipe --no-startup-window
     <launched> pid=70
     [pid=70][err] /usr/bin/chromium: 9: [: 5225713664: unexpected operator
@@ -129,7 +129,7 @@ not ok 6 - real layout lifecycle: new page, overrides, baseline drift, errors an
       - [pid=70] starting temporary directories cleanup
       - [pid=70] finished temporary directories cleanup
       - [pid=70] <gracefully close end>
-    
+
   code: 'ERR_TEST_FAILURE'
   stack: |-
     openBrowser (<build-workspace>/agentgate/design-kit/lib/browser.mjs:81:39)
