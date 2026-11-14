@@ -1,7 +1,19 @@
-# AgentGate 0.14.0 — refactored distribution
+# AgentGate 0.14.1 — interactive clarification and planning fixes
 
 Исходная база: `knaus94/agentgate`, коммит `d1185635e89587683acfe90b047a29e0c70e7c72` (0.13.0).
 Версия включает исходники и автономный установочный архив; результаты выпускной проверки приведены ниже.
+
+## Исправления 0.14.1
+
+Лид использует штатные интерактивные вопросы при наличии поддержки в клиенте. Для Codex Default-mode может
+потребоваться opt-in флаг, описанный в docs/ru/codex.md; установщик не включает его глобально без решения
+пользователя. Сами формы в Zed/Claude требуют проверки в интерактивной сессии, headless-тесты не доказывают
+их отображение.
+
+Многоэтапные read-only планы теперь сохраняются без ошибочного требования убрать stages. Сохранение не
+разрешает реализацию; launch всё ещё отклоняет действие plan. После неудачной коррекции prepare выдаёт
+публичную диагностику вместо предложения разбирать приватное состояние. Эти пути и установка интеграций
+проверены узкими регрессиями без новых платных модельных вызовов.
 
 ## Что находится в архиве
 
@@ -14,7 +26,7 @@
 ## Установка
 
 ```sh
-cd agentgate-0.14.0
+cd agentgate-0.14.1
 sh scripts/install-local.sh --lead both
 agentgate setup doctor
 agentgate config validate
@@ -86,7 +98,7 @@ state; продолжение/ответ исполнителю перепров
 
 ## English overview
 
-This archive delivers the refactored 0.14.0 source and Linux binaries, based on the commit above. It keeps
+This archive delivers the refactored 0.14.1 source and Linux binaries, based on the commit above. It keeps
 the local CLI/provider integration model and reorganizes the code around lifecycle, evidence, execution,
 configuration and presentation boundaries. The most consequential changes prevent stale/failing evidence
 from authorizing completion, protect unrelated Git changes, preserve interrupted rounds and credential

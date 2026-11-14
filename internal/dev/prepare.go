@@ -141,6 +141,7 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 			return map[string]any{"status": "BLOCKED", "summary": answer.Summary, "questions": answer.Questions,
 				"review_rule_catalogue": packet["review_rule_catalogue"],
 				"setup":                 answer.Setup, "route": used, "dir": dir, "next": "Resolve only the reported decisions or technical prerequisites, then prepare again with notes. " +
+					"For unanswered user questions, use the lead client's native interactive question tool when available; fall back to concise text if unsupported or unanswered. Never infer consent from an empty result. " +
 					"The blocker is recorded here; do not parse private worker files to discover it. No implementation has started."}, nil
 		}
 		plan := &Plan{}
@@ -180,11 +181,16 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 				return nil, err
 			}
 		}
+		next := "Review the brief for product scope and authorization. Approve the listed checks/stand as required; launch the saved plan, or replan an active task. Do not repeat repository discovery, parse design data or inspect layout yourself."
+		if request.Action == "plan" {
+			next = "Show the saved brief and report planning complete. This request authorizes a proposal only; do not launch workers or run proposed checks. Implementation needs explicit user authorization and an updated request action, preserving the accepted constraints."
+		}
 		return map[string]any{"status": "READY", "summary": answer.Summary, "saved": saved, "setup": answer.Setup,
 			"review_rules": reviewRuleSummary(cfg, rules),
 			"checks":       plan.Checks, "route": used, "dir": dir, "substitutions": subs.list,
-			"next": "Review the brief for product scope and authorization. Approve the listed checks/stand as required; launch the saved plan, " +
-				"or replan an active task. Do not repeat repository discovery, parse design data or inspect layout yourself."}, nil
+			"next": next}, nil
 	}
-	return nil, fmt.Errorf("preparation could not produce a valid plan: %v; inspect %s", packet["validation_error"], path)
+	return map[string]any{"status": "BLOCKED", "reason": "invalid_plan", "summary": "The preparer could not produce a valid plan after its correction attempt.",
+		"validation_error": packet["validation_error"], "questions": []string{}, "setup": []string{}, "route": used, "dir": dir,
+		"next": "Report the validation failure. No plan was saved or implementation started. Do not reconstruct the technical plan in the lead, parse private worker files, or repeat unchanged preparation attempts. Resolve the concrete validation problem before preparing again."}, nil
 }

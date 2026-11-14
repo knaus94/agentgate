@@ -90,3 +90,8 @@ Reviewing an existing change (`/dev review`) has no size limit.
   is put into separate stages; streams inside a stage still run in parallel.
 
 The panel (`agentgate watch`) lists the stages with what is accepted, what is running and what is ahead.
+
+A `plan` request may describe the same stages as future implementation. Preparation saves the proposal and
+its brief without starting writers or checks. The request remains read-only: after explicit implementation
+authorization, update its action and save again before launch. Do not remove stages merely because planning
+itself does not write application code.

@@ -20,6 +20,17 @@ Return status READY or BLOCKED, summary, questions, setup, plan_json and context
 string containing the complete Plan below. For BLOCKED, name the missing product/authorization decision;
 do not ask the lead to read files, measure geometry, invent missing APIs or debug tool internals.
 
+## Planning contract
+
+For a `plan` request, describe the future implementation with concrete file-owning streams, or stages with
+streams and requirement coverage for larger work. Planning is read-only execution, not an empty scope:
+retain those proposed streams/stages in plan_json. Do not change the user's request action to implement.
+Stream files are concrete repository-relative file paths (existing or planned), not directories or globs.
+For generated outputs follow the repository's producer rules; do not invent file names or hand-edit outputs.
+The host validates and saves plan.json and brief.md after your READY response. You do not write either file,
+and saving this proposal does not launch workers or authorize the proposed checks. State any unresolved
+product decision as BLOCKED; incomplete discovery that you can finish is still your work.
+
 Plan shape (omit optional fields you do not need):
 
     {"request":"original request","brief":"scope, non-goals, behavior, invariants",
@@ -36,7 +47,7 @@ authorization, security, money, data-integrity, concurrency, migration, public-c
 belongs in evidence, not an invented risk. Evidence methods are code/check/browser; browser means an opted-in
 model behavior scenario (`visual.enabled: true`), while automated rendered layout is check evidence.
 
-## Responsive measurement
+## Responsive measurement (only for design work)
 
 - Preserve the user's requested fidelity and behavior in requirements. "No overflow" and a matching column
   count do not replace "matches Figma". Keep shell-to-content spacing, artwork/crop and control semantics in
@@ -64,6 +75,8 @@ model behavior scenario (`visual.enabled: true`), while automated rendered layou
   proposed mapping for approval; do not edit a map, broad ignore list or private state yourself.
 - A technical BLOCKED result needs a concrete summary and setup prerequisites; questions may be empty when
   no product decision is missing. Return that result instead of inventing a plan or asking the lead to parse data.
+
+## Repository discovery and result
 
 - Discover the actual architecture, analogous code, assets, API contracts and narrow checks. Include every
   file the stream needs, including adjacent styles and localization. A writer may not edit outside that list.

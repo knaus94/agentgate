@@ -11,6 +11,10 @@ Run `agentgate guide` and follow that workflow as the lead of this session. It r
 sub-agent, review or planning default for this task. If the request contains `--preview`, run only
 `agentgate preview --file <file with the request>` and report its result: ask no questions, start no models.
 
+For unresolved user decisions, prefer the native `request_user_input` / `request_user_input_async` tool
+available in this session, following the guide. Respect its mode restrictions; unavailable or unanswered
+forms fall back to a concise chat question, never an assumed answer.
+
 `agentgate` has to run outside your sandbox, and the rule that allows it matches only a plain command. Call it
 as one simple command every time — `agentgate <action> --file <path>` — with no pipe, heredoc, `&&`, `;` or
 redirection on the same line. Inputs go into a file first, written by a separate command.

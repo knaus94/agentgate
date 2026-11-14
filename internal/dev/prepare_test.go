@@ -77,6 +77,61 @@ func TestPreparationDraftsWithoutWritingAndReusesDiscovery(t *testing.T) {
 	f.finish()
 }
 
+func TestPreparationSavesStagedPlanningWithoutStartingImplementation(t *testing.T) {
+	f := newFixture(t)
+	plan := f.plan("-m --staged plan integrate the backend")
+	plan.Streams = nil
+	plan.Requirements = []Requirement{{ID: "R1", Text: "preserve the contract"}, {ID: "R2", Text: "implement the adapter"}}
+	plan.Stages = []Stage{
+		{Name: "contract", Goal: "Define the contract", Covers: []string{"R1"}, Streams: []Stream{{Name: "contract", Domain: "backend", Files: []string{"a.txt"}}}},
+		{Name: "adapter", Goal: "Build the adapter", Covers: []string{"R2"}, Streams: []Stream{{Name: "adapter", Domain: "backend", Files: []string{"b.txt"}}}},
+	}
+	f.model = func(kind string, _ map[string]any, _ provider.Call) (string, error) {
+		if kind != "prepare" {
+			return "", nil
+		}
+		proposal, _ := json.Marshal(plan)
+		answer, _ := json.Marshal(map[string]any{"status": "READY", "summary": "Two backend stages", "questions": []string{}, "setup": []string{}, "plan_json": string(proposal), "context_pack": map[string]any{}})
+		return string(answer), nil
+	}
+	result := f.do("prepare", func() (any, error) {
+		return Prepare(f.cfg, PrepareInput{Request: plan.Request, Name: "backend-proposal"})
+	})
+	if result["status"] != "READY" || f.count("prepare") != 1 || Current() != nil || f.count("writer") != 0 {
+		t.Fatal(result)
+	}
+	path, err := PlanFile("backend-proposal")
+	must(t, err)
+	var saved Plan
+	must(t, json.Unmarshal([]byte(fileText(t, path)), &saved))
+	if saved.Request != plan.Request || len(saved.Stages) != 2 {
+		t.Fatal("planning lost its scope or read-only authority")
+	}
+	f.fails("launch", "read-only", func() (any, error) { return Launch(f.cfg, &saved) })
+	if fileText(t, "a.txt") != "before\n" || fileText(t, "b.txt") != "before\n" {
+		t.Fatal("planning changed application files")
+	}
+}
+
+func TestInvalidPreparationStopsWithPublicDiagnostics(t *testing.T) {
+	f := newFixture(t)
+	f.model = func(kind string, _ map[string]any, _ provider.Call) (string, error) {
+		if kind == "prepare" {
+			return `{"status":"READY","summary":"invalid proposal","questions":[],"setup":[],"plan_json":"{\"brief\":\"no streams\"}","context_pack":{}}`, nil
+		}
+		return "", nil
+	}
+	result := f.do("prepare", func() (any, error) {
+		return Prepare(f.cfg, PrepareInput{Request: "-m plan the backend", Name: "invalid-proposal"})
+	})
+	if result["status"] != "BLOCKED" || result["reason"] != "invalid_plan" || !strings.Contains(result["validation_error"].(string), "streams are required") || f.count("prepare") != 2 || Current() != nil {
+		t.Fatalf("invalid preparation lost its bounded diagnostic: %v", result)
+	}
+	if _, err := os.Stat(filepath.Join(PlansDir, "invalid-proposal", "plan.json")); !os.IsNotExist(err) {
+		t.Fatal("invalid proposal was saved")
+	}
+}
+
 func TestPreparationReportsMissingInstructionsForTheDiscoveredScope(t *testing.T) {
 	f := newFixture(t)
 	plan := f.plan("-m implement the UI")

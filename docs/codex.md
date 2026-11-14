@@ -129,3 +129,22 @@ profile makes no claims about current prices, benchmark scores or comparative mo
 
 See [model routing and independence](model-selection.md), [configuration](configuration.md) and
 [CLI reference](cli.md) for the remaining commands and routing rules.
+
+## Interactive questions
+
+The lead prefers Claude Code's `AskUserQuestion` or the native input tool exposed by Codex. The tool/client
+renders the form; Agentgate does not create a separate question UI. Questions are grouped within the tool's
+limits. A pending asynchronous question stays pending; a dismissal, empty response or timeout is not consent.
+An unsupported form falls back to concise text. Only unresolved decisions are asked again.
+
+Some Codex versions expose questions in Default mode through an opt-in development feature. Check support
+with `codex features list`; when supported and desired, enable it with:
+
+```sh
+codex features enable default_mode_request_user_input
+```
+
+Start a new Codex session (or restart its editor agent) so it loads the setting. ACP clients such as editors
+must also advertise form elicitation. Enabling the flag cannot add UI support to a client that lacks it.
+Agentgate's installer does not silently change this global experimental setting. Claude's `/dev` command
+includes `AskUserQuestion`; the selected lead/profile remains your choice.

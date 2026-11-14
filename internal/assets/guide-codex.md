@@ -16,6 +16,11 @@ You are a Codex session. Everything above applies; these points are specific to 
   second `agentgate` command while one is running: it would be rejected, not queued.
 - **The workers are agentgate's.** Do not use your own sub-agents, `codex review` or plan mode for this task.
   You read the diffs and make the decisions.
+- **User questions.** Prefer the native interactive input tool exposed by this session. If it is unavailable
+  in the current mode, follow the guide's text fallback; do not enter plan mode or create an MCP/UI workaround.
+  Some Codex versions expose Default-mode questions through `features.default_mode_request_user_input`;
+  this is a user/client setting, not permission to edit configuration during a task. ACP clients must also
+  support form elicitation. An empty tool result does not mean the user selected the recommended option.
 - **Ending a turn.** The user may have trusted the Stop hook (`/hooks`), which holds you to an unfinished task.
   Do not rely on it: before you end a turn run `agentgate status` and follow its `next`, or `hold` with the true
   reason.

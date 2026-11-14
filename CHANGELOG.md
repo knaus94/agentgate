@@ -2,6 +2,17 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.14.1
+
+- Lead instructions prefer native interactive questions in Claude Code and Codex, with bounded batches,
+  explicit handling of unanswered/pending forms and a text fallback for unsupported clients. Claude's command
+  declares AskUserQuestion. Codex Default-mode setup and ACP capability requirements are documented.
+- Read-only `plan` requests can save staged implementation proposals without starting writers or checks.
+  Preparation explains that the host saves artifacts and preserves proposed file ownership. Launch still
+  refuses a planning request until implementation is explicitly authorized and its action updated.
+- An invalid proposal after the bounded correction attempt returns a structured BLOCKED diagnostic instead
+  of directing the lead into private worker files or repeated unchanged preparation calls.
+
 ## 0.14.0
 
 - Refactored command parsing/dispatch, task state/lifecycle/evidence, provider adapters, accounts,

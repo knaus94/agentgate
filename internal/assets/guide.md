@@ -21,8 +21,21 @@ that investigation, export frames, parse raw design data or inspect pictures in 
 
 Read the repository instructions that govern authorization. Review the preparation summary and saved brief
 for scope and decisions. The preparation worker reads module docs and analogous implementations. Ask the
-user only for its unresolved product, data, security or authorization decisions, with a recommendation, all at once. `--grill` forces clarification, `--no-grill` skips optional questions but
+user only for its unresolved product, data, security or authorization decisions, with a recommendation, grouped within the question tool's limits. `--grill` forces clarification, `--no-grill` skips optional questions but
 never an approval. Silence is not agreement.
+
+Use the lead client's native interactive question tool when available: `AskUserQuestion` in Claude Code,
+or `request_user_input` / `request_user_input_async` as exposed by Codex. Prefer it to a numbered chat list.
+Offer concise alternatives with a recommendation and allow a free-text answer. Respect the tool's current
+mode and question limits; do not switch into another planning workflow just to display a form. Keep required
+decisions pending while doing independent work. A default selection, empty result, dismissal or timeout is
+not an answer or approval. An asynchronous acknowledgement means the question is still pending: wait for
+the user's response, do not duplicate it in chat. If the client does not expose/support the tool or a closed
+request returns no answer, explain that
+briefly and ask the remaining questions in one concise message instead of retrying the same form.
+Do not ask again for decisions already supplied. Return actual answers through `prepare.notes` or `answer`
+as appropriate. Workers report blockers to the lead; they never open user dialogs. Use dedicated approval
+mechanisms for permissions when the client requires them; a question tool does not bypass authorization.
 
 Preparation reports applicable `review_rules` with their scopes, instruction paths, definition sources and
 missing files. Use this summary to resolve setup problems; do not repeat the worker's skill discovery.
@@ -45,6 +58,11 @@ the plan changes (an accepted architecture, an `update`), so the file always sho
 with its accepted design can be launched from any later session in the same checkout; `agentgate plan list`
 shows what is there. A one-line light fix does not need a saved plan. The `.agentgate/` directory is the
 user's and is never part of the change: leave it where it is, also when the brief says to change nothing else.
+
+A `plan` request can contain future implementation streams and stages. The host saves the proposal without
+starting writers or checks. Report that planning is complete; implementation needs explicit authorization
+and an updated request action. If preparation returns `reason: invalid_plan`, report its public validation
+error. Do not repeatedly start unchanged preparations or repair the worker's technical plan in the lead.
 
 ## 2. The mode
 

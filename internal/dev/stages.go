@@ -179,7 +179,7 @@ func resolveStaged(cfg *config.Config, plan *Plan, request Request) (*Resolved, 
 	if request.Single {
 		return nil, errors.New("--single asks for one pass, and the plan has stages")
 	}
-	if !request.Writes() || request.ReviewFirst() {
+	if (!request.Writes() && request.Action != "plan") || request.ReviewFirst() {
 		return nil, fmt.Errorf("stages are for work that writes code; %s reads what is already there", request.Action)
 	}
 	if len(plan.Streams) > 0 {

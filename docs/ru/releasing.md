@@ -9,10 +9,10 @@ make check
 npm ci --prefix design-kit --ignore-scripts --no-audit --no-fund
 node design-kit/node_modules/playwright-core/cli.js install chromium
 make design-browser
-make package VERSION=0.14.0
+make package VERSION=0.14.1
 ```
 
-Результат: `dist/agentgate-0.14.0.zip` и файл `.sha256`. Внутри исходники, документация, статические бинарники
+Результат: `dist/agentgate-0.14.1.zip` и файл `.sha256`. Внутри исходники, документация, статические бинарники
 Linux amd64/arm64, `scripts/install-local.sh`, `RELEASE.json`, опись `SHA256SUMS`. Упаковщик использует явный
 список и фиксированное время ZIP. `.git`, node_modules, приватные профили и кэши не включаются.
 `SOURCE_DATE_EPOCH` задаёт время релиза при необходимости.
@@ -20,8 +20,8 @@ Linux amd64/arm64, `scripts/install-local.sh`, `RELEASE.json`, опись `SHA25
 Проверка перед передачей:
 
 ```sh
-unzip dist/agentgate-0.14.0.zip
-cd agentgate-0.14.0
+unzip dist/agentgate-0.14.1.zip
+cd agentgate-0.14.1
 sha256sum -c SHA256SUMS
 sh scripts/install-local.sh --prefix "$HOME/.local/bin" --no-integrations
 ```
@@ -61,7 +61,7 @@ prerelease, build metadata не делает версию новее. Неизв
 Завершите или явно остановите активные операции перед заменой их бинарника. Читайте миграцию конкретного
 релиза: совместимость состояния нельзя обещать безусловно для всех будущих версий.
 
-Настройки установщика: `AGENTGATE_VERSION=v0.14.0`, `AGENTGATE_BIN=/some/bin`,
+Настройки установщика: `AGENTGATE_VERSION=v0.14.1`, `AGENTGATE_BIN=/some/bin`,
 `AGENTGATE_BASE_URL` для разрешённого зеркала релизов. Закреплённая версия — явный выбор и может быть старее;
 обычный `update` не должен случайно понижать новую локальную сборку.
 
@@ -70,7 +70,7 @@ prerelease, build metadata не делает версию новее. Неизв
 Путь Go-модуля остаётся `github.com/knaus94/agentgate`. Репозиторий релизов переопределяется при линковке:
 
 ```sh
-go build -trimpath -buildvcs=false -ldflags '-X github.com/knaus94/agentgate/internal/update.Repo=you/agentgate -X github.com/knaus94/agentgate/internal/update.Version=0.14.0' ./cmd/agentgate
+go build -trimpath -buildvcs=false -ldflags '-X github.com/knaus94/agentgate/internal/update.Repo=you/agentgate -X github.com/knaus94/agentgate/internal/update.Version=0.14.1' ./cmd/agentgate
 ```
 
 Workflow получает путь символов из `go list -m`, а репозиторий — из `GITHUB_REPOSITORY`.

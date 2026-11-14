@@ -73,8 +73,12 @@ func PlanSave(cfg *config.Config, plan *Plan, name string) (any, error) {
 	if err := os.WriteFile(brief, []byte(renderBrief(name, resolved)), 0o644); err != nil {
 		return nil, err
 	}
+	next := "Show the user the brief path. Pass the plan to any command with `--plan " + name + "`; save again after every change to it."
+	if resolved.Request.Action == "plan" {
+		next = "Show the saved brief. This is a read-only proposal, not authorization to implement. After explicit approval, change the request action to implementation while preserving scope and constraints, save again, and follow the normal launch gates."
+	}
 	return map[string]any{"name": name, "plan": path, "brief": brief, "mode": resolved.Mode, "decision": resolved.Decision,
-		"next": "Show the user the brief path. Pass the plan to any command with `--plan " + name + "`; save again after every change to it."}, nil
+		"next": next}, nil
 }
 
 // PlanList names the saved plans of this repository, newest first.
