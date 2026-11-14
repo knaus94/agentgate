@@ -137,11 +137,9 @@ func (g *Gate) read(cfg *config.Config, review LeadReview, known map[string]Find
 		return errors.New("the files or the criteria changed since the evidence was prepared; `run` prepares it again")
 	}
 	accepted := g.accepted()
-	lane, err := g.leadLane(review, known)
-	if err != nil {
-		return err
-	}
-	if err := g.validateQuality(review.Quality, quality); err != nil {
+	// Every problem of the review goes back in one answer, findings and criteria alike.
+	lane, laneErr := g.leadLane(review, known)
+	if err := errors.Join(laneErr, g.validateQuality(review.Quality, quality)); err != nil {
 		return err
 	}
 	lane.Quality = review.Quality

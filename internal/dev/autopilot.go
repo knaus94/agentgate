@@ -160,7 +160,7 @@ func (g *Gate) classify(cfg *config.Config) (string, []Need, error) {
 			if reading := g.Reading; reading != nil && reading.Key == key && reading.Contract == contract && reading.QualityDigest == quality.fingerprint() {
 				need := Need{Kind: "review", What: "this mode has no reviewer process: read the patch and judge it yourself",
 					Detail:  map[string]string{"patch": reading.Patch, "packet": reading.Packet},
-					Resolve: "decide {review: {summary, findings, quality}} — quality only when the packet has one. Judge every slop_signal and every added line: does the task need it? An empty findings list is a valid result."}
+					Resolve: "decide {review: {summary, findings, quality}} — quality only when the packet has one; a code ref is path:line or path:first-last. Judge every slop_signal and every added line: does the task need it? An empty findings list is a valid result."}
 				if disputed := len(g.openDisputes(g.accepted())); disputed > 0 {
 					need.What = fmt.Sprintf("the writer disputes %d of your findings; its evidence is under `disputes` in the packet. Read the patch and judge again", disputed)
 					need.Resolve += " A disputed finding you leave out of findings is withdrawn; one you report again under its id is upheld and goes back to be fixed."

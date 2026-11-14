@@ -2,6 +2,20 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.16.1
+
+- `prepare` refuses a new request while the session holds an unfinished task and says what to do instead:
+  `status`, `run`, `prepare` with notes only, or `pause` {cancelled: true} on the user's word. Before, the
+  words "continue the work" were prepared as a new request and a worker rewrote the plan of the task around
+  them.
+- The guide tells the lead to run `status` first when a task may already exist, and how a task the user stopped
+  or one saved by 0.15 is continued. `status` of a task saved by 0.15 says that the user's stop is lifted by
+  `resume` on their word only.
+
+- A code reference in a review may be a range of lines (`path:10-20`). A refused review, the lead's or a
+  reviewer's, names every problem of its findings and criteria at once instead of the first; a finding is
+  named by its axis, path and line, with what is wrong with it.
+
 ## 0.16.0
 
 The core of a task was rewritten: its lifecycle, its plan, its evidence and the protocol with the lead. The

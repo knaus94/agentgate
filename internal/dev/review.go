@@ -404,6 +404,8 @@ const reportCorrections = 2
 // stable ids. unmet says that the same reviewer judged a criterion not satisfied: that explains an axis that
 // needs a fix and names no defect in the code.
 func (g *Gate) validateReports(reports []Report, axes, scope []string, known map[string]Finding, unmet bool) ([]Report, error) {
+	var problems []string
+	add := func(format string, values ...any) { problems = append(problems, fmt.Sprintf(format, values...)) }
 	var got []string
 	for _, report := range reports {
 		got = append(got, report.Axis)
@@ -412,7 +414,7 @@ func (g *Gate) validateReports(reports []Report, axes, scope []string, known map
 	sort.Strings(got)
 	sort.Strings(want)
 	if !slices.Equal(got, want) {
-		return nil, fmt.Errorf("the review must report each of its axes exactly once: want %v, got %v", want, got)
+		add("the review must report each of its axes exactly once: want %v, got %v", want, got)
 	}
 	owned := compilePatterns(scope)
 	seen := map[string]bool{}
@@ -422,31 +424,51 @@ func (g *Gate) validateReports(reports []Report, axes, scope []string, known map
 			return nil, fmt.Errorf("the %s reviewer could not review: %s", report.Axis, strings.Join(report.Checked, "; "))
 		}
 		if (report.Status != "PASS" && report.Status != "NEEDS_FIX") || len(report.Checked) == 0 {
-			return nil, errors.New("a review report needs a status and what it checked")
+			add("the %s report needs a status (PASS or NEEDS_FIX) and what it checked", report.Axis)
 		}
 		if report.Status == "NEEDS_FIX" && len(report.Findings) == 0 && !unmet {
-			return nil, fmt.Errorf("the %s report says NEEDS_FIX and lists no finding: name the defect as a finding with its path, line, "+
+			add("the %s report says NEEDS_FIX and lists no finding: name the defect as a finding with its path, line, "+
 				"evidence, impact and remedy, or return PASS", report.Axis)
 		}
 		report.ScopeFiles = scope
 		for position := range report.Findings {
 			finding := &report.Findings[position]
 			finding.Axis = report.Axis
-			empty := slices.ContainsFunc([]string{finding.Evidence, finding.Impact, finding.Remedy}, func(value string) bool {
-				return strings.TrimSpace(value) == ""
-			})
-			if !slices.Contains(config.Severities, finding.Severity) || !slices.Contains([]string{"high", "medium", "low"}, finding.Confidence) ||
-				!matchAny(owned, finding.Path) || finding.Line < 1 || empty {
-				return nil, fmt.Errorf("finding %q is outside the scope or lacks evidence, impact or remedy", finding.ID)
+			where := fmt.Sprintf("the %s finding at %s:%d", report.Axis, finding.Path, finding.Line)
+			var wrong []string
+			if !slices.Contains(config.Severities, finding.Severity) {
+				wrong = append(wrong, "severity is one of "+strings.Join(config.Severities, ", "))
+			}
+			if !slices.Contains([]string{"high", "medium", "low"}, finding.Confidence) {
+				wrong = append(wrong, "confidence is high, medium or low")
+			}
+			if !matchAny(owned, finding.Path) {
+				wrong = append(wrong, "path must be a file of the change's scope")
+			}
+			if finding.Line < 1 {
+				wrong = append(wrong, "line is one line number, 1 or more")
+			}
+			for name, value := range map[string]string{"evidence": finding.Evidence, "impact": finding.Impact, "remedy": finding.Remedy} {
+				if strings.TrimSpace(value) == "" {
+					wrong = append(wrong, name+" is empty")
+				}
+			}
+			if len(wrong) > 0 {
+				sort.Strings(wrong)
+				add("%s: %s", where, strings.Join(wrong, "; "))
+				continue
 			}
 			if previous, ok := known[finding.ID]; !ok || previous.Axis != report.Axis {
 				finding.ID = g.ID[:8] + "-" + digest([]string{report.Axis, finding.Path, finding.Category, finding.Evidence})[:16]
 			}
 			if seen[finding.ID] {
-				return nil, errors.New("the same finding was reported twice")
+				add("%s is reported twice", where)
 			}
 			seen[finding.ID] = true
 		}
+	}
+	if len(problems) > 0 {
+		return nil, errors.New(strings.Join(problems, "; "))
 	}
 	return reports, nil
 }

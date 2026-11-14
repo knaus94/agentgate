@@ -92,8 +92,9 @@ func TestAnEarlierTaskIsReadWithoutBeingRewritten(t *testing.T) {
 	status, err := Status(f.cfg, gate, "")
 	must(t, err)
 	answer := asMap(status)
-	if answer["saved_by_an_earlier_version"] != true || !slices.Equal(offered(answer), []string{"resume", "stop"}) {
-		t.Fatalf("status says what the task is and what is possible: %v", answer)
+	if answer["saved_by_an_earlier_version"] != true || !slices.Equal(offered(answer), []string{"resume", "stop"}) ||
+		!strings.Contains(answer["next"].(string), "on the user's word only") {
+		t.Fatalf("status says what the task is, what is possible and that the user's stop is theirs to lift: %v", answer)
 	}
 	if text := PanelText(f.cfg, false, false, 120, 0); !strings.Contains(text, "2. second") || !strings.Contains(text, "paused (user)") {
 		t.Fatalf("the panel shows an earlier task:\n%s", text)

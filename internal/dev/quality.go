@@ -241,6 +241,8 @@ func (q *qualityInputs) fingerprint() string {
 	return digest(q)
 }
 
+// validateQuality checks a report on the criteria and names every problem it has at once: a reviewer, or the
+// lead, corrects them all in one round instead of meeting them one refusal at a time.
 func (g *Gate) validateQuality(report *QualityReport, input *qualityInputs) error {
 	if input == nil {
 		if report != nil && (len(report.Requirements) > 0 || len(report.Rules) > 0) {
@@ -248,26 +250,34 @@ func (g *Gate) validateQuality(report *QualityReport, input *qualityInputs) erro
 		}
 		return nil
 	}
-	if report == nil || len(report.Requirements) != len(input.Requirements) || len(report.Rules) != len(input.Rules) {
+	if report == nil {
 		return errors.New("quality report must assess every requirement and review rule exactly once")
 	}
+	var problems []string
+	add := func(format string, values ...any) { problems = append(problems, fmt.Sprintf(format, values...)) }
 	seen := map[string]bool{}
 	for _, result := range report.Requirements {
 		index := slices.IndexFunc(input.Requirements, func(r criterion) bool { return r.ID == result.ID })
 		if index < 0 || seen[result.ID] || !slices.Contains([]string{"verified", "partial", "missing"}, result.Status) || strings.TrimSpace(result.Reason) == "" {
-			return fmt.Errorf("invalid requirement result %q: needs a known unique id, status and reason", result.ID)
+			add("invalid requirement result %q: needs a known unique id, status and reason", result.ID)
+			continue
 		}
 		seen[result.ID] = true
 		requirement := input.Requirements[index]
 		method := requirement.Method == ""
 		for _, proof := range result.Evidence {
 			if err := g.validateProof(proof, input, result.Status == "verified"); err != nil {
-				return fmt.Errorf("requirement %q: %w", result.ID, err)
+				add("requirement %q: %v", result.ID, err)
 			}
 			method = method || proof.Kind == requirement.Method
 		}
 		if result.Status == "verified" && (len(result.Evidence) == 0 || !method) {
-			return fmt.Errorf("requirement %q needs evidence using its declared method %q", result.ID, requirement.Method)
+			add("requirement %q needs evidence using its declared method %q", result.ID, requirement.Method)
+		}
+	}
+	for _, requirement := range input.Requirements {
+		if !seen[requirement.ID] {
+			add("requirement %q is not assessed; the report must assess every requirement and review rule exactly once", requirement.ID)
 		}
 	}
 	seen = map[string]bool{}
@@ -275,15 +285,24 @@ func (g *Gate) validateQuality(report *QualityReport, input *qualityInputs) erro
 		index := slices.IndexFunc(input.Rules, func(r reviewRule) bool { return r.ID == result.ID })
 		if index < 0 || seen[result.ID] || strings.TrimSpace(result.Evidence) == "" ||
 			!slices.Contains([]string{"pass", "block", "not_applicable", "unavailable"}, result.Status) {
-			return fmt.Errorf("invalid review rule result %q", result.ID)
+			add("invalid review rule result %q", result.ID)
+			continue
 		}
 		seen[result.ID] = true
 		if input.Rules[index].Required && result.Status == "not_applicable" {
-			return fmt.Errorf("review rule %q must be assessed; missing evidence is unavailable", result.ID)
+			add("review rule %q must be assessed; missing evidence is unavailable", result.ID)
 		}
 		if input.Rules[index].Unavailable != "" && result.Status != "unavailable" {
-			return fmt.Errorf("review rule %q is unavailable and cannot be approved", result.ID)
+			add("review rule %q is unavailable and cannot be approved", result.ID)
 		}
+	}
+	for _, rule := range input.Rules {
+		if !seen[rule.ID] {
+			add("review rule %q is not assessed; the report must assess every requirement and review rule exactly once", rule.ID)
+		}
+	}
+	if len(problems) > 0 {
+		return errors.New(strings.Join(problems, "; "))
 	}
 	return nil
 }
@@ -294,14 +313,20 @@ func (g *Gate) validateProof(proof Proof, input *qualityInputs, verified bool) e
 	}
 	switch proof.Kind {
 	case "code":
-		path, number, ok := strings.Cut(proof.Ref, ":")
-		line, err := strconv.Atoi(number)
-		if !ok || err != nil || line < 1 || (!matchAny(compilePatterns(g.scope()), path) && !slices.Contains(g.context(), path)) {
-			return fmt.Errorf("code evidence %q must name a scoped file:line", proof.Ref)
+		// A line, or a range of lines: "path:12" or "path:12-30".
+		path, lines, ok := strings.Cut(proof.Ref, ":")
+		from, to, ranged := strings.Cut(lines, "-")
+		first, err := strconv.Atoi(from)
+		last := first
+		if ranged && err == nil {
+			last, err = strconv.Atoi(to)
+		}
+		if !ok || err != nil || first < 1 || last < first || (!matchAny(compilePatterns(g.scope()), path) && !slices.Contains(g.context(), path)) {
+			return fmt.Errorf("code evidence %q must be path:line or path:first-last, in a file of this stage's scope or context", proof.Ref)
 		}
 		raw, err := os.ReadFile(path)
-		if err != nil || line > len(strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")) || len(raw) == 0 {
-			return fmt.Errorf("code evidence %q cannot be read", proof.Ref)
+		if err != nil || last > len(strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")) || len(raw) == 0 {
+			return fmt.Errorf("code evidence %q cannot be read: the file is missing or shorter", proof.Ref)
 		}
 	case "check":
 		check, ok := input.Checks[proof.Ref]

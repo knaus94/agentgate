@@ -28,6 +28,12 @@ prepare ⇄ questions to the user → [architecture] → start → run ⇄ (answ
 A request that is only `status`, `stop` or `help` is that command: run it and stop. With `--preview`, run
 `agentgate preview --file <the request>` and report it: no questions, no models.
 
+**A task may already exist in this session** — you were started again after a context reset, or the user says
+"continue". Run `agentgate status` first when there is any doubt. A `step` other than `done` means a task is
+open: report where it stands and continue it from its `actions` and `needs`; `prepare` refuses to start another
+beside it. A task the user stopped (`paused.kind` is `user`) continues only on their word, with `resume`. A task
+`saved_by_an_earlier_version` is converted by your next command and is otherwise the same.
+
 1. **Prepare.** Write the request to a file exactly as the user typed it and run
    `agentgate prepare --file <that file>`. A read-only worker explores the repository and drafts the plan; the
    tool validates it and saves it with a readable brief. The answer names the plan, the mode and why.

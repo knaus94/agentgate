@@ -295,12 +295,19 @@ func Show(cfg *config.Config, gate *Gate, what string) (any, error) {
 func Status(cfg *config.Config, gate *Gate, what string) (any, error) {
 	if gate.legacy != nil {
 		out := map[string]any{"task": gate.ID[:8], "action": gate.Request.Action, "mode": gate.Mode, "step": gate.Step,
-			"saved_by_an_earlier_version": true, "actions": gate.actions(),
-			"next": "This task was saved by an earlier version of the tool. Its next command (for example `run`) brings it to the present format; " +
-				"the original state is kept beside it as state.v1.json. Checks and review run again once, because their receipts were bound differently."}
+			"saved_by_an_earlier_version": true, "actions": gate.actions()}
+		next := "This task was saved by an earlier version of the tool. The next command of its own session brings it to the present format; " +
+			"the original state is kept beside it as state.v1.json. Checks and review run again once, because their receipts were bound differently. "
 		if gate.Pause != nil {
 			out["paused"] = map[string]string{"kind": gate.Pause.Kind, "reason": gate.Pause.Reason}
 		}
+		switch {
+		case gate.Pause != nil && gate.Pause.Kind == PauseUser:
+			next += "The user stopped it: `resume` continues it, on the user's word only; then `run`."
+		case gate.active():
+			next += "`run` continues it."
+		}
+		out["next"] = next
 		return out, nil
 	}
 	if what == "" {

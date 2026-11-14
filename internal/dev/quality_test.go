@@ -158,6 +158,43 @@ func TestQualityRejectsMissingDuplicateAndInventedProof(t *testing.T) {
 			}
 		})
 	}
+	// A code reference names one line or a range of lines in a file of the scope, and every problem of a report
+	// is named at once, so the lead or the reviewer corrects them in one round.
+	t.Run("code references and every problem at once", func(t *testing.T) {
+		f := newFixture(t)
+		f.model = func(kind string, _ map[string]any, _ provider.Call) (string, error) {
+			if kind != "writer" {
+				return "", nil
+			}
+			write(t, "a.txt", "one\ntwo\nthree\n")
+			return `{"status":"COMPLETED","summary":"wrote three lines","blockers":[],"handoff":"","deviations":[],"disputes":[]}`, nil
+		}
+		plan := f.plan("-l implement criteria")
+		plan.Checks = nil
+		plan.Requirements = []Requirement{{ID: "R1", Text: "first behavior", Method: "code"}, {ID: "R2", Text: "second behavior", Method: "code"}}
+		f.start(plan)
+		gate := Current()
+		input, err := gate.qualityInputs(f.cfg)
+		must(t, err)
+		proof := func(ref string) []Proof { return []Proof{{Kind: "code", Ref: ref, Detail: "read it"}} }
+		report := func(first, second string) *QualityReport {
+			return &QualityReport{Rules: []RuleResult{}, Requirements: []RequirementResult{
+				{ID: "R1", Status: "verified", Reason: "read", Evidence: proof(first)},
+				{ID: "R2", Status: "verified", Reason: "read", Evidence: proof(second)}}}
+		}
+		must(t, gate.validateQuality(report("a.txt:2", "a.txt:1-3"), input))
+		err = gate.validateQuality(report("a.txt:3-1", "a.txt:2-9"), input)
+		if err == nil || !strings.Contains(err.Error(), `"a.txt:3-1" must be path:line or path:first-last`) || !strings.Contains(err.Error(), `"a.txt:2-9" cannot be read`) {
+			t.Fatalf("a reversed range and a range past the end are both named in one answer: %v", err)
+		}
+		bad := Finding{Severity: "P9", Confidence: "high", Path: "b.txt", Line: 0, Evidence: "e", Remedy: "r"}
+		err = gate.read(f.cfg, LeadReview{Summary: "read", Findings: []Finding{bad}, Quality: report("a.txt:1", "elsewhere.txt:1")}, map[string]Finding{})
+		for _, want := range []string{"severity is one of", "path must be a file of the change's scope", "line is one line number", "impact is empty", `"elsewhere.txt:1"`} {
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("the lead's review is refused with every problem of findings and criteria at once, missing %q: %v", want, err)
+			}
+		}
+	})
 	// A failure that existed before the task still blocks, and a failing command proves nothing.
 	t.Run("preexisting failure", func(t *testing.T) {
 		f := newFixture(t)

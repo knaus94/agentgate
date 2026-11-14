@@ -4,6 +4,13 @@ This record distinguishes live integrations from controlled provider fixtures an
 model quality, arbitrary specification size or every possible execution environment. It has two parts: what
 was run for the 0.16.0 source, and the release validation of 0.14.0, which is kept as it was written.
 
+## 0.16.1
+
+Checked on 2026-11-14: `make check` — formatting, `go vet`, `go test -race ./...` and the 18 Node core tests —
+PASS; the release workflow runs the same suites and the Chromium workflow again before it publishes. The two
+fixes come from a lead's live session: its review was refused for a code reference written as a line range,
+one problem per attempt. No new live runs were made for this version.
+
 ## 0.16.0 — the rewritten task core
 
 Validated on 2026-11-14 against the source based on `29baaf9` (0.15.0). Automated suites, an archive check

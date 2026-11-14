@@ -104,6 +104,13 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 		return nil, err
 	}
 	revising := gate != nil && gate.active()
+	// A request is a new task. While this session holds an unfinished one it is continued, not prepared again:
+	// preparing the words "continue it" would have a worker rewrite the plan of the task around them.
+	if revising && input.Request != "" && input.Request != gate.Plan.Request {
+		return nil, fmt.Errorf("this session already has an unfinished task (%s, at %s): `agentgate status` shows where it stands and which actions are legal, "+
+			"`run` continues it. To revise its plan, call `prepare` with notes only. To start another task, first end this one with `pause` {reason, cancelled: true} — "+
+			"the user's word", gate.ID[:8], gate.Step)
+	}
 	preparation := openPreparation(gate)
 	if input.Fresh || (preparation != nil && !revising && input.Request != "" && input.Request != preparation.Request) {
 		preparation = nil

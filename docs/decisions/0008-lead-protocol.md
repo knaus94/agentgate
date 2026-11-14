@@ -65,6 +65,16 @@ next command would have told it is a turn spent and a mistake to make: `prepare`
 itself, and for a request that opens no task (`status`, `--preview`, `research`) it names the command that
 does.
 
+A lead can also start into a session that already holds a task: after a context reset, or when the user
+says "continue". The guide says to run `status` first when in doubt, and `prepare` refuses a request that
+differs from the open task's own, naming the legal ways on. Without the refusal the words "continue the work"
+were prepared as a new request, which for an open task means a worker rewriting its plan around them. The
+suite now holds the refusal.
+
+A review the lead gives in light mode is validated like a reviewer's. The first live use of it was refused for
+a code reference written as a range of lines, then refused again for the next problem. A reference may now be
+a range, and a refusal names every problem of the review at once, findings and criteria together.
+
 ### Measured
 
 One small task was led by a non-interactive Codex session on both versions, with the same model

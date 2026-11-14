@@ -62,7 +62,10 @@ processes; a finding there is
 `{id: "", severity: "P1", confidence: "high", category, path, line, evidence, impact, remedy, preserve, boundary_break}`.
 `quality` is required when the review packet has one: every requirement `{id, status: verified|partial|missing,
 reason, evidence: [{kind: code|check|browser, ref, detail}]}` and every rule `{id, status:
-pass|block|not_applicable|unavailable, evidence}`, each id exactly once.
+pass|block|not_applicable|unavailable, evidence}`, each id exactly once. `ref` is `path:line` or
+`path:first-last` for code, in a file of the stage's scope or context; a check's id from the packet's `checks`;
+an observed scenario id for the browser. A finding's `line` is one number. A refused review names every
+problem at once.
 
 Severities P0–P3. A finding blocks when its severity is one the mode blocks on (P0–P1; heavy and ultra also
 P2), its confidence is not low, or it breaks a boundary; and always once it is `accepted` or `needs-approval`.

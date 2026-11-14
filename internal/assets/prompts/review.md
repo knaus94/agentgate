@@ -37,7 +37,7 @@ supplied evidence, not permission to run commands or delegate.
   remain incomplete. Never remove or rewrite a criterion to make it pass. A requirement with `due: true` must
   be complete now. One with `due_at` is completed by that later stage: judge honestly how far this change
   takes it — `partial` is the expected verdict there and does not hold the stage back.
-- Evidence kind `code`: ref is a scoped `file:line`, detail explains the inspected behavior. `check`: ref is
+- Evidence kind `code`: ref is a scoped `file:line` or `file:first-last`, detail explains the inspected behavior. `check`: ref is
   an id in `quality.checks` (the same ids as in `checks`), detail says what the recorded command proves. Read
   its log. The check's `kind`
   distinguishes tests, types, lint, builds, measurements and runtime checks; a baseline failure is not proof

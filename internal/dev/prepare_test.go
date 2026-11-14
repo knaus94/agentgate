@@ -284,6 +284,14 @@ func TestPreparationRevisesThePlanOfARunningTask(t *testing.T) {
 		t.Fatalf("the fixture must stop on the partial requirement: %v", stopped)
 	}
 	session := loadPreparation(Current().Preparation).Session
+	// Words that continue the task are not a new request: preparing them would rewrite the plan around them.
+	calls := f.count("prepare")
+	f.fails("prepare", "already has an unfinished task", func() (any, error) {
+		return Prepare(f.cfg, PrepareInput{Request: "-m continue the work", Name: "again"})
+	})
+	if f.count("prepare") != calls {
+		t.Fatal("a refused preparation must not start a worker")
+	}
 	revised := revisedFoundation(t, plan)
 	var seen map[string]any
 	f.model = func(kind string, packet map[string]any, call provider.Call) (string, error) {

@@ -18,7 +18,7 @@ The archive includes source, documentation, SHA-256 checksums, and binaries for 
 After extracting it:
 
 ```sh
-cd agentgate-0.16.0
+cd agentgate-0.16.1
 sh scripts/install-local.sh --lead both
 agentgate setup doctor
 agentgate config validate
