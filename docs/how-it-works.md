@@ -7,42 +7,93 @@
 | Role | Who | Can do |
 |---|---|---|
 | Lead | your Claude Code or Codex session | everything a normal session can: your MCP servers, plugins and skills stay available |
-| Scout | a fresh, cheap model process | medium: read the repository once, return a context pack for the writers and the reviewers |
-| Architect | a fresh model process | read the repository, return a design |
-| Writer | a fresh model process, one per stream | edit the files of its stream |
-| Reviewer | a fresh model process | read the diff, return findings |
+| Preparation | one read-only model process, resumed on every call | read the repository, ask what only a person can decide, draft the plan and a map of the area |
+| Architect | a fresh model process | heavy and ultra: read the repository, return a design |
+| Writer | a model process per stream, resumed for corrections | edit the files of its stream |
+| Reviewer | a model process that did not write the code, resumed for rechecks | read the patch, return findings and verdicts on the criteria |
 
-`agentgate` is the only thing that starts workers. The lead never spawns agents for the task; it calls
-`agentgate` and follows the `next` field of every answer.
+`agentgate` is the only thing that starts workers. The lead never spawns agents for the task. It owns product
+decisions, authorization and the report to the user; it is asked for decisions, not for keystrokes.
 
-## The stages
+## One command moves the task
 
-Every stage exists because skipping it costs more than running it.
+```
+prepare ⇄ questions → [architecture] → start → run ⇄ (answer | decide | amend) → done
+```
 
-| # | Stage | Who | Why it is there |
-|---|---|---|---|
-| 1 | Preparation | read-only worker, then lead | The worker discovers the repository and drafts the plan; the lead handles product decisions and authorization |
-| 2 | Scout | one cheap model, once | Medium only: nobody designs there, so writers and reviewers start from its map. Architects read the code themselves, and in heavy and ultra the accepted design is the map |
-| 3 | Design | two top models, independently | Heavy and ultra only. Two designs take the time of one and show where the real decision is. The lead accepts one. A critique (ultra) and a revision continue the architect's own session: the code is already read |
-| 4 | Write | one writer per stream | Writers run the declared checks themselves, so the first thing the gate sees is code its author already tested |
-| 5 | Check | the declared commands | Runs before any reviewer. Seconds, against minutes and quota: code that fails its checks is not reviewed |
-| 6 | Review | models that did not write the code | The independent judgement. Two vendors in the default mixed-provider routes above light; actual substitutions are reported |
-| 7 | Triage | the lead | A finding is a claim, not a fact. The lead assesses the reviewer's cited evidence and sends technical uncertainty back to a specialist |
-| 8 | Correct | the same writers, same sessions | Failing checks and accepted findings go back to whoever wrote the code, with its context intact |
-| 9 | Finish | the gate | Refuses unless the review is current, the checks pass and nothing blocks |
+`agentgate run` takes every step the state determines and stops only where a person is needed. `start`
+already runs; `answer` and `decide` run on by themselves.
 
-Stages 5–8 repeat until the task is clean. Two things keep the loop cheap: a recheck runs only the lanes that
-have something to verify plus one correctness lane on the delta, one effort step lower; and effort rises only
-when a correction demonstrably stalled.
+| Step | What `run` does there |
+|---|---|
+| `write` | starts the pending streams of the round, wave by wave; a finished stream is never started again |
+| `verify` | runs the declared checks, then the independent review, then reads the result |
+| `decide` | nothing: something only a person can settle is listed in `needs` |
+| `done` | the task is complete |
 
-What is deliberately not a stage: a separate test-writing agent (tests belong to the stream that changes the
-behaviour), a merge step (writers share one checkout with disjoint files), and a second design round by
-default (one optional revision, then the lead decides).
+What follows a verification is determined, so the tool does it:
+
+- **Clean** — the stage is accepted in the same run. The next stage opens, or the whole change is reviewed
+  once more for the seams, or the task ends.
+- **Fixable** — a failing check or a blocking finding goes back to the writers that own it, in their own
+  sessions, and the loop continues without the lead.
+- **Needs a person** — the task stops at `decide` with a typed list.
+
+| `needs` | What happened |
+|---|---|
+| `answer` | a writer stopped with questions |
+| `failed` | a writer or a provider failed; `run` retries the unfinished streams |
+| `review` | light mode: the lead is the reviewer and is handed the patch |
+| `finding` | the author disputed a finding and the reviewer upheld it, or it waits for an approval |
+| `requirement`, `rule` | a criterion that is due is not verified |
+| `stall` | a correction made no verified progress: a new diagnosis is needed, not another attempt |
+| `limit` | three corrections ran in a row without the lead looking |
+| `setup` | a verification tool could not observe the result |
+| `scenarios` | opted-in browser scenarios were not observed |
+| `scope` | an isolated task changed a file that no stream owns |
+
+Every answer also lists `actions`: the commands that are legal now, the one that moves the task first. A
+command that is not legal answers with the same picture and the reason. The guard, the list and the tests
+are derived from one table, so a task cannot reach a position with no way out
+([decision 0002](decisions/0002-one-state-machine.md)).
+
+A pause is not a step. It lies on top of the position: `user` (the user stopped the task; only `resume`, on
+their word, lifts it), `decision` (the lead waits for the user) and `step` (confirm every stage). Any action
+that moves the task lifts the last two.
+
+### Findings are answered by their author
+
+A finding at a severity the mode blocks on goes straight to the writer that owns the file. The writer checks
+it against the code and its brief. It fixes it, or returns a dispute with evidence. The reviewer that raised
+the finding reads the dispute in its own session and withdraws the finding or upholds it. Only an upheld
+dispute reaches the lead, with both arguments. A finding is therefore closed by the reviewer's agreement or
+by the lead's ruling, never by the author alone. Findings below the blocking line are notes
+([decision 0005](decisions/0005-autopilot-and-author-filtered-findings.md)).
+
+Two things keep the loop cheap: a recheck runs only the lanes that have something to verify plus one
+correctness lane on the delta, one effort step lower; and effort rises only when a correction demonstrably
+stalled.
+
+### When the plan is wrong
+
+`agentgate amend` replaces the plan of the active task at any step, with `update` saying what changed and
+why. Accepted stages are frozen. A requirement may be added, or moved to the stage that completes it;
+changing or removing one needs `authorized`. An amendment makes stale only what it touches: moving a
+requirement has the reviewer reassess the criteria in its own session and does not re-read the code
+([decision 0006](decisions/0006-amendment-is-ordinary.md)).
+
+What is deliberately not there: a separate explorer before the writers (the preparation worker already read
+the repository and hands over its map), a separate test-writing agent (tests belong to the stream that
+changes the behaviour), a merge step (writers share one checkout with disjoint files), triage of every
+finding by the lead, and a summary written by hand at the end (the writers' reports are the record).
 
 ## Where the plan lives
 
-`agentgate prepare --file request.json` delegates repository discovery and plan preparation to a read-only
-worker and saves the result. The lead checks scope and authorizations. To save an explicitly edited plan:
+`agentgate prepare --file request.txt` — the request as the user typed it — delegates repository discovery
+and plan preparation to a read-only worker. The plan is typed, so the provider enforces its shape; the tool validates all of it and returns every
+problem at once to the same worker, which corrects its draft without exploring again. Answers to its
+questions and the lead's notes continue the same session. The lead checks scope and authorizations. To save
+an explicitly edited plan:
 
 ```sh
 agentgate plan save wallet --file plan.json
@@ -56,9 +107,11 @@ The saved files are:
                                                   their writers and files, checks, the accepted design
 ```
 
-`route`, `architecture`, `launch` and `replan` accept `--plan <name>` instead of a plan file. `plan save` can
+`route`, `architecture`, `start` and `amend` accept `--plan <name>` instead of a plan file. `plan save` can
 also read another saved plan with `--plan <name>`. Other commands use their own input schemas; for example,
-`review --file review.json` accepts a review request, not a plan. Saving again replaces the plan and its brief.
+`decide --file decision.json` accepts the lead's decisions, not a plan. Saving again replaces the plan and its
+brief. A plan is checked as a whole before anything starts: a plan that could not be finished — a stage with
+no declared check and no stated waiver, a requirement no stage covers — is refused when it is saved.
 The directory is yours to commit or to ignore; the gate does not count these notes as part of a change.
 
 To have the same plans on every computer, keep the directory in a synced folder:
@@ -71,10 +124,10 @@ This moves `.agentgate` to `<folder>/<repository name>/` and leaves a link in it
 computer the same command links the checkout to what is already there. `.agentgate/config.json` — your own
 settings for this repository, read after the team's `.agentgate.json` — travels with it.
 
-Design receipts and the scout's context pack belong to the checkout, not to one conversation
-(`~/.local/state/agentgate/<checkout>/designs`, `…/scout`). A plan designed today can therefore be launched
-from a new session tomorrow without paying for the design again; a receipt stays bound to its brief, files and
-mode by a fingerprint.
+Design receipts and the context pack of a prepared plan belong to the checkout, not to one conversation
+(`~/.local/state/agentgate/<checkout>/designs`, `…/packs`). A plan designed today can therefore be started
+from a new session tomorrow without paying for the design again; a receipt stays bound to its brief, mode and
+rules by a fingerprint.
 
 ## Keeping model-written code lean
 
@@ -96,7 +149,7 @@ layers deal with it, cheapest first.
    and hidden failures are P1; code someone must keep for no benefit is P2. Naming and formatting taste, what a
    linter already reports and code the change did not add are out of scope.
 
-In light mode there is no reviewer process: the lead receives the signals with the diffs and applies the same
+In light mode there is no reviewer process: the lead receives the signals with the patch and applies the same
 test. `/dev clean` remains the way to simplify code that is already in the repository.
 
 The rules draw on public work: the community `/deslop` commands and the `code-slop` skill for the list of
@@ -110,36 +163,38 @@ A task is a *gate*: one JSON state file per lead session and checkout, under `~/
 
 ```mermaid
 stateDiagram-v2
-    direction TB
-    state "awaiting-review" as awaiting_review
-    implementing --> awaiting_review: writers finish
-    awaiting_review --> reviewed: review recorded
-    reviewed --> correcting: accepted findings
-    correcting --> awaiting_review: correction finishes
-    reviewed --> complete: gate accepts finish
+    direction LR
+    write --> verify: every stream reported
+    verify --> write: a check fails or a finding blocks
+    verify --> decide: a person is needed
+    decide --> write: a ruling sends work to a writer
+    decide --> verify: the plan was amended or proof supplied
+    verify --> write: stage accepted, next stage
+    verify --> done: everything required is current
 ```
 
-Active work can also be held or cancelled. An interrupted writer round retains its completed streams;
-after explicitly resuming a hold, `agentgate task continue` retries the unfinished streams.
+When the task opens, the tool records the whole working tree as a git tree — your uncommitted and untracked
+work included — in a private object directory inside the task's state. Your index, objects and refs are never
+written. It does the same at every stage boundary and review, so "what was here before" has an answer for any
+file at any time, also for one that a generator adds later
+([decision 0004](decisions/0004-evidence-on-git-trees.md)). From then on:
 
-When the gate opens it stores the content of every owned file as it was before the task, including your
-uncommitted edits. From then on:
-
-- A **review** is bound to a digest of the code and of the task contract. Edit a file, or change the brief, and
-  the review no longer counts.
-- A **check** result is bound to the files it declared as inputs. With no declared inputs, freshness also
-  covers the repository's HEAD and changed/untracked files, so an edited sibling dependency invalidates it.
-  Checks run before reviewers; a failing check sends the task back to its writers without a review. A failure
-  observed before the task is recorded for diagnosis; it does not waive the requirement for a passing check.
+- A **review** is bound to the exact change of the stage's files, to the files it was pointed at and to the
+  contract it judged. Edit a file, or change the brief, and the review no longer counts.
+- A **check** result is bound to the files it declared as inputs. With no declared inputs it is bound to the
+  whole tree it ran against, so an edited sibling dependency invalidates it. Checks run before reviewers; a
+  failing check sends the task back to its writers without a review. A failure observed before the task is
+  recorded for diagnosis; it does not waive the requirement for a passing check.
 - **Findings** keep their ids across rounds. A defect that comes back reopens under the same id; it cannot be
   renamed away.
-- `finish` succeeds only when the review is current, every declared check has a current passing result, no
-  blocking finding is open and every required browser scenario was observed.
+- A stage is accepted only when the review is current, every declared check has a current passing result, no
+  blocking finding is open, every requirement that is due is verified and every required browser scenario
+  was observed. A requirement is due at the last stage that covers it.
 
-A Stop hook keeps the lead from ending its turn on an unfinished gate, unless an operation is still running or
-the task is honestly on hold.
+A Stop hook keeps the lead from ending its turn on an unfinished task, unless an operation is still running
+or the task is honestly paused.
 
-Two sessions can work in the same checkout. Each has its own gate; a file can be owned by only one of them.
+Two sessions can work in the same checkout. Each has its own task; a file can be owned by only one of them.
 
 ## The sandbox
 
@@ -154,8 +209,9 @@ Every worker is started through `bwrap`:
 
 An ordinary reviewer receives the checkout read-only. Writers can write the checkout, their lane, the
 shared board and any explicitly granted extension directories. File ownership *between* writers is enforced
-by assignment and audit, not by per-file mounts: after each round the gate compares the checkout with its
-manifest and reports changes outside the task's files.
+by assignment and audit, not by per-file mounts: the gate compares the working tree with the tree the stage
+started from and reports changes outside the task's files. In an isolated worktree such a change is settled
+before anything is reviewed, because what the worktree holds is what lands.
 
 The host read-only mount still allows broad reads, and network access remains available for providers and
 configured tools. AgentGate masks its lead-private browser directory, but this is not complete secrecy or
@@ -171,15 +227,18 @@ disk and nothing depends on a daemon staying alive.
 
 | Channel | From → to | Mechanism |
 |---|---|---|
-| Context pack | scout → writers, reviewers | one JSON map of the area: files and their roles, callers, invariants, conventions. Gathered once per contract by a cheap model, in the modes that have a scout, and named in every later packet |
-| Assignment | lead → writer | one JSON packet: brief, the stream's files, context, accepted design. Files are named, never copied |
-| Report | writer → lead | fixed schema: status, summary, blockers, deviations, handoff |
-| Handoff | writer → writer | the contract a stream actually implemented, delivered in the assignment of the streams that come `after` it |
+| Questions | preparation → lead → user | structured questions with options and a recommendation; the answers go back into the **same session**, which does not explore again |
+| Context pack | preparation → writers, reviewers | one JSON map of the area: files and their roles, callers, invariants, conventions. Written by the worker that drafted the plan and named in every later packet |
+| Assignment | tool → writer | one JSON packet: brief, the stream's files, context, the requirements it works on, the accepted design. Files are named, never copied |
+| Report | writer → tool | fixed schema: status, summary, blockers, deviations, handoff, disputes |
+| Handoff | writer → writer | the contract a stream actually implemented, delivered in the assignment of the streams that come `after` it and of the next stage |
 | Board | writers ↔ writers, lead → writers | a shared directory; each writer posts its public contract as soon as it is decided, and reads the others' |
 | Answer | lead → blocked writer | the reply is sent into the writer's **own session**; it continues with full context |
-| Findings | reviewer → lead → writer | accepted findings go to the writer that owns the file, in its **own session** |
-| Failing checks | gate → writer | the command and the end of its output go back to the writers, in their **own sessions**, before any reviewer runs |
-| Recheck | lead → reviewer | the reviewer that raised a finding verifies the fix in its **own session**, reading only the delta, one effort step lower; lanes with nothing to verify do not run |
+| Review packet | tool → reviewer | one patch of the change, the files as they were, the criteria. Generated output is listed, not shown |
+| Findings | reviewer → writer | blocking findings go to the writer that owns the file, in its **own session** |
+| Dispute | writer → reviewer | the author's evidence against a finding, answered by the reviewer in its **own session** |
+| Failing checks | tool → writer | the command and the end of its output go back to the writers, in their **own sessions**, before any reviewer runs |
+| Recheck | tool → reviewer | the reviewer that raised a finding verifies the fix in its **own session**, reading only the delta, one effort step lower; lanes with nothing to verify do not run |
 | Cross-critique | architect ↔ architect | ultra only: each receives the other's design and looks for blockers |
 
 The board is read at natural boundaries. It is a note, not an interrupt: a writer cannot preempt another.
@@ -187,9 +246,9 @@ The board is read at natural boundaries. It is a note, not an interrupt: a write
 ### Why sessions are continued
 
 Starting a fresh process means re-reading the repository. Continuing a session means sending one message. The
-three places where that matters are answers, corrections and rechecks, and those are exactly the ones that
-repeat. Independence is not lost: a reviewer is still a different model from the writer, in a different
-process, and a first review is always a fresh context.
+places where that matters are answers to the preparation worker, answers to writers, corrections and
+rechecks, and those are exactly the ones that repeat. Independence is not lost: a reviewer is still a
+different model from the writer, in a different process, and a first review is always a fresh context.
 
 ## Parallelism and pools
 

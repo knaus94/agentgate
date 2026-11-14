@@ -4,8 +4,9 @@
 
 AgentGate has two related interfaces. A person starts work in a lead session with
 `/dev <task>` in Claude Code or `$dev <task>` in Codex. The lead runs the CLI's
-structured commands to prepare, execute, check and finish the task. The terminal
-CLI also provides installation, diagnostics, configuration and observation.
+structured commands to prepare a plan, start the task and settle what only a person
+can decide; one command, `run`, does everything between those decisions. The
+terminal CLI also provides installation, diagnostics, configuration and observation.
 
 ## Discover commands
 
@@ -13,7 +14,7 @@ CLI also provides installation, diagnostics, configuration and observation.
 agentgate help
 agentgate help task
 agentgate help setup install
-agentgate launch --help
+agentgate start --help
 agentgate --version
 ```
 
@@ -33,8 +34,8 @@ remain supported and produce the same data:
 | `agentgate task watch` | `agentgate watch` | Open the live dashboard |
 | `agentgate task status` | `agentgate status` | Read current task status |
 | `agentgate task stop` | `agentgate stop` | Request cooperative cancellation |
-| `agentgate task continue` | `agentgate continue` | Retry unfinished streams after interruption |
-| `agentgate task launch --plan wallet` | `agentgate launch --plan wallet` | Launch a saved plan |
+| `agentgate task start --plan wallet` | `agentgate start --plan wallet` | Open a task from a saved plan and run it |
+| `agentgate task run` | `agentgate run` | Take every determined step until a person is needed |
 
 `setup` also groups `config`, `accounts` and `modes`. `task` includes the lead
 protocol commands shown by `agentgate help task`. Plans and design tools remain
@@ -60,14 +61,38 @@ profiles, quotas and paid API credentials.
 `config validate` reads the effective layered configuration and exits nonzero if
 it is invalid. Configuration edits still use `config set`, `unset` and `profile`.
 
+## The lead protocol
+
+| Command | Purpose |
+|---|---|
+| `prepare` | A read-only worker drafts or revises the plan; the same worker continues with answers and notes |
+| `plan save`, `list`, `show`, `link` | Keep reusable plans in the repository |
+| `route`, `preview` | Mode decision and routes, read-only |
+| `architecture` | Design passes of heavy and ultra |
+| `start [--implement]` | Open a task from a plan and run it |
+| `run` | Write, check, review, correct, accept — until a person is needed |
+| `answer` | Reply to a blocked writer in its own session, then run on |
+| `decide` | Rule on findings, give the lead's own review, send an unmet criterion to the writers; then run on |
+| `amend` | Replace the plan of the active task, with a reason |
+| `status [--full]`, `show <part>` | The compact picture, or one part in full |
+| `pause`, `resume`, `stop` | Park the task with the true reason; lift a pause; cancel the running operation |
+| `check`, `visual`, `land` | Run declared checks; browser verification; land an isolated task |
+
+Every one of them answers with the same compact JSON object: the `step` the task is at, what this call
+`did`, what only a person can settle (`needs`, each with the one way to `resolve` it), and the `actions`
+that are legal now. `agentgate guide` is the workflow for a lead; `agentgate reference` has the inputs.
+
+The commands of the earlier protocol — `launch`, `review`, `triage`, `fix`, `finish`, `replan`, `hold` —
+answer with the name of what replaced them. `continue` is accepted as another name for `run`.
+
 ## Task input
 
 Most lead protocol commands accept one JSON object:
 
 ```sh
-agentgate task launch --file plan.json
-agentgate task launch --file=plan.json
-agentgate task launch --plan wallet
+agentgate task start --file plan.json
+agentgate task start --file=plan.json
+agentgate task start --plan wallet
 agentgate task check --all
 ```
 
@@ -76,6 +101,9 @@ exclusive; `--plan` is available only where a plan is expected. Inputs over 16 M
 unknown fields, `null`, arrays, extra JSON values and trailing non-whitespace
 content are rejected. Unknown flags, invalid subcommands and unexpected
 positional arguments are errors. No flag is silently ignored.
+
+The first `prepare` of a task takes the user's request as it was typed, in a file or on stdin; text that
+is not a JSON object is the request. Its later calls take a JSON object with `answers` or `notes`.
 
 `parse` and `preview` accept request text from an argument, a file or stdin:
 
@@ -95,17 +123,18 @@ when it detects confinement; see [Codex](codex.md).
 ## Stop and continue
 
 `task stop` requests cancellation of a live operation. It does not unconditionally
-kill an arbitrary process from a stale PID file. `task status` reports the state
-and the next permitted action.
+kill an arbitrary process from a stale PID file. A task stopped this way is paused
+by the user: only `task resume`, on the user's word, lifts it.
 
-An interrupted writer round keeps its completed streams. After the cause is
-resolved, `task continue` retries the unfinished streams using the recorded plan.
-A held task first needs `task resume`; a worker waiting for an answer needs
-`task answer --file answer.json`. The tool does not automatically override a user
-stop or invent an answer to a worker's blocker.
+An interrupted writer round keeps its completed streams. `task run` retries the
+unfinished ones using the recorded plan; a worker waiting for an answer needs
+`task answer --file answer.json`. A process that died leaves no writer "running":
+its streams are marked failed and the next `run` retries them. The tool does not
+override a user stop or invent an answer to a worker's blocker.
 
-The gate continues to enforce evidence freshness and review requirements. The
-new command does not bypass checks, review, triage or final acceptance.
+`run` with nothing settled changes nothing and starts no model: it reports the
+same `needs`. The one thing it repeats is a failing check whose cause may lie
+outside the code, such as a stand that was down.
 
 ## Observation and scripts
 
@@ -121,7 +150,7 @@ agentgate task status --all
 and when `TERM=dumb`. `--once` explicitly requests a snapshot. `--json` always
 prints one structured snapshot and exits; `--all` selects every checkout. JSON
 snapshots contain `schema_version`, `scope`, `read_only` and `tasks`, with each
-task's phase, workers, checks, blocking count and suggested next action. They do
+task's step, pause, workers, checks, blocking count and suggested next action. They do
 not require a model or make provider quota requests.
 
 `NO_COLOR` or `watch --no-color` disables colors without disabling keyboard
@@ -135,12 +164,12 @@ plain `watch` output are human-readable text. `accounts --json` and
 | Exit code | Meaning |
 |---|---|
 | `0` | The requested command succeeded |
-| `1` | Invalid input, configuration, environment or execution error |
+| `1` | Invalid input, configuration, environment or execution error; or a command that is not legal in the task's present state — then stdout holds the task's picture with `refused` and the legal `actions` |
 | `2` | Declared checks failed in `check` |
 
 The separate Node design tools document their own exit codes in `--help`.
 A successful invocation of `status`, `route` or `preview` does not mean that a
-task has passed its quality gate; inspect the returned phase and requirements.
+task has passed its quality gate; inspect the returned `step` and `needs`.
 
 ## Design tools
 

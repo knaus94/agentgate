@@ -7,16 +7,16 @@ Codex. Run it inside a repository or use the `agentgate: watch` Zed task. The
 compatible `agentgate watch` command opens the same dashboard.
 
 The dashboard does not drive a task, start a model, refresh a subscription quota
-or write gate state. Its purpose is to make the current phase, worker activity
-and the next action visible in one place.
+or write gate state. Its purpose is to make the current step, what the task
+waits for, worker activity and the next action visible in one place.
 
 ## What it shows
 
 | Section | Contents |
 |---|---|
-| Tasks | Running tasks first, then tasks needing attention, isolated changes ready to land, and recent finished tasks. Each task shows mode, phase, elapsed time and the operation in flight |
+| Tasks | Running tasks first, then tasks needing attention, isolated changes ready to land, and recent finished tasks. Each task shows mode, step or pause, elapsed time and the operation in flight |
 | Stages | Accepted, current and remaining parts of a staged task; recorded operations and their durations |
-| Workers | Scouts, designers, consultants, writers and reviewers; model, effort, account, elapsed time, retries and most recent activity |
+| Workers | The preparation worker, designers, consultants, writers and reviewers; model, effort, account, elapsed time, retries and most recent activity |
 | Checks | Declared verification commands, their latest results and whether the evidence still matches current inputs |
 | Findings | Open findings by severity, notes and the number blocking completion |
 | Signals | Mechanical hints on added lines that reviewers should investigate |
@@ -53,7 +53,7 @@ incoming review round cannot silently replace the worker currently being read.
 |---|---|
 | Worker | Commands with the end of their output, files read and edited, model messages and final report |
 | Check | Output from its latest recorded run |
-| Findings | Severity, location, evidence, impact, suggested remedy and triage decision |
+| Findings | Severity, location, evidence, impact, suggested remedy, the decision on it and the author's dispute |
 | Signals | Potential issues detected mechanically, without treating them as confirmed defects |
 | Plan | Brief, each stream's assignment and files, accepted design |
 
@@ -68,7 +68,7 @@ Worker activity and state refresh every second. Expensive check freshness
 calculations refresh at most five seconds apart, immediately when relevant gate
 state changes, and when `r` is pressed. Moving between rows does not rescan the
 repository. The quality gate itself always revalidates the evidence when a
-command depends on it; the dashboard's display cache cannot authorize a finish.
+command depends on it; the dashboard's display cache cannot authorize an acceptance.
 
 ## Text and JSON snapshots
 
@@ -86,9 +86,10 @@ uses the snapshot mode. `NO_COLOR` or `--no-color` disables ANSI colors while
 retaining keyboard navigation on a normal terminal.
 
 `--json` is always a single snapshot and is suitable for scripts. It contains a
-`schema_version` (currently `1`), `read_only`, `scope`, and a `tasks` array. Task
-objects include phase, running state, workers, checks, blocking count and next
-action. Invalid task files appear with an `error` field. The snapshot does not
+`schema_version` (currently `2`), `read_only`, `scope`, and a `tasks` array. Task
+objects include `step`, `paused`, the position among the stages, running state,
+workers, checks, blocking count and next action. Version 1 had a `phase` in place
+of `step` and `paused`. Invalid task files appear with an `error` field. The snapshot does not
 include internal Gate objects or full worker prompts.
 
 Without `--all`, interactive and text modes automatically show all checkouts when

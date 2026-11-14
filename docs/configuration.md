@@ -51,7 +51,7 @@ untrusted-code sandboxes: enable them only for repositories you intend to run.
 agentgate config init                         # create a starter only if the user file is absent
 agentgate config set max_parallel 3
 agentgate config set modes.medium.backend opus:high
-agentgate config set modes.medium.scout '""'   # an explicit empty scout route disables that stage
+agentgate config set modes.medium.scout terra:medium   # the route of the preparation worker
 agentgate config unset modes.medium.backend  # remove this user override
 agentgate config validate
 ```
@@ -128,7 +128,7 @@ for a particular model's effort range.
 
 | Key | Used for |
 |---|---|
-| `modes.<mode>.scout` | Context gathering; an empty string disables the scout |
+| `modes.<mode>.scout` | The route of the preparation worker that drafts the plan and its context pack. A mode without one uses medium's. The key keeps its earlier name; there is no separate scout |
 | `modes.<mode>.escalate_to` | Effort ceiling for supported writer escalation |
 | `modes.<mode>.architecture` | Architecture routes; `critique: true` requires exactly two |
 | `modes.<mode>.backend`, `.frontend` | Writers selected by stream domain |
@@ -177,7 +177,7 @@ configuration or plugins. A server entry uses these keys:
 |---|---|
 | `command`, `args`, `env` | Start a stdio server inside the worker sandbox, in the checkout; `command` must be nonempty |
 | `tools` | Tool-name allowlist; omitted or empty means **all tools of that server**, for both CLIs |
-| `roles` | `scout`, `architect`, `writer`, `reviewer`, `consultant`, `designer`; omitted or empty means `scout` only |
+| `roles` | `scout` (the preparation worker), `architect`, `writer`, `reviewer`, `consultant`, `designer`; omitted or empty means `scout` only |
 | `hint` | Short instructions included in the worker assignment |
 | `refresh` | Optional argv command run before the server's first use in an operation |
 | `refresh_timeout_s` | Refresh ceiling; default `300`, `0` selects that default, negative values are rejected |
@@ -190,8 +190,8 @@ an appropriate setup or refresh command before use.
 
 The server runs inside the worker sandbox, but **`refresh` runs outside it**, like a repository script.
 Parallel callers in one operation wait for the same refresh. If refresh fails, that optional server is
-omitted and the worker is told to read source directly instead of trusting a stale index. Heavy and ultra
-have no scout by default, so a server assigned only to `scout` will not reach their architecture workers.
+omitted and the worker is told to read source directly instead of trusting a stale index. A server assigned
+only to `scout` reaches the preparation worker and not the architecture workers of heavy and ultra.
 
 Keep secrets out of shared extension files. Inherited `FIGMA_ACCESS_TOKEN` and the private browser-profile
 location are removed from the worker environment; exported design files are the worker-facing input.

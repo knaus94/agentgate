@@ -9,8 +9,8 @@ block completion. There is no second dial.
 
 A flag in the request is final: `-l`, `-m`, `-h`, `-x` (or `--light`, `--medium`, `--heavy`, `--ultra`).
 
-Without a flag the lead records an `assessment` of what it found in the code, and the mode follows from this
-table, first match wins:
+Without a flag the plan carries an `assessment` of what was found in the code — the preparation worker writes
+it with its evidence — and the mode follows from this table, first match wins:
 
 | # | Facts | Mode |
 |---|---|---|
@@ -32,23 +32,31 @@ Named risks: `authorization`, `security`, `money`, `data-integrity`, `concurrenc
 `public-contract`. A risk is named only when the change really touches it. "This module has many callers" is
 not a risk; it is ordinary work, and ordinary work is medium.
 
-`agentgate route --file plan.json` prints the decision with its reasons before anything starts.
+`agentgate route --file plan.json` prints the decision with its reasons before anything starts. In a plan
+of several stages each stage may carry its own assessment and gets its own mode.
 
 ## What each mode runs
 
 | | light | medium | heavy | ultra |
 |---|---|---|---|---|
-| Context pack | the lead's own context | scout `sol:medium` | none: the accepted design | none: the accepted design |
-| Architects | the lead | the lead | `fable:high` ∥ `astra:high`, independent, in parallel | `fable:xhigh` ∥ `astra:xhigh`, then each critiques the other at `high` |
+| Preparation | `sol:medium` | `sol:medium` | `sol:medium` | `sol:medium` |
+| Architects | the plan | the plan | `fable:high` ∥ `astra:high`, independent, in parallel | `fable:xhigh` ∥ `astra:xhigh`, then each critiques the other at `high` |
 | Blocker round | — | — | optional, once | optional, once |
 | Backend writer | `sol:medium` | `opus:medium` | `opus:high` | `opus:xhigh` |
-| Frontend writer | `sonnet:medium` | `opus:medium` | `astra:high` | `astra:xhigh` |
-| Review lanes | the lead | architecture+simplicity `fable:medium` ∥ correctness `astra:medium` | architecture+simplicity `fable:high` ∥ correctness `astra:high` | architecture+simplicity `fable:high` ∥ correctness `fable:xhigh` ∥ correctness `astra:xhigh` ∥ security `astra:high` |
+| Frontend writer | `sonnet:medium` | `opus:medium` | `opus:high` | `opus:xhigh` |
+| Review lanes | the lead reads the patch | one lane, `astra:medium`: correctness, architecture, simplicity | architecture+simplicity `fable:high` ∥ correctness `astra:high` | architecture+simplicity `fable:high` ∥ correctness `fable:xhigh` ∥ correctness `astra:xhigh` ∥ security `astra:high` |
 | Effort ceiling | `high` | `high` | `xhigh` | `max` |
 | Blocking severities | P0, P1 | P0, P1 | P0, P1, P2 | P0, P1, P2 |
-| Checks required to finish | optional | at least one | at least one | at least one |
-| `architecture_evidence` at finish | — | — | required | required |
+| Declared checks | optional | at least one per stage, or a stated `checks_waiver` | the same | the same |
+| Review of the whole change after the last stage | with three or more stages | with three or more stages | always, for a staged plan | always, for a staged plan |
 | Process ceilings (design / writer / reviewer) | default 20 min | default 20 min | 15 / 30 / 20 min | 30 / 60 / 30 min |
+
+The preparation route is the key `modes.medium.scout`; the key keeps the name it had when a separate scout
+existed. A mode may set its own.
+
+Medium has one review lane where it had two. In the measured runs the second lane read the same change at
+the same price and its findings overlapped; the mode that pays for two vendors' opinions is heavy
+([decision 0009](decisions/0009-review-economics.md)). `modes.medium.review` restores a second lane.
 
 The ladder has one rule for models: **the strongest model the mode can afford creates; the other frontier
 models verify.** [Why these models](model-selection.md) shows the data.
@@ -58,27 +66,29 @@ models verify.** [Why these models](model-selection.md) shows the data.
 Reasoning effort is the main cost dial, and usage limits are finite. Four rules keep it where it pays.
 
 **1. Code is read once, and a later round continues that reading.** An expensive model opens the files itself
-whatever map it is handed: in a measured design pass the architects read the same files with a scout's map and
-without one, and the map only made them wait. So architects get none. In heavy and ultra the design the lead
-accepted — made by the strongest models after reading the code — is what writers and reviewers start from. In
-medium nobody designs, so one cheap, fast scout maps the area once for the writers and the reviewers: which
-files matter and why, who calls them, the invariants, the conventions. And no worker starts over: a critique
-and a revision continue the architect's own session, a correction the writer's, a recheck the reviewer's.
+whatever map it is handed: in a measured design pass the architects read the same files with a prepared map
+and without one, and the map only made them wait. So architects get none. In heavy and ultra the accepted
+design — made by the strongest models after reading the code — is what writers and reviewers start from. In
+every mode the worker that prepared the plan hands over its map of the area: which files matter and why, who
+calls them, the invariants, the conventions. Nobody is paid to explore the same area a second time, and no
+worker starts over: an answer continues the preparation worker's session, a critique and a revision the
+architect's, a correction the writer's, a recheck the reviewer's.
 
 **2. The base effort follows the vendors' own defaults.** Medium runs each model at the level its vendor ships
 as default. Heavy is one step above, ultra two. Effort goes to design and correctness review first — they
 produce little text and decide a lot — and less to lanes that read more than they reason.
 
 **3. `max` is earned, never assumed.** No default uses it. A writer's effort rises one step, up to the mode's
-ceiling, only when a correction made no verified progress, when the lead passes `escalate` to `fix`, or when
-the plan raises one hard stream with `effort`. Only ultra can reach `max`.
+ceiling, only when a correction made no verified progress and the lead gave a new diagnosis, when the lead
+passes `escalate` to `decide`, or when the plan raises one hard stream with `effort`. Only ultra can reach `max`.
 
 **4. A recheck costs less than a review.** After a fix, only the lanes with something to verify run again, plus
 one correctness lane that reads the delta for regressions — each in its own session, one effort step lower. The critique round of ultra does the same against
 the design round.
 
-In every mode: P3 findings are notes that need no triage; a boundary break blocks regardless of severity; a
-finding the lead accepted blocks until it is resolved.
+In every mode: a finding at a blocking severity goes to the writer that owns the file, which fixes it or
+disputes it with evidence; findings below that line are notes that need no judgement; a boundary break blocks
+regardless of severity; a finding the lead accepted blocks until it is resolved.
 
 ## Why the design pass is parallel
 
@@ -98,4 +108,4 @@ agentgate config set modes.heavy.blocking '["P0","P1"]'
 agentgate modes
 ```
 
-Leave `review` empty (`[]`) and the lead reviews the diff itself, as in light.
+Leave `review` empty (`[]`) and the lead reviews the patch itself, as in light.

@@ -29,9 +29,9 @@ the source list is a definition history, not per-field provenance. See [configur
 
 `review_rules` adds local review instructions to the existing review pass. Writers receive the same
 applicable rules; the first reviewer assesses them alongside acceptance criteria. Light mode uses the lead.
-Preparation sees a scoped catalogue before discovery and reports applied rules after it. Architects, scouts
-and scoped UI designers receive the same instruction snapshots. Changed applicable policies invalidate an
-accepted architecture and the cached discovery as well as review.
+Preparation sees a scoped catalogue before discovery and reports applied rules after it. Architects and
+scoped UI designers receive the same instruction snapshots. Changed applicable policies invalidate an
+accepted architecture as well as the review.
 
 ```json
 {
@@ -109,14 +109,15 @@ installed. `worker_mcp` hands chosen roles chosen tools all the same.
 |---|---|
 | `command`, `args`, `env` | how the stdio MCP server is started; it runs inside the worker's sandbox, in the checkout |
 | `tools` | the only tools a worker may call; empty means all of the server's. Enforced for both CLIs |
-| `roles` | who gets it: `scout` (default), `architect`, `writer`, `reviewer`, `consultant`, `designer` |
+| `roles` | who gets it: `scout` (default; the preparation worker), `architect`, `writer`, `reviewer`, `consultant`, `designer` |
 | `hint` | when to use it; the worker is told this together with the tool names |
 | `refresh` | a command run in the checkout once per operation, before the server's first use, to bring its index up to date |
 | `writable` | existing cache subdirectories inside the checkout; read-only workers receive write access only to accepted grants |
 
-The default role is the scout alone: it maps the code once, and what it learns reaches the writers and the
-reviewers through the context pack. Heavy and ultra have no scout by default, so name `architect` for a tool
-the design pass should have. Give a tool to reviewers when "who else calls this" is the question they keep asking;
+The default role is `scout` alone. The name is kept from the time a separate scout existed; it now means the
+preparation worker, which reads the code once for every mode, and what it learns reaches the writers and the
+reviewers through the context pack. Name `architect` for a tool the design pass of heavy and ultra should
+have. Give a tool to reviewers when "who else calls this" is the question they keep asking;
 give writers a tool only when they cannot work without it.
 
 The checkout is read-only for non-writers except for explicit writable grants. A server that builds its

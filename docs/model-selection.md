@@ -26,16 +26,18 @@ changes with `agentgate config validate`.
 
 | Role | light | medium | heavy | ultra |
 |---|---|---|---|---|
-| Scout | lead context | sol:medium | accepted architecture | accepted architecture |
-| Architecture | lead | lead | fable:high + astra:high | fable:xhigh + astra:xhigh, cross-critique |
+| Preparation | sol:medium | sol:medium | sol:medium | sol:medium |
+| Architecture | the plan | the plan | fable:high + astra:high | fable:xhigh + astra:xhigh, cross-critique |
 | Backend writer | sol:medium | opus:medium | opus:high | opus:xhigh |
 | Frontend writer | sonnet:medium | opus:medium | opus:high | opus:xhigh |
-| Architecture and simplicity review | lead | fable:medium | fable:high | fable:high |
-| Correctness review | lead | astra:medium | astra:high | fable:xhigh + astra:xhigh |
+| Architecture and simplicity review | lead | astra:medium, one lane with correctness | fable:high | fable:high |
+| Correctness review | lead | the same lane | astra:high | fable:xhigh + astra:xhigh |
 | Security review | — | — | — | astra:high |
 | Escalation ceiling | high | high | xhigh | max |
 
-Heavy and ultra use Opus for both implementation domains. The previous table used Astra for frontend work
+Medium has one review lane that judges correctness, architecture and simplicity together; a second vendor's
+opinion is what heavy pays for ([decision 0009](decisions/0009-review-economics.md)). Heavy and ultra use Opus
+for both implementation domains. The previous table used Astra for frontend work
 and also for correctness review, which conflicted with author independence in mixed tasks. Keeping Fable
 and Astra available as reviewers makes the standard routes coherent before any fallback is needed.
 

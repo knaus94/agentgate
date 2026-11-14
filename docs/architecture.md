@@ -1,8 +1,9 @@
 # Architecture
 
-This describes the refactored implementation delivered as 0.14.0. The product is a local process supervisor
-and evidence-based workflow, not a new model runtime. Claude Code and Codex still own model inference and
-provider protocol semantics.
+This describes the implementation as of 0.16.0, whose task core was rewritten; the reasons are recorded in
+the [design decisions](decisions/README.md). The product is a local process supervisor and evidence-based
+workflow, not a new model runtime. Claude Code and Codex still own model inference and provider protocol
+semantics.
 
 ## Boundaries
 
@@ -10,9 +11,13 @@ provider protocol semantics.
 |---|---|---|
 | Command contract | `cmd/agentgate/args.go`, `help.go` | One registry of commands, flags, input sources and help; no actions while parsing help |
 | Command dispatch | `cmd/agentgate/commands.go`, `design_tools.go` | Translate validated inputs into operations, serialize output, delegate standalone design commands |
-| Domain and state | `internal/dev/types.go`, `state.go`, `lifecycle.go` | Task identity, phases, persistence, corruption checks and interrupted-round recovery |
-| Task execution | `writers.go`, `arch.go`, `scout.go`, `stages.go`, `run.go` | Bounded workers, dependency waves, continuation and stage handoffs |
-| Evidence | `snapshots.go`, `checks.go`, `check_receipts.go`, `review.go`, `quality.go` | File snapshots, input fingerprints, check receipts, independent reviews and acceptance rules |
+| Position and legality | `internal/dev/machine.go` | The steps, the pause overlay and the one table of legal actions and transitions; the guard of every command |
+| Plan | `plan.go`, `planschema.go`, `scope.go`, `plans.go` | One plan shape with stages, due requirements, validation of the whole plan, scope as paths and patterns, saved plans |
+| State | `types.go`, `state.go`, `gate.go`, `migrate.go` | Task identity, persistence, corruption checks, what the present position owns, translation of earlier states |
+| Driving a task | `autopilot.go`, `write.go`, `verify.go`, `decide.go`, `amend.go`, `control.go`, `run.go` | `run` and its classification, writer rounds and waves, verification, the lead's decisions, amendment, pause and stop |
+| Preparation and design | `prepare.go`, `arch.go`, `ui.go`, `consult.go` | The resumable preparation worker, architecture passes, the interface specification, read-only consultations |
+| Evidence | `tree.go`, `checks.go`, `check_receipts.go`, `review.go`, `quality.go`, `slop.go`, `visual.go` | Git trees of the working tree, check receipts, independent reviews, criteria, leftovers on added lines, browser observation |
+| Answers to the lead | `summary.go` | The compact report, typed needs, `status` and `show` |
 | Worktrees | `internal/dev/worktree.go` | Isolated checkout, preparation, scope audit, catch-up and guarded landing |
 | Terminal UI | `panel_state.go`, `panel_model.go`, `panel_render.go`, `term.go`, `terminal_text.go` | Read-only dashboard data, navigation, rendering and terminal protocol |
 | Provider adapters | `internal/provider/claude.go`, `codex.go`, `events.go` | CLI arguments, streamed events, structured results and resume identifiers |
@@ -32,15 +37,18 @@ planning, writing, checking and text review do not depend on a browser.
 ```mermaid
 flowchart TD
     Lead["Claude Code or Codex lead"] --> CLI["Validated CLI command"]
-    CLI --> Gate["Task state and operation lock"]
+    CLI --> Guard["Guard: is the action legal at this step?"]
+    Guard --> Gate["Task state and operation lock"]
     Gate --> Workers["Provider workers in bwrap"]
     Workers --> Receipts["Reports, sessions and file audit"]
     Receipts --> Checks["Declared checks"]
     Checks --> Review["Independent review and quality criteria"]
-    Review --> Decision{"Evidence current and complete?"}
-    Decision -->|Yes| Finish["Completion receipt"]
-    Decision -->|Fix needed| Workers
-    Decision -->|Decision needed| Held["Held task"]
+    Review --> Decision{"What follows from the evidence?"}
+    Decision -->|Clean| Accept["Accept the stage: next stage, whole-change pass or completion receipt"]
+    Decision -->|Fixable| Workers
+    Decision -->|A person is needed| Needs["Stop at decide with typed needs"]
+    Needs -->|answer, decide, amend| Gate
+    Accept --> Gate
 ```
 
 Every operation is a normal process. A session lock prevents two commands from mutating the same task
@@ -49,18 +57,26 @@ user state directory, separate from worker-writable code. No daemon needs to rem
 
 ## Lifecycle and recovery
 
-The main writing cycle is `implementing → awaiting-review → reviewed → complete`. A correction uses
-`correcting → awaiting-review`. Staged work also has an accepted-stage boundary and may enter a final
-integration review. `held` remembers the prior phase; `cancelled` is terminal.
+A task's position is a step named after what has to happen next: `write`, `verify`, `decide`, `done` (or
+`cancelled`). A pause — by the user, for a decision, or between stages when the user asked to confirm each —
+lies on top of the position and does not change it. `machine.go` holds one table of which actions are legal
+at which step and which step may follow which. The guard of every command, the `actions` offered to the lead
+and the checks in the test suite are all derived from that table, and `setStep` is the only assignment of the
+step.
 
-A phase label alone is insufficient. Review requires each scheduled stream of the current writer round to
-have a completed record. Completion requires the current content and contract to match the review and all
-required checks/evidence. Corrupt JSON or inconsistent state is reported; it cannot be treated as an empty
+`run` reads the evidence of the present position and classifies it: stale evidence is verified again;
+something a writer can correct opens a correction round; something only a person can settle becomes a typed
+need; a clean position is accepted. The classification starts nothing and can be repeated safely, which is
+what makes `run` idempotent.
+
+A step alone is insufficient. Verification requires each scheduled stream of the current round to have a
+completed record. Acceptance requires the current content and contract to match the review and all required
+checks and criteria. Corrupt JSON or inconsistent state is reported; it cannot be treated as an empty
 checkout with no active task.
 
-An interrupted operation becomes an explicit hold. `resume` acknowledges the hold; `continue` retries the
-saved round's unfinished streams while preserving completed reports, sessions and the baseline. A blocked
-writer requires an answer rather than a blind retry. A user stop is never automatically reversed.
+An interrupted operation does not park the task: its running writers are recorded as failed and the next
+`run` retries the unfinished streams while preserving completed reports and sessions. A blocked writer
+requires an answer rather than a blind retry. A user stop is never automatically reversed.
 
 Cancellation waits for process reaping before consumers read exit status. Process receipts include Linux
 start identity so an old PID cannot identify an unrelated new process. Atomic state writes sync the file,
@@ -70,9 +86,10 @@ rename it and sync its parent directory. A failed persistence operation is retur
 
 | Evidence | Bound to | Invalidated by |
 |---|---|---|
-| Code review | Declared owned files, context, task contract and relevant quality/design evidence | Changed scoped bytes, plan or required proof |
+| Code review | The exact change of the stage's files between two trees, the content of declared context, the code contract and the criteria | Changed scoped bytes, a changed contract; a changed criterion alone has the criteria reassessed without re-reading the code |
 | Check with explicit `inputs` | Its command, declared patterns and matched contents | Input content/set changes, command changes or inability to fingerprint inputs |
-| Check without `inputs` | Repository working content and HEAD | Repository changes or HEAD changes |
+| Check without `inputs` | The tree of the whole working tree it ran against | Any change of the working tree; a commit of the same bytes changes nothing |
+| Before-image of any file | The tree recorded when the task opened and at each stage boundary | Nothing: a file admitted later is read from the same tree |
 | Design package | Actual manifest and inventoried file bytes | Missing/corrupt inventory, changed spec/assets/images/brief |
 | Design baseline | Design content, page/root, viewport, device, map and tolerances | Any contract change or a different discrepancy |
 | Writer ownership | Assigned paths plus recorded attempts | Foreign changes, path escapes or incomplete streams |
@@ -122,6 +139,8 @@ not invent successful data for an unrecorded operation.
 ## Compatibility decisions
 
 The flat command API remains available alongside `task` and `setup`. Existing valid configuration and
-exported packages continue to work. Unknown flags, malformed values, incomplete packages and invalid state
+exported packages continue to work. The lead protocol changed in 0.16: the commands of the earlier protocol
+answer with the name of what replaced them, and a task saved by an earlier version is read, shown and
+continued ([state format and migration](decisions/0010-state-format-and-migration.md)). Unknown flags, malformed values, incomplete packages and invalid state
 that previously slipped through are now errors. Heavy/ultra frontend defaults changed to prevent a built-in
 writer/reviewer collision. See [migration](migration.md) for behavior changes and recovery commands.

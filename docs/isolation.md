@@ -19,8 +19,11 @@ same file. With `-w` a task works somewhere else, and your checkout changes only
    in your checkout remain there. Setup scripts and explicitly shared directories have their own permissions.
 3. **Several tasks.** Every session has its own worktree and branch, so tasks may change the same files.
    `agentgate watch` and `agentgate status` in the repository show them all.
-4. **Finish.** The task passes the usual gate — checks, review, triage — and is committed on its own branch.
-   The lead reports what was done and asks you how to bring it in.
+4. **Finish.** The task passes the usual gate — checks, review, corrections — and is committed on its own
+   branch; each accepted stage of a staged plan is a commit. Nobody else writes in the worktree, and what it
+   holds is what lands, so a file the task changed outside its plan stops the task before anything is
+   reviewed: the plan is amended to give the file to a stream, or the file is removed. The lead reports what
+   was done and asks you how to bring it in.
 5. **Land**, on your word:
 
    | `land` | Result |
@@ -49,8 +52,8 @@ own uncommitted edits in the files the task lands; commit or stash them, or land
 
 `land {how: "commit"}` also refuses when the checkout has any staged changes, including unrelated files, so
 it cannot include someone else's index entries in the task commit. Commit or unstage them first, or use
-`apply`, which preserves the index. New edits made to a completed task's worktree must pass review and finish
-again before landing.
+`apply`, which preserves the index. New edits made to a completed task's worktree reopen the task: `run`
+verifies them before it lands.
 
 ## Preparing a worktree
 
@@ -71,7 +74,7 @@ fresh one needs in the repository's `.agentgate.json` (or in your user file):
 outside the sandbox, like the repository's own scripts. They see `AGENTGATE_CHECKOUT` (your checkout) and
 `AGENTGATE_WORKTREE`. The checkout's `.agentgate` directory is linked into the worktree, so plans and helper
 scripts kept there stay reachable. Settings that are yours rather than the team's go into
-`.agentgate/config.json`. A failing setup command stops the launch and removes
+`.agentgate/config.json`. A failing setup command stops the start and removes
 the worktree. `"default": true` isolates every writing task without the flag.
 
 Do not link `node_modules` from the checkout into the worktree in a workspace monorepo: workspace packages in it

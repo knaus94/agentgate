@@ -18,7 +18,7 @@ The archive includes source, documentation, SHA-256 checksums, and binaries for 
 After extracting it:
 
 ```sh
-cd agentgate-0.15.0
+cd agentgate-0.16.0
 sh scripts/install-local.sh --lead both
 agentgate setup doctor
 agentgate config validate
@@ -64,22 +64,26 @@ $dev add rate limiting to the export endpoint          Codex
 /dev plan -x split the wallet service                  plan before implementation
 ```
 
-The lead prepares and accepts a plan, then drives structured commands. `--preview` shows intended work.
-`plan`, `research` and `verify` are read-only. `review` inspects an existing change; `--fix` adds write authority.
+A read-only worker prepares the plan and the tool validates all of it before anything starts. From then on
+one command, `agentgate run`, takes every step the state determines and stops only where a person is needed:
+a blocked writer, a finding its author and the reviewer disagree about, an unmet requirement, a correction
+that went nowhere. `--preview` shows intended work. `plan`, `research` and `verify` are read-only. `review`
+inspects an existing change; `--fix` adds write authority.
 
-| Stage | What happens | Completion evidence |
+| Step | What happens | Evidence |
 |---|---|---|
-| Prepare | Read-only discovery, scope and plan | Validated plan and explicit requirements |
-| Scout / architecture | Context collection or independent proposals, depending on mode | Context pack or accepted design |
-| Write | Disjoint streams, dependency waves and bounded parallelism | Structured reports and file ownership audit |
-| Check | Declared commands run before reviewers | Exit code, logs and current input fingerprint |
-| Review | Separate models inspect the change and quality criteria | Findings and review bound to content and contract |
-| Correct | The original writer continues with checks or accepted findings | New result in the correct provider session |
-| Finish | The gate checks all required evidence | Current review, passing checks and no blocking findings |
+| Prepare | One resumable read-only worker explores, asks, and drafts a typed plan | A plan validated as a whole, every problem named at once |
+| Design (heavy, ultra) | Independent architecture proposals and critiques | The accepted design |
+| Write | Disjoint streams, dependency waves and bounded parallelism | Structured reports and a file ownership audit |
+| Check | Declared commands run before any reviewer | Exit code and log, bound to the tree they ran against |
+| Review | A separate model reads one patch and judges the criteria | Findings and verdicts bound to content and contract |
+| Correct | A blocking finding goes to the writer that owns the file; it fixes it or disputes it with evidence | The reviewer's answer in its own session |
+| Accept | A stage, and then the task, is accepted in the same run once everything it requires is current | Passing checks, a current review, due requirements verified |
 
 A failure before the task began is diagnostic evidence, not permission to ignore later failures. Changing a
-file, plan contract or required evidence invalidates the relevant receipts. An author model cannot review
-its own work, including earlier stages and partially failed attempts.
+file, the plan's contract or required evidence makes stale exactly what it touches. An author model cannot
+review its own work, including earlier stages and partially failed attempts. The plan can be amended at any
+step without losing the task. [Why it works this way](docs/decisions/README.md).
 
 ## Commands organized around the work
 
@@ -91,8 +95,8 @@ its own work, including earlier stages and partially failed attempts.
 | Observe work | `agentgate task watch`, `agentgate task status --all` |
 | Export a machine-readable dashboard | `agentgate task watch --json` |
 | Stop work | `agentgate task stop` |
-| Resume an interrupted writer round | `agentgate task resume`, then `agentgate task continue` |
-| Reuse a saved plan | `agentgate plan list`, `agentgate task launch --plan <name>` |
+| Continue a task after an interruption | `agentgate task run` |
+| Reuse a saved plan | `agentgate plan list`, `agentgate task start --plan <name>` |
 | Inspect accounts | `agentgate accounts`, `agentgate accounts discover --save` |
 | Inspect provider routes | `agentgate modes` |
 | Design tools | `agentgate figma --help`, `agentgate layout --help`, `agentgate fixtures --help` |
@@ -120,8 +124,8 @@ Pipes, redirected input and `TERM=dumb` produce one snapshot instead of an inter
 | Mode | Typical scope | Architecture | Review | Blocking severities |
 |---|---|---|---|---|
 | light `-l` | Small, low-risk change | Lead | Lead | P0–P1 |
-| medium `-m` | Ordinary implementation | Lead plus scout | Independent configured lanes | P0–P1 |
-| heavy `-h` | Named risk or complex uncertain work | Two independent proposals | Architecture and correctness | P0–P2 |
+| medium `-m` | Ordinary implementation | The plan | One independent reviewer: correctness, architecture, simplicity | P0–P1 |
+| heavy `-h` | Named risk or complex uncertain work | Two independent proposals | Separate architecture and correctness lanes | P0–P2 |
 | ultra `-x` | Severe or irreversible risk | Proposals and cross-critique | Additional correctness and security lanes | P0–P2 |
 
 With no flag, the recorded assessment selects a mode deterministically. A flag takes precedence. The mixed
@@ -148,8 +152,8 @@ local development, not a complete secrecy boundary against hostile code. Read
 [the security model](SECURITY.md) before granting extension tools or running untrusted projects.
 
 With `-w`, the whole task uses its own worktree. Landing audits the task scope and preserves unrelated
-staged changes. Interrupted operations retain their state; continuing retries unfinished streams instead
-of starting a replacement task. [Worktrees](docs/isolation.md) · [Recovery and migration](docs/migration.md).
+staged changes. Interrupted operations retain their state; `run` retries unfinished streams instead of
+starting a replacement task. A task saved by 0.15 is read and continued as it is. [Worktrees](docs/isolation.md) · [Recovery and migration](docs/migration.md).
 
 ## Figma, layout measurement and fixtures
 
@@ -177,8 +181,8 @@ make design-browser              # actual Chromium workflow scenarios
 make package                     # both Linux binaries + source ZIP + checksums
 ```
 
-Go integration tests use controlled fake provider executables so they can exercise launching, checks,
-review, correction and completion without consuming subscriptions. They do not claim that a live provider
+Go integration tests use controlled fake provider executables so they can drive whole tasks — writing,
+checks, review, correction, amendment and completion — without consuming subscriptions. They do not claim that a live provider
 accepted a particular model. [Validation record](docs/validation.md) lists what was actually run for this
 archive and any environment limits.
 
@@ -188,8 +192,8 @@ archive and any environment limits.
 [Configuration](docs/configuration.md) · [Modes](docs/modes.md) · [Model routing](docs/model-selection.md) ·
 [Accounts](docs/accounts.md) · [Codex](docs/codex.md) · [Extensions](docs/extensions.md) ·
 [Dashboard](docs/watch.md) · [Stages](docs/stages.md) · [Design](docs/design.md) ·
-[Worktrees](docs/isolation.md) · [Migration](docs/migration.md) · [Research decisions](docs/research.md) ·
-[Releasing](docs/releasing.md).
+[Worktrees](docs/isolation.md) · [Migration](docs/migration.md) · [Design decisions](docs/decisions/README.md) ·
+[Research decisions](docs/research.md) · [Releasing](docs/releasing.md).
 
 `agentgate guide` and `agentgate reference` print the lead workflow and JSON protocol installed with this
 exact binary. License: [MIT](LICENSE).

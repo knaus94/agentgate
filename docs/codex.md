@@ -47,7 +47,8 @@ $dev fix the pagination limit
 $dev -h review the payment state transition
 ```
 
-The lead prepares structured requests and calls AgentGate. A separate terminal can observe the same checkout:
+The lead has a plan prepared, starts the task and settles what only a person can decide; `agentgate run`
+does everything between those decisions. A separate terminal can observe the same checkout:
 
 ```sh
 agentgate task watch
@@ -59,7 +60,7 @@ sandbox may prevent these operations. When AgentGate detects confinement, its er
 input to a file and make a plain command invocation, for example:
 
 ```sh
-agentgate task launch --file plan.json
+agentgate task start --file plan.json
 ```
 
 The installed rule contains the `agentgate` command prefix and, when available, its absolute executable path.
@@ -67,6 +68,15 @@ Keep the invocation separate from pipelines, heredocs and shell wrappers so the 
 executable rule. Host approval and sandbox policy still apply; the rule does not override a managed policy.
 Workers retain AgentGate's own mount restrictions. Their precise read, write and network boundary is
 explained in the [security and trust model](../SECURITY.md).
+
+### Waiting for a command
+
+`start`, `run`, `answer`, `decide`, `prepare` and `architecture` run model workers for minutes and print
+nothing until they end. How the lead waits decides what the task costs: in a measured task of 0.15 the lead
+spent more tokens polling than every writer spent writing. The guide installed for a Codex lead therefore
+gives the exact call — a wait of up to 300 seconds per poll, which returns early when the command ends —
+instead of leaving the interval to the model. One operation runs at a time per session; "already running"
+means the command was rejected, not queued.
 
 ## The shipped Codex-only profile
 
@@ -76,12 +86,10 @@ The source of this table is [the bundled profile](../internal/assets/profiles/co
 
 | Role | light | medium | heavy | ultra |
 |---|---|---|---|---|
-| Context | lead context | scout `terra:medium` | accepted architecture | accepted architecture |
-| Architecture | lead | lead | `astra:high` + `sol:xhigh` | `astra:max` + `sol:max`, then cross-critique |
+| Preparation | `terra:medium` | `terra:medium` | `terra:medium` | `terra:medium` |
+| Architecture | the plan | the plan | `astra:high` + `sol:xhigh` | `astra:max` + `sol:max`, then cross-critique |
 | Writers | `sol:medium` | `astra:medium` | `astra:high` | `astra:high` |
-| Architecture and simplicity review | lead | `sol:high` | `sol:xhigh` | `sol:xhigh` |
-| Correctness review | lead | `sol:high` | `sol:xhigh` | `sol:max` + `terra:max` |
-| Security review | — | — | — | `sol:xhigh` |
+| Review | the lead reads the patch | one lane, `sol:high`: correctness, architecture, simplicity | `sol:xhigh` architecture and simplicity + `sol:xhigh` correctness | `sol:xhigh` architecture and simplicity + `sol:max` and `terra:max` correctness + `sol:xhigh` security |
 | Escalation ceiling | `high` | `high` | `max` | `max` |
 
 Other configured roles are `sol:medium` for consultation, `astra:medium` for UI design and `terra:high` for

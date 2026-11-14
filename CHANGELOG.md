@@ -2,6 +2,59 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.16.0
+
+The core of a task was rewritten: its lifecycle, its plan, its evidence and the protocol with the lead. The
+reasons, the measurements behind them and the alternatives are in [docs/decisions](docs/decisions/README.md).
+The lead protocol is not compatible with 0.15: reinstall the lead integration and start a new lead session.
+Configuration, accounts, saved plans, the sandbox, the design tools and the panel are unchanged in use.
+
+- **One command moves a task.** `run` writes, runs the declared checks, has the change reviewed, sends what
+  can be corrected back to its author and accepts a stage or the task, until a person is needed. `start`
+  opens a task and runs it; `answer` and `decide` run on by themselves. `launch`, `review`, `triage`, `fix`,
+  `finish`, `replan` and `hold` are replaced and answer with their replacement.
+- **No dead ends.** A task is at one of four steps (`write`, `verify`, `decide`, `done`); a pause lies on top
+  and does not change the step. One table defines which actions are legal where; the guard of every command
+  and the `actions` in every answer come from it. A refused command answers with the task's picture, the
+  reason and what is possible, with exit code 1.
+- **Typed needs instead of a sentence to follow.** Every answer is one compact object: `step`, `did`,
+  `needs` (each with the one way to resolve it), `actions`. `status --full` and `show` have the details.
+- **Findings are answered by their author.** A blocking finding goes to the writer that owns the file,
+  which fixes it or disputes it with evidence; the reviewer answers the dispute in its own session. The lead
+  rules only on what the two disagree about. The lead no longer triages every finding or writes a finishing
+  summary; `architecture_evidence` is gone.
+- **One plan shape.** Every plan has stages; a plan with top-level `streams` is one stage. `covers` means
+  "works on", and a requirement is due at the last stage that covers it. The whole plan is validated before
+  anything starts and every problem is reported at once: a stage without a declared check or a stated
+  `checks_waiver`, an uncovered requirement, a scope entry that is not a path.
+- **`amend` at any step.** Accepted stages are frozen; a requirement may be added or moved, and changed or
+  removed only with `authorized`; `rework` sends the amendment to writers as new work. An amendment makes
+  stale only what it touches: a moved requirement is reassessed by the reviewer without reading the code again.
+- **Preparation is one conversation.** `prepare` takes the request as it was typed and continues the same
+  read-only worker with answers, notes and the validator's problems. The plan is typed (`plan`, not a
+  `plan_json` string). The separate scout and the separate `parse` step are removed: the preparation worker
+  hands over the context pack, and `prepare` names the right command for a request that opens no task.
+- **Evidence on git trees.** The whole working tree is recorded as a tree in a private object directory when
+  a task opens, at every stage boundary and at every review. Any file has a before-image at any time,
+  including one a generator adds later. Scope entries may be paths, directories or patterns. State files are
+  tens of kilobytes instead of megabytes.
+- **Cheaper reviews.** A reviewer reads one patch; generated output and very large files are listed and left
+  out of it. Medium has one review lane (correctness, architecture, simplicity) instead of two. A report the
+  tool cannot use goes back to the same reviewer session to be corrected instead of discarding the review.
+- **Waiting.** The guide for a Codex lead gives the exact call that waits up to 300 seconds per poll; a
+  Claude Code lead runs the command in the background. The guide is less than half its former length and the
+  reference is split into topics (`agentgate reference plan|inputs|design|isolation|config`).
+- **Isolated tasks.** A file changed outside the plan stops the task before any reviewer is paid, instead
+  of failing when the finished work is committed.
+- **Failing checks and the environment.** When a task waits because a check fails for a cause that may lie
+  outside the code, `run` runs the failing checks again.
+- **Saved tasks of 0.15** are read, shown and continued; the first command of their own session converts
+  them and keeps `state.v1.json`. Their checks and review run once more. See [migration](docs/migration.md).
+- **Validated live.** Five scenarios ran on Codex models, including a Codex session as the lead; they found
+  six defects that scripted scenarios had not, all fixed. On one small task led by the same model the lead
+  ran 6 commands where 0.15 needed 14, on 159 k input tokens instead of 757 k. See
+  [validation](docs/validation.md).
+
 ## 0.15.0
 
 - `replan` can amend the current unaccepted stage using the whole saved plan. Accepted stages, original

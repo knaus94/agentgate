@@ -207,6 +207,6 @@ issue signatures under an identical package, URL/root, viewport/device, locale, 
 A missing/incompatible baseline means strict comparison. A page not yet built does not receive a blanket
 waiver for absent design layers. Ordinary command-check baseline failures are always blocking.
 
-If the measurement contract was wrong, use `replan --plan <name>` with an explanation. Do not create a new
+If the measurement contract was wrong, use `amend --plan <name>` with `update` explaining why. Do not create a new
 baseline after implementation to hide a regression. For responsive tasks, declare relevant intermediate
 breakpoints/states; two endpoint screenshots cannot establish behavior across the whole range.

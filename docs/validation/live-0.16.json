@@ -1,0 +1,70 @@
+{
+  "recorded": "2026-11-14",
+  "tool": "agentgate 0.16.0 development build; codex-cli 0.167.2; worker profile codex (terra:medium prepares, astra:medium writes, sol:high reviews, sol:medium writes in light mode)",
+  "isolation": "A synthetic Go module in a temporary directory; configuration and state in temporary directories; worker credentials are the private snapshots the tool always makes.",
+  "token_note": "Token counts are the provider's turn totals: the sum over every request of a worker's run, so the same context is counted once per request. 'cached' is the part served from the provider's cache.",
+  "scenarios": [
+    {
+      "name": "staged task, the lead following the guide by hand",
+      "request": "--staged --step -m: reservations in three stages (a parsed value, stock operations, the command line)",
+      "commands": ["prepare", "start", "amend", "run", "run (failed)", "run", "amend", "run"],
+      "outcome": "done; three stages accepted, the whole change reviewed once more, go vet and go test pass, the built command behaves as asked",
+      "operation_seconds": {"prepare": 59, "start (stage 1)": 92, "run (stage 2)": 128, "run (stage 3, review discarded)": 92, "run (stage 3 review again)": 51, "run (reassessment, acceptance, whole-change review)": 92},
+      "worker_calls": {"prepare": 1, "writers": 3, "reviews": 5, "reassessment": 1},
+      "tokens": {"input": 1022285, "cached": 715648, "output": 19250},
+      "observed": [
+        "The typed plan was accepted by the provider and by the validator in the first round: three stages, checks with kinds and inputs, a context pack of five files.",
+        "Stage 2 changed the files stage 1 had changed; its reviewer was shown stage 2's change only.",
+        "An amendment at the pause between stages added a requirement due at the last stage; nothing accepted was touched.",
+        "The reviewer of stage 3 judged the added requirement 'partial' (its declared proof was a check and no check covers README) and marked its axis NEEDS_FIX with no finding. The validator discarded the whole review and the command failed. Fixed: see the defects below.",
+        "With the fix the same position stopped at 'decide' with a typed need for that requirement. An amendment changed its method of proof with 'authorized'; the reviewer reassessed the criteria in its own session in 17 seconds with one command, and the code review stood."
+      ]
+    },
+    {
+      "name": "a Codex session as the lead, same task on both versions",
+      "request": "-m: a 'remove <sku> <qty>' command with a typed error, a usage line and unit tests",
+      "lead": "codex exec, gpt-6-astra at medium effort, non-interactive",
+      "version_0_15": {"lead_commands": 14, "lead_tokens": {"input": 757007, "cached": 721920, "output": 2030}, "worker_calls": 4,
+        "worker_tokens": {"input": 557339, "cached": 417024, "output": 9417}, "wall_seconds": 256, "outcome": "complete"},
+      "version_0_16": {"lead_commands": 6, "lead_tokens": {"input": 159186, "cached": 146176, "output": 889}, "worker_calls": 3,
+        "worker_tokens": {"input": 322949, "cached": 256640, "output": 6173}, "wall_seconds": 194, "outcome": "done"},
+      "note": "One run on each version, so this is a pair of observations and not a statistic. The 0.15 run was not planned: the lead's login shell resolved 'agentgate' to the installed 0.15 binary, which ran the task in the user's real state directory. It was kept as the baseline. The 0.16 run named the development build by its path and ran without Codex's own sandbox, because the installed rule matches the command name only."
+    },
+    {
+      "name": "questions during preparation",
+      "request": "-m: a 'low' command, with two decisions the request says must not be guessed",
+      "outcome": "BLOCKED in 25 seconds with two questions (id, options, a recommendation); the answers went into the same worker session, which read one file and returned READY in 20 seconds",
+      "worker_tokens_both_calls": {"input": 109145, "cached": 85120, "output": 1800}
+    },
+    {
+      "name": "light mode, the lead as the reviewer, a finding that was wrong on purpose",
+      "request": "-l: one paragraph in README",
+      "outcome": "the writer wrote the paragraph in 25 seconds; the lead's wrong finding went to the writer, which left the code alone and returned a dispute citing cmd/inventory/main.go:14 in 16 seconds; the lead was shown the dispute, withdrew the finding and the task was done",
+      "observed": ["Before this run the lead-reviewer was not shown the author's dispute at all. Fixed: see the defects below."]
+    },
+    {
+      "name": "a brief that contradicts a repository rule",
+      "request": "-m: the brief asks internal/stock to print a warning; AGENTS.md says that package never prints",
+      "outcome": "the writer stopped before editing and asked the lead; the answer went into its session; the reviewer raised a P2 finding that breaks a boundary; it went to the writer without the lead; the writer disputed it with the lead's recorded answer; the reviewer withdrew it in its own session, one effort step lower; the task was done in the same command",
+      "operation_seconds": {"start (blocked)": 24, "answer (implementation, checks, review, dispute, recheck, completion)": 144}
+    }
+  ],
+  "defects_found_by_the_live_runs": [
+    "A review whose axis said NEEDS_FIX and listed no finding was discarded, also when an unmet criterion explained it. Such a report is now accepted; any other unusable report goes back to the same reviewer session to be corrected, at most twice.",
+    "In light mode the lead-reviewer did not receive the author's dispute. It is now in the lead's packet, and the need says how to withdraw or uphold a finding.",
+    "A dispute upheld by the lead's own review was mistaken for a stalled correction, because the author had left the code unchanged while it objected.",
+    "The record of a corrected stream was its last report, which described the correction and lost the work. It now holds the first report and what was done after the review.",
+    "The lead called 'parse' on the input of 'prepare'. The parse step is removed from the loop; 'prepare' takes the request as it was typed and names the right command for a request that opens no task.",
+    "The answer that accepts a stage did not say what the stage did; the lead would have needed another command to report it."
+  ],
+  "not_exercised_live": [
+    "a writer fixing a reviewer's finding (both findings raised live were disputed and withdrawn)",
+    "a dispute the reviewer upholds, and the lead's ruling on it",
+    "a correction that stalls; the limit of automatic corrections",
+    "heavy and ultra: architecture passes and several review lanes",
+    "an isolated worktree and landing",
+    "browser verification and design packages",
+    "Claude models as workers; a Claude Code session as the lead",
+    "an interactive Codex session, where a long command yields and has to be waited for"
+  ]
+}

@@ -26,16 +26,18 @@
 
 | Роль | light | medium | heavy | ultra |
 |---|---|---|---|---|
-| Разведка | контекст лида | sol:medium | принятая архитектура | принятая архитектура |
-| Архитектура | лид | лид | fable:high + astra:high | fable:xhigh + astra:xhigh, взаимная критика |
+| Подготовка | sol:medium | sol:medium | sol:medium | sol:medium |
+| Архитектура | план | план | fable:high + astra:high | fable:xhigh + astra:xhigh, взаимная критика |
 | Бэкенд | sol:medium | opus:medium | opus:high | opus:xhigh |
 | Фронтенд | sonnet:medium | opus:medium | opus:high | opus:xhigh |
-| Ревью архитектуры и простоты | лид | fable:medium | fable:high | fable:high |
-| Ревью корректности | лид | astra:medium | astra:high | fable:xhigh + astra:xhigh |
+| Ревью архитектуры и простоты | лид | astra:medium, одна полоса вместе с корректностью | fable:high | fable:high |
+| Ревью корректности | лид | та же полоса | astra:high | fable:xhigh + astra:xhigh |
 | Ревью безопасности | — | — | — | astra:high |
 | Потолок усилия | high | high | xhigh | max |
 
-В heavy и ultra реализацию обеих частей пишет Opus. В прежней таблице Astra одновременно была автором
+В medium одна полоса ревью оценивает корректность, архитектуру и простоту вместе; мнение второго провайдера
+оплачивает режим heavy ([решение 0009](../decisions/0009-review-economics.md)). В heavy и ultra реализацию
+обеих частей пишет Opus. В прежней таблице Astra одновременно была автором
 фронтенда и ревьюером корректности; смешанная задача нарушала требование независимости. Теперь Fable и
 Astra остаются доступными для ревью до появления замен по квоте.
 

@@ -5,7 +5,10 @@
 A large specification is not written in one breath. Done as one task, it produces one huge diff, one heavy
 review and long correction rounds. `agentgate` splits it into **stages**: each stage is one logical outcome,
 goes through the whole gate — write, check, review, correct, accept — and the next stage starts only when the
-one before it is accepted.
+one before it is accepted. `agentgate run` moves from one stage to the next by itself.
+
+Every plan has stages. A plan written with `streams` at the top is a plan of one stage, so there is one
+shape, one validator and one set of rules ([decision 0003](decisions/0003-one-plan-shape.md)).
 
 ```
 plan with stages
@@ -19,13 +22,26 @@ plan with stages
 
 ## What a staged plan holds
 
-- **Requirements.** What the specification asks for, as a short list with ids.
+- **Requirements.** What the specification asks for, as a short list with ids and, optionally, the kind of
+  proof each needs (`code`, `check`, `browser`).
 - **Stages.** Each has a name, a goal (its one outcome), the requirements it `covers`, its own streams, and
   optionally acceptance criteria, extra checks and its own assessment.
 
-Every requirement must be covered by a stage; a plan that leaves one out is refused. That is what keeps a
-requirement from being lost between the specification and the work. The saved brief
-(`.agentgate/plans/<name>/brief.md`) shows the requirements with the stage that delivers each.
+`covers` means "this stage works on the requirement". A requirement may be covered by several stages and is
+**due at the last one**: there it must be verified in full. An earlier stage is told that it contributes and
+is not held to the end-to-end behaviour; what a foundation stage must deliver by itself goes into the stage's
+own acceptance criteria. This is what a reviewer's `partial` on a foundation stage used to trip over.
+
+The plan is validated as a whole before anything starts, and every problem is reported at once:
+
+- every requirement is covered by a stage;
+- every stage outside light mode has a declared check, or the plan states `checks_waiver` — why no command
+  can verify the change;
+- streams of one stage own disjoint files; a later stage may take a file over;
+- the size limits below.
+
+A plan that could not be finished is therefore refused when it is saved, not after the work is done. The
+saved brief (`.agentgate/plans/<name>/brief.md`) shows the requirements with the stage where each is due.
 
 A good stage leaves the declared checks green and is small enough to read in one sitting. Foundations first
 (schema, contracts), then behaviour, then the interface and the clean-up.
@@ -33,37 +49,37 @@ A good stage leaves the declared checks green and is small enough to read in one
 ## How a stage runs
 
 - **Its own mode.** The mode is computed per stage from the stage's assessment, so a data migration can run as
-  ultra and the form after it as medium. Routes follow that stage's assessment and configured mode table.
+  ultra and the form after it as medium. A mode flag in the request applies to every stage.
 - **Fresh workers.** Writers and reviewers of a stage start with a clean context. They are given the whole
-  brief, the stage's goal and requirements, what the earlier stages delivered (their summaries and the
-  contracts their writers left), and the list of later stages, which are not theirs to do.
+  brief, the stage's goal, the requirements it works on and where each is due, what the earlier stages
+  delivered (their writers' summaries and the contracts they left), and the list of later stages, which are
+  not theirs to do.
 - **Its own review.** Reviewers see the stage's change, measured from where the previous stage ended.
   Reviewer independence still excludes models that authored earlier stages or failed partial attempts;
   starting a new stage does not erase the task's author history.
 - **Kept on acceptance.** The stage's reviews, findings, decisions and check receipts are archived with the
-  task, so the history of one stage is not overwritten by the next.
+  task, so the history of one stage is not overwritten by the next. The record of the stage is its writers'
+  own summary, not prose written afterwards.
 
 ## Between stages
 
-The lead goes on to the next stage by itself. It stops when a decision is missing, when a stage is blocked, or
-when what it learned makes the plan wrong; `--step` in the request makes it stop after every stage and wait
-for you.
-
-The stages still ahead may be revised between stages, with a stated reason. Accepted stages are frozen.
+`run` accepts a stage as soon as everything it requires is current, and opens the next one in the same call.
+It stops when a decision is missing, when a stage is blocked, or when what was learned makes the plan wrong;
+`--step` in the request pauses after every accepted stage until you say to go on.
 
 ## After the last stage
 
 Per-stage reviews do not see the seams: a contract that drifted from one stage to the next, a leftover of an
 early stage, a requirement no stage met end to end. So in heavy and ultra, and whenever there are three or
-more stages, the whole change gets one more review, measured from where the task began. Its findings go back
-to a writer for the stage that owned the file last.
+more stages, the whole change gets one more review, measured from where the task began. A finding there goes
+to the writer of the stage that owned the file last, in that writer's own session.
 
 ## Isolation
 
 A staged task works in its own worktree ([isolated tasks](isolation.md)) when the repository says how to
 prepare one (`worktree.setup` or `worktree.copy`). Then every accepted stage is a commit on the task's branch,
 and `land` brings the whole in. `staging.isolate` is `auto` by default; `always` and `never` force it. Without
-a worktree a stage boundary is a snapshot of the files, and nothing is committed.
+a worktree a stage boundary is a recorded tree, and nothing is committed.
 
 ## When staging is required
 
@@ -78,42 +94,44 @@ stage it. Flags in the request:
 |---|---|
 | `--staged` | the plan must be in stages |
 | `--single` | one pass whatever the size — for a change that really is mechanical |
-| `--step` | hold after every accepted stage until you say to go on |
+| `--step` | pause after every accepted stage until you say to go on |
 
 Reviewing an existing change (`/dev review`) has no size limit.
 
 ## What it costs
 
-- Each stage has its own review, with a whole-change review when the integration rule above requires it.
-  Stage reviews bound the diff under consideration; the integration review still covers the entire change.
+- Each stage has its own review, with a whole-change review when the rule above requires it. Stage reviews
+  bound the diff under consideration; the last review still covers the entire change.
 - Stages run one after another. Work that would have run as parallel streams of one task takes longer when it
   is put into separate stages; streams inside a stage still run in parallel.
 
 The panel (`agentgate watch`) lists the stages with what is accepted, what is running and what is ahead.
 
 A `plan` request may describe the same stages as future implementation. Preparation saves the proposal and
-its brief without starting writers or checks. The request remains read-only: after explicit implementation
-authorization, update its action and save again before launch. Do not remove stages merely because planning
-itself does not write application code.
+its brief without starting writers or checks. A proposal starts only with `agentgate start --implement`,
+which is the lead's statement that the user authorized the implementation; the plan itself is not edited to
+say so.
 
-## Amend the current stage
+## Amending the plan
 
-A reviewed stage is not an accepted stage. If coverage mistakenly requires later runtime behavior now,
-correct the saved whole plan and use `agentgate replan --plan <name>` with an `update` reason. Resume a held
-task explicitly first. The tool preserves its identity, source snapshots, writer sessions, findings and
-check history, invalidates review and requires a fresh assessment. It starts no writer or check.
+Changing the plan in the middle of the work is ordinary. `agentgate amend --plan <name>` (or `--file`)
+replaces the plan of the active task at any step. The plan carries `update`: what changed and why. To have
+the plan revised for you, call `agentgate prepare` with `notes` while the task is active: the same read-only
+worker sees the task's position and what it waits for, and returns the revised plan.
 
-The amendment must retain every original requirement's id, text and evidence method and cover it somewhere
-in the plan. Current stage/stream identities and owned files remain; accepted stages cannot change. Add
-separate intermediate criteria instead of marking an end-to-end requirement complete at a foundation stage.
-`covers` means complete delivery at the stage boundary, not a contribution to the eventual result.
+- **Accepted stages are frozen**, and so are the requirements they completed. The present stage keeps its
+  name and the streams that already have a writer; files it already changed cannot leave its scope.
+- **A requirement may be added, or moved** to the stage that completes it. Changing its text or removing it
+  needs `authorized`: who allowed it, in what words. A requirement is never weakened to get past a review.
+- **`rework: ["stream"]`** sends the amendment to those writers as new work, in their own sessions. A stream
+  the amendment adds is new work by itself.
+- **Only what is touched becomes stale.** Changing what is to be built has the code reviewed again. Moving a
+  requirement or changing a criterion has the reviewer reassess the criteria in its own session, without
+  reading the code again. A change that touches neither leaves every receipt valid.
+- **An unfinished round stays unfinished**: finished streams keep their reports, blocked writers are still
+  answered in their sessions.
 
-Added generated files keep a before-image from recorded snapshots or the original Git tree. Current-stage
-and whole-task baselines are distinct. Original uncommitted bytes that cannot be recovered cause a refusal,
-not a new baseline of finished code. New tasks retain the whole-task Git/dirty-file origin across stages;
-legacy tasks can establish that origin only before accepting their first stage. Unversioned files without
-a recorded preimage are presented in full, rather than assumed unchanged.
-
-An unfinished writer round retains the ability to continue after a metadata amendment; BLOCKED writers still
-need `answer` in their existing sessions. Stream assignments cannot change through replan while that round is
-unfinished. The integration pass cannot rewrite already accepted stages.
+A file admitted late — a generator's output, a file a finding needs — always has its before-image: the task
+recorded the whole tree when it opened and at every stage boundary
+([decision 0004](decisions/0004-evidence-on-git-trees.md)). Every amendment is logged with its reason and
+what it changed; `agentgate show plan` lists the revisions.

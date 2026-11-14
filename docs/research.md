@@ -1,7 +1,9 @@
 # Research and design decisions
 
-Reviewed for this refactor on 2026-11-14. This is a comparison of published interfaces and implementation
-patterns, not a benchmark or a claim that competing products were run against this repository.
+Reviewed for the 0.14 refactor on 2026-11-14. This is a comparison of published interfaces and implementation
+patterns, not a benchmark or a claim that competing products were run against this repository. The decisions
+behind the 0.16 task core, with the measurements and the later sources they rest on, are recorded separately
+in [design decisions](decisions/README.md).
 
 ## What AgentGate is responsible for
 
