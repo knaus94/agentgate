@@ -54,14 +54,9 @@
       "review": [
         {
           "axes": [
+            "correctness",
             "architecture",
             "simplicity"
-          ],
-          "route": "sol:high"
-        },
-        {
-          "axes": [
-            "correctness"
           ],
           "route": "sol:high"
         }

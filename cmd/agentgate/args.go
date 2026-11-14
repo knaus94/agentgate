@@ -118,6 +118,9 @@ func parseArgs(args []string) (arguments, error) {
 	if out.action == "limits" { // retained compatibility alias
 		out.action = "accounts"
 	}
+	if _, old := renamed[out.action]; old || out.action == "continue" {
+		return out, nil // answered by the dispatcher with the present name; `continue` is `run`
+	}
 	spec, ok := command(out.action)
 	if !ok {
 		return out, fmt.Errorf("unknown command %q; run `agentgate help`", out.action)
@@ -155,6 +158,10 @@ func (a arguments) validatePositionals() error {
 		}
 		count, ok := map[string]int{"show": 1, "path": 1, "init": 1, "validate": 1, "extensions": 1, "profiles": 1, "profile": 2, "unset": 2, "set": 3}[a.rest[0]]
 		if !ok || len(a.rest) != count {
+			return fail()
+		}
+	case "show", "reference":
+		if len(a.rest) > 1 {
 			return fail()
 		}
 	case "plan":
@@ -272,6 +279,30 @@ func (a arguments) input(into any, required bool) error {
 		if required {
 			return fmt.Errorf("%s needs --file <path> or --file -", a.action)
 		}
+		return nil
+	}
+	if err := decodeInput(raw, into); err != nil {
+		return fmt.Errorf("%s input: %w", a.action, err)
+	}
+	return nil
+}
+
+// requestOrInput reads the input of a command that takes either one JSON object or the user's request as
+// it was typed. A request begins with a flag or a word, never with a brace, so the two cannot be confused;
+// the lead does not have to wrap a user's text in JSON to hand it over.
+func (a arguments) requestOrInput(into any, request *string) error {
+	raw, err := a.read()
+	if err != nil {
+		return err
+	}
+	text := bytes.TrimSpace(raw)
+	switch {
+	case len(text) == 0 && (a.file != "" || a.plan != ""):
+		return fmt.Errorf("%s input: expected the request text or a JSON object", a.action)
+	case len(text) == 0:
+		return nil
+	case text[0] != '{':
+		*request = string(text)
 		return nil
 	}
 	if err := decodeInput(raw, into); err != nil {

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -18,11 +18,12 @@ import (
 type Stream struct {
 	Name   string   `json:"name"`
 	Domain string   `json:"domain"` // backend or frontend
-	Files  []string `json:"files"`
-	After  []string `json:"after,omitempty"`  // streams that must finish first
-	Brief  string   `json:"brief,omitempty"`  // what this stream does, beyond the shared brief
+	Files  []string `json:"files"`  // exact paths, directories ("dir/") and patterns ("src/**/*.ts")
+	After  []string `json:"after,omitempty"`
+	Brief  string   `json:"brief,omitempty"`
 	Effort string   `json:"effort,omitempty"` // raise the writer's effort for a hard stream, up to the mode's ceiling
 	Done   bool     `json:"done,omitempty"`   // keeps ownership but starts no writer
+	Except []string `json:"except,omitempty"` // set by the tool in the pass over the whole change: what a later stage owns
 }
 
 // Check is an approved verification command. It may be written as a plain argv array.
@@ -78,33 +79,58 @@ type Accepted struct {
 	Blockers   map[string]string `json:"blockers,omitempty"` // blocker id -> how it is resolved or why it is rejected
 }
 
+// Requirement is an observable acceptance criterion.
+type Requirement struct {
+	ID     string `json:"id"`
+	Text   string `json:"text"`
+	Method string `json:"method,omitempty"` // code, check or browser; empty lets the reviewer select the proof
+}
+
+// Stage is one part of a plan: one outcome that leaves the declared checks green. It goes through the whole
+// gate — write, check, review, correct, accept — before the next one starts.
+type Stage struct {
+	Name       string      `json:"name"`
+	Goal       string      `json:"goal"`
+	Acceptance []string    `json:"acceptance,omitempty"`
+	Covers     []string    `json:"covers,omitempty"` // requirements this stage works on; each is due at the last stage that lists it
+	Streams    []Stream    `json:"streams"`
+	Checks     []Check     `json:"checks,omitempty"`     // in addition to the plan's checks
+	Assessment *Assessment `json:"assessment,omitempty"` // this stage's own facts; default: the plan's
+}
+
+// Plan is what was agreed: the brief, the criteria and the stages that deliver them. A plan written with
+// top-level streams is one stage; the tool gives every plan that one shape before it runs it.
 type Plan struct {
 	Request          string        `json:"request"`
-	Requirements     []Requirement `json:"requirements,omitempty"` // independently verified acceptance criteria
-	Stages           []Stage       `json:"stages,omitempty"`       // staged plans: the parts, done and reviewed one after another
-	View             bool          `json:"stage_view,omitempty"`   // set by the tool: a stage of a staged plan, seen as a plan of its own
-	Assessment       *Assessment   `json:"assessment,omitempty"`
 	Brief            string        `json:"brief"`
-	Streams          []Stream      `json:"streams"`
+	Assessment       *Assessment   `json:"assessment,omitempty"`
+	Requirements     []Requirement `json:"requirements,omitempty"`
+	Stages           []Stage       `json:"stages,omitempty"`
+	Streams          []Stream      `json:"streams,omitempty"`     // a single-pass plan: one stage, written without the wrapper
+	Single           bool          `json:"single_pass,omitempty"` // set by the tool: the plan was written with top-level streams
 	Context          []string      `json:"context,omitempty"`
 	Checks           []Check       `json:"checks,omitempty"`
+	ChecksWaiver     string        `json:"checks_waiver,omitempty"` // why no command can verify this change
+	Generated        []string      `json:"generated,omitempty"`     // patterns of generator output: reviewed by provenance, not line by line
 	UI               *UI           `json:"ui,omitempty"`
 	Visual           *Visual       `json:"visual,omitempty"`
-	Design           []DesignRef   `json:"design,omitempty"` // design packages streams implement
+	Design           []DesignRef   `json:"design,omitempty"`
 	Architecture     *Accepted     `json:"architecture,omitempty"`
-	Update           string        `json:"update,omitempty"`   // what changed, for a continuation of an unfinished task
-	BaseRef          string        `json:"base_ref,omitempty"` // review and clean: the commit the diff starts from
+	Update           string        `json:"update,omitempty"`     // an amendment: what changed and why
+	Authorized       string        `json:"authorized,omitempty"` // an amendment that changes requirements: who allowed it, in what words
+	Rework           []string      `json:"rework,omitempty"`     // an amendment: streams of the current stage that get it as new work
+	BaseRef          string        `json:"base_ref,omitempty"`   // review and clean: the commit the diff starts from
 	WriterTimeoutS   int           `json:"writer_timeout_s,omitempty"`
 	ReviewerTimeoutS int           `json:"reviewer_timeout_s,omitempty"`
 	Revise           string        `json:"revise,omitempty"`          // architecture only: receipt to revise
 	ReviseBlockers   []string      `json:"revise_blockers,omitempty"` // architecture only: blockers the lead verified
 }
 
-// Assessment is what the lead found in the code. The mode is computed from these facts, not chosen by taste.
+// Assessment is what was found in the code. The mode is computed from these facts, not chosen by taste.
 type Assessment struct {
 	Size         string   `json:"size"`                   // trivial, ordinary or complex
 	Risks        []string `json:"risks,omitempty"`        // named risks the change really touches
-	Irreversible bool     `json:"irreversible,omitempty"` // hard to undo once shipped: data migration, destructive change, published contract
+	Irreversible bool     `json:"irreversible,omitempty"` // hard to undo once shipped
 	Uncertainty  string   `json:"uncertainty,omitempty"`  // low (default) or material
 	Evidence     string   `json:"evidence"`               // the inspected code that supports the facts above
 }
@@ -118,12 +144,12 @@ var severeRisks = []string{"authorization", "security", "money"}
 // Decision is the mode and the reasons for it.
 type Decision struct {
 	Mode    string   `json:"mode"`
-	Source  string   `json:"source"` // flag or assessment
+	Source  string   `json:"source"` // flag, assessment, stages or read-only
 	Because []string `json:"because"`
 }
 
 // decide applies the rule table, most thorough rule first.
-func decide(a *Assessment, files, streams int) Decision {
+func decide(a *Assessment, files, streams int, sized bool) Decision {
 	severe := false
 	for _, risk := range a.Risks {
 		severe = severe || slices.Contains(severeRisks, risk)
@@ -138,11 +164,13 @@ func decide(a *Assessment, files, streams int) Decision {
 		return Decision{"heavy", "assessment", []string{"touches " + named}}
 	case a.Size == "complex" && a.Uncertainty == "material":
 		return Decision{"heavy", "assessment", []string{"complex change with material uncertainty"}}
-	case a.Size == "trivial" && a.Uncertainty != "material" && files <= 3 && streams == 1:
+	case a.Size == "trivial" && a.Uncertainty != "material" && sized && files <= 3 && streams == 1:
 		return Decision{"light", "assessment", []string{"exact change of at most three files", "no named risk"}}
 	}
 	return Decision{"medium", "assessment", []string{"ordinary change", "no named risk"}}
 }
+
+var modeRank = map[string]int{"light": 0, "medium": 1, "heavy": 2, "ultra": 3}
 
 var uiSuffixes = []string{".tsx", ".jsx", ".vue", ".svelte", ".html", ".css", ".scss", ".sass", ".less"}
 
@@ -154,7 +182,16 @@ const (
 	timeoutMax     = 7200
 )
 
-// Files is every path owned by the plan.
+// allStreams is every stream of every stage.
+func (p *Plan) allStreams() []Stream {
+	out := slices.Clone(p.Streams)
+	for _, stage := range p.Stages {
+		out = append(out, stage.Streams...)
+	}
+	return out
+}
+
+// Files is every scope entry of the plan.
 func (p *Plan) Files() []string {
 	var files []string
 	for _, stream := range p.allStreams() {
@@ -164,28 +201,101 @@ func (p *Plan) Files() []string {
 	return slices.Compact(files)
 }
 
-// cleanPaths validates repository-relative regular-file paths (existing or not yet created).
-func cleanPaths(values []string) ([]string, error) {
-	var out []string
-	for _, value := range values {
-		clean := filepath.ToSlash(filepath.Clean(value))
-		parts := strings.Split(clean, "/")
-		if value == "" || strings.ContainsRune(value, '\x00') || filepath.IsAbs(value) || slices.Contains(parts, "..") || slices.Contains(parts, ".git") || clean == "." {
-			return nil, fmt.Errorf("scope must contain repository-relative file paths: %q", value)
-		}
-		for current := clean; current != "."; current = filepath.ToSlash(filepath.Dir(current)) {
-			info, err := os.Lstat(current)
-			if err != nil && !errors.Is(err, os.ErrNotExist) {
-				return nil, fmt.Errorf("inspect scope %q: %w", value, err)
-			}
-			if err == nil && (info.Mode()&os.ModeSymlink != 0 || (current == clean && !info.Mode().IsRegular())) {
-				return nil, fmt.Errorf("scope must name regular files, not directories or symlinks: %q", value)
-			}
-		}
-		out = append(out, clean)
+// scope is what a stage owns; index -1 or past the last stage means the whole plan.
+func (p *Plan) scope(index int) []string {
+	if index < 0 || index >= len(p.Stages) {
+		return p.Files()
 	}
-	sort.Strings(out)
-	return slices.Compact(out), nil
+	var files []string
+	for _, stream := range p.Stages[index].Streams {
+		files = append(files, stream.Files...)
+	}
+	sort.Strings(files)
+	return slices.Compact(files)
+}
+
+// lastCover is the last stage that works on a requirement: where it is due. -1 when no stage lists it.
+func (p *Plan) lastCover(id string) int {
+	for index := len(p.Stages) - 1; index >= 0; index-- {
+		if slices.Contains(p.Stages[index].Covers, id) {
+			return index
+		}
+	}
+	return -1
+}
+
+// covered are the requirements a stage works on, in the plan's order.
+func (p *Plan) covered(index int) []Requirement {
+	if index < 0 || index >= len(p.Stages) {
+		return slices.Clone(p.Requirements)
+	}
+	var out []Requirement
+	for _, requirement := range p.Requirements {
+		if slices.Contains(p.Stages[index].Covers, requirement.ID) {
+			out = append(out, requirement)
+		}
+	}
+	return out
+}
+
+// designsFor are the designs built by a stream of the stage; every design in the pass over the whole change.
+func (p *Plan) designsFor(index int) []DesignRef {
+	if index < 0 || index >= len(p.Stages) {
+		return slices.Clone(p.Design)
+	}
+	var out []DesignRef
+	for _, design := range p.Design {
+		if slices.ContainsFunc(p.Stages[index].Streams, func(stream Stream) bool { return stream.Name == design.Stream }) {
+			out = append(out, design)
+		}
+	}
+	return out
+}
+
+// checksFor are the commands that must pass for a stage: the plan's, the stage's own and the layout check of
+// every design the stage builds. The pass over the whole change runs all of them.
+func (p *Plan) checksFor(index int) []Check {
+	out := slices.DeleteFunc(slices.Clone(p.Checks), generatedDesignCheck)
+	for position, stage := range p.Stages {
+		if index == position || index < 0 || index >= len(p.Stages) {
+			out = mergeChecks(out, stage.Checks)
+		}
+	}
+	for _, design := range p.designsFor(index) {
+		out = mergeChecks(out, []Check{design.check()})
+	}
+	return out
+}
+
+func mergeChecks(base, extra []Check) []Check {
+	out := slices.Clone(base)
+	for _, check := range extra {
+		if !slices.ContainsFunc(out, func(other Check) bool { return slices.Equal(other.Argv, check.Argv) }) {
+			out = append(out, check)
+		}
+	}
+	return out
+}
+
+// normalized is a deep copy of the plan in its one shape: stages only.
+func (p *Plan) normalized() *Plan {
+	out := &Plan{}
+	raw, _ := json.Marshal(p)
+	_ = json.Unmarshal(raw, out)
+	out.Checks = slices.DeleteFunc(out.Checks, generatedDesignCheck)
+	if len(out.Stages) == 0 && len(out.Streams) > 0 {
+		stage := Stage{Name: "main", Goal: firstLine(out.Brief), Streams: out.Streams}
+		for _, requirement := range out.Requirements {
+			stage.Covers = append(stage.Covers, requirement.ID)
+		}
+		out.Stages, out.Streams, out.Single = []Stage{stage}, nil, true
+	}
+	if len(out.Stages) == 1 && len(out.Stages[0].Covers) == 0 {
+		for _, requirement := range out.Requirements {
+			out.Stages[0].Covers = append(out.Stages[0].Covers, requirement.ID)
+		}
+	}
+	return out
 }
 
 // timeoutSeconds picks the first set value: the task's, then the mode's, then the default.
@@ -205,147 +315,331 @@ func timeoutSeconds(values ...int) (int, error) {
 	return value, nil
 }
 
-// Resolved is a validated plan with its request and mode.
+// PlanProblems is every reason a plan cannot run, reported together so that one correction can fix them all.
+type PlanProblems []string
+
+func (p PlanProblems) Error() string {
+	if len(p) == 1 {
+		return p[0]
+	}
+	return fmt.Sprintf("the plan has %d problems:\n- %s", len(p), strings.Join(p, "\n- "))
+}
+
+// Resolved is a validated plan in its one shape, with its request and the mode of every stage.
 type Resolved struct {
-	Stages   []*Resolved // staged plans: each stage, resolved as a plan of its own
-	Plan     *Plan
-	Request  Request
-	Mode     string
-	Decision Decision
-	Config   *config.Config
+	Plan      *Plan
+	Request   Request
+	Mode      string // the most thorough mode of a stage
+	Decision  Decision
+	Modes     []string // per stage
+	Decisions []Decision
+	Config    *config.Config
 }
 
 func (r *Resolved) ModeConfig() config.Mode { return r.Config.Modes[r.Mode] }
 
-// Resolve validates the plan and decides its mode. A flag in the request always wins.
-func Resolve(cfg *config.Config, plan *Plan) (*Resolved, error) {
-	request, err := ParseRequest(plan.Request)
+// Resolve validates a plan, gives it its one shape and decides the mode of every stage. A flag in the
+// request always wins. The plan passed in is not changed.
+func Resolve(cfg *config.Config, source *Plan) (*Resolved, error) {
+	request, err := ParseRequest(source.Request)
 	if err != nil {
 		return nil, err
 	}
 	if slices.Contains([]string{"status", "stop", "help"}, request.Action) || request.Preview {
 		return nil, errors.New("this request starts no work")
 	}
-	resolved := &Resolved{Plan: plan, Request: request, Mode: request.Mode, Config: cfg}
+	var problems PlanProblems
+	add := func(format string, values ...any) { problems = append(problems, fmt.Sprintf(format, values...)) }
+	if len(source.Stages) > 0 && len(source.Streams) > 0 {
+		add("a staged plan keeps its streams inside the stages")
+	}
+	plan := source.normalized()
+	resolved := &Resolved{Plan: plan, Request: request, Config: cfg}
 	if strings.TrimSpace(plan.Brief) == "" {
-		return nil, errors.New("brief is required: the accepted requirements, invariants and acceptance criteria")
+		add("brief is required: the accepted requirements, invariants and acceptance criteria")
 	}
 	if err := validateRequirements(plan.Requirements); err != nil {
-		return nil, err
+		add("%v", err)
 	}
-	if plan.staged() {
-		return resolveStaged(cfg, plan, request)
+	if len(plan.Stages) == 0 && request.ReviewFirst() {
+		// A review of what is already there needs no hand-written scope: it is whatever differs from the base.
+		stream, err := changedStream(plan.BaseRef)
+		if err != nil {
+			add("%v", err)
+		} else {
+			plan.Streams = []Stream{stream}
+			plan = plan.normalized()
+			resolved.Plan = plan
+		}
 	}
-	if request.Staged && !plan.View {
-		return nil, errors.New("--staged asks for the work in stages: give stages [{name, goal, covers, streams}] and requirements")
+	if len(plan.Stages) == 0 && len(problems) == 0 {
+		add("streams are required: at least one named stream with its files, or stages [{name, goal, covers, streams}]")
 	}
-	if len(plan.Streams) == 0 {
-		return nil, errors.New("streams are required: at least one named stream with its files")
+	staged := !plan.Single && len(plan.Stages) > 1
+	switch {
+	case request.Single && staged:
+		add("--single asks for one pass, and the plan has stages")
+	case request.Staged && !staged:
+		add("--staged asks for the work in stages: give stages [{name, goal, covers, streams}] and requirements")
+	case staged && !request.Writes() && request.Action != "plan":
+		add("stages are for work that writes code; %s reads what is already there", request.Action)
+	case staged && request.ReviewFirst():
+		add("stages are for work that writes code; %s starts from what is already there", request.Action)
+	case staged && len(plan.Requirements) == 0:
+		add("a staged plan lists requirements [{id, text}] and says which stages cover each, so nothing in the specification is lost")
 	}
-	names, owner := map[string]bool{}, map[string]string{}
-	for index := range plan.Streams {
-		stream := &plan.Streams[index]
-		if !safeName.MatchString(stream.Name) || names[stream.Name] {
-			return nil, fmt.Errorf("stream names must be unique path-safe identifiers (letters, digits, dot, dash or underscore, starting with a letter or digit): %q", stream.Name)
-		}
-		names[stream.Name] = true
-		if stream.Domain != "backend" && stream.Domain != "frontend" {
-			return nil, fmt.Errorf("stream %q: domain must be backend or frontend", stream.Name)
-		}
-		if stream.Files, err = cleanPaths(stream.Files); err != nil {
-			return nil, err
-		}
-		if len(stream.Files) == 0 {
-			return nil, fmt.Errorf("stream %q owns no files", stream.Name)
-		}
-		for _, file := range stream.Files {
-			if other, taken := owner[file]; taken {
-				return nil, fmt.Errorf("%s is owned by both %q and %q; streams must be disjoint", file, other, stream.Name)
+	known := map[string]bool{}
+	for _, requirement := range plan.Requirements {
+		known[requirement.ID] = true
+	}
+	stageNames := map[string]bool{}
+	for index := range plan.Stages {
+		stage := &plan.Stages[index]
+		label := ""
+		if !plan.Single {
+			label = fmt.Sprintf("stage %q: ", stage.Name)
+			if !safeName.MatchString(stage.Name) || stageNames[stage.Name] {
+				add("stage names are unique and made of letters, digits, dot, dash or underscore: %q", stage.Name)
 			}
-			owner[file] = stream.Name
+			stageNames[stage.Name] = true
+			if strings.TrimSpace(stage.Goal) == "" {
+				add("stage %q needs a goal: the one outcome it delivers", stage.Name)
+			}
+		}
+		for _, id := range stage.Covers {
+			if !known[id] {
+				add("%scovers an unknown requirement %q", label, id)
+			}
+		}
+		for _, problem := range validateStreams(stage.Streams) {
+			add("%s%s", label, problem)
+		}
+		if err := validateChecks(stage.Checks); err != nil {
+			add("%s%v", label, err)
 		}
 	}
-	if _, err := waves(plan.Streams); err != nil {
-		return nil, err
+	if staged {
+		var missing []string
+		for _, requirement := range plan.Requirements {
+			if plan.lastCover(requirement.ID) < 0 {
+				missing = append(missing, requirement.ID)
+			}
+		}
+		if len(missing) > 0 {
+			add("no stage covers these requirements: %s", strings.Join(missing, ", "))
+		}
 	}
 	if plan.Context, err = cleanPaths(plan.Context); err != nil {
-		return nil, err
+		add("%v", err)
+	}
+	for _, value := range plan.Generated {
+		if _, err := normalizeEntry(value, true); err != nil {
+			add("generated: %v", err)
+		}
 	}
 	for _, timeout := range []int{plan.WriterTimeoutS, plan.ReviewerTimeoutS} {
 		if _, err := timeoutSeconds(timeout); err != nil {
-			return nil, err
+			add("%v", err)
 		}
 	}
-	if err := resolved.validateDesign(); err != nil {
-		return nil, err
-	}
 	if err := validateChecks(plan.Checks); err != nil {
-		return nil, err
+		add("%v", err)
 	}
-	if err := resolved.decideMode(); err != nil {
-		return nil, err
+	for _, problem := range resolved.validateDesign() {
+		add("%s", problem)
 	}
+	for _, problem := range resolved.decideModes() {
+		add("%s", problem)
+	}
+	if len(resolved.Modes) == len(plan.Stages) {
+		for _, problem := range resolved.preflight() {
+			add("%s", problem)
+		}
+	}
+	for _, problem := range resolved.validateUI() {
+		add("%s", problem)
+	}
+	if len(problems) > 0 {
+		return nil, problems
+	}
+	return resolved, nil
+}
+
+// changedStream is the scope of a review of existing work: every file that differs from the base.
+func changedStream(base string) (Stream, error) {
+	if base == "" {
+		base = "HEAD"
+	}
+	if exec.Command("git", "rev-parse", "--verify", "--quiet", "--end-of-options", base+"^{commit}").Run() != nil {
+		return Stream{}, fmt.Errorf("base_ref %q is not a commit", base)
+	}
+	tracked, _ := git("diff", "--name-only", "-z", base)
+	untracked, _ := git("ls-files", "-z", "--others", "--exclude-standard")
+	var files []string
+	for _, name := range strings.Split(tracked+untracked, "\x00") {
+		if name != "" && !ownNotes(name) {
+			files = append(files, name)
+		}
+	}
+	if len(files) == 0 {
+		return Stream{}, fmt.Errorf("nothing differs from %s: there is no change to review", base)
+	}
+	sort.Strings(files)
+	return Stream{Name: "change", Domain: "backend", Files: slices.Compact(files)}, nil
+}
+
+// validateStreams checks the streams of one stage: names, domains, scopes that cannot collide, and waves.
+func validateStreams(streams []Stream) []string {
+	var problems []string
+	add := func(format string, values ...any) { problems = append(problems, fmt.Sprintf(format, values...)) }
+	if len(streams) == 0 {
+		return []string{"streams are required: at least one named stream with its files"}
+	}
+	names := map[string]bool{}
+	for index := range streams {
+		stream := &streams[index]
+		if !safeName.MatchString(stream.Name) || names[stream.Name] {
+			add("stream names must be unique path-safe identifiers (letters, digits, dot, dash or underscore, starting with a letter or digit): %q", stream.Name)
+		}
+		names[stream.Name] = true
+		if stream.Domain != "backend" && stream.Domain != "frontend" {
+			add("stream %q: domain must be backend or frontend", stream.Name)
+		}
+		files, err := normalizeScope(stream.Files)
+		if err != nil {
+			add("stream %q: %v", stream.Name, err)
+			continue
+		}
+		if stream.Files = files; len(files) == 0 {
+			add("stream %q owns no files", stream.Name)
+		}
+	}
+	for index := range streams {
+		for other := index + 1; other < len(streams); other++ {
+			if left, right, collide := firstOverlap(streams[index].Files, streams[other].Files); collide {
+				if left == right {
+					add("%s is owned by both %q and %q; streams must be disjoint", left, streams[index].Name, streams[other].Name)
+				} else {
+					add("%s of %q and %s of %q could name the same file; streams must be disjoint — narrow one of them", left, streams[index].Name, right, streams[other].Name)
+				}
+			}
+		}
+	}
+	if _, err := waves(streams); err != nil {
+		add("%v", err)
+	}
+	return problems
+}
+
+// decideModes computes the mode of every stage and of the whole.
+func (r *Resolved) decideModes() []string {
+	plan := r.Plan
+	var problems []string
+	for index, stage := range plan.Stages {
+		decision, err := r.decideStage(stage)
+		if err != nil {
+			if plan.Single {
+				return []string{err.Error()}
+			}
+			problems = append(problems, fmt.Sprintf("stage %q: %v", stage.Name, err))
+			continue
+		}
+		r.Modes, r.Decisions = append(r.Modes, decision.Mode), append(r.Decisions, decision)
+		if index == 0 || modeRank[decision.Mode] > modeRank[r.Mode] {
+			r.Mode = decision.Mode
+		}
+	}
+	if len(problems) > 0 || len(r.Decisions) == 0 {
+		return problems
+	}
+	r.Decision = r.Decisions[0]
+	if len(plan.Stages) > 1 {
+		r.Decision = Decision{r.Mode, "stages", []string{fmt.Sprintf("%d stages; the most thorough of them is %s", len(plan.Stages), r.Mode)}}
+	}
+	return nil
+}
+
+func (r *Resolved) decideStage(stage Stage) (Decision, error) {
+	if r.Request.Action == "research" || r.Request.Action == "verify" {
+		return Decision{"medium", "read-only", []string{"read-only consultation"}}, nil
+	}
+	if r.Request.Mode != "" {
+		return Decision{r.Request.Mode, "flag", []string{"selected explicitly in the request"}}, nil
+	}
+	a := stage.Assessment
+	if a == nil {
+		a = r.Plan.Assessment
+	}
+	if a == nil || strings.TrimSpace(a.Evidence) == "" || !slices.Contains([]string{"trivial", "ordinary", "complex"}, a.Size) {
+		return Decision{}, errors.New("without a mode flag the plan needs assessment {size: trivial|ordinary|complex, risks, irreversible, uncertainty, evidence}")
+	}
+	if a.Uncertainty != "" && a.Uncertainty != "low" && a.Uncertainty != "material" {
+		return Decision{}, errors.New("assessment.uncertainty is low or material")
+	}
+	for _, risk := range a.Risks {
+		if !slices.Contains(Risks, risk) {
+			return Decision{}, fmt.Errorf("unknown risk %q; named risks are %s", risk, strings.Join(Risks, ", "))
+		}
+	}
+	var scope []string
+	for _, stream := range stage.Streams {
+		scope = append(scope, stream.Files...)
+	}
+	exact := exactPaths(scope)
+	return decide(a, len(exact), len(stage.Streams), len(exact) == len(scope)), nil
+}
+
+// preflight refuses, before anything starts, a plan that could not finish: everything completion requires
+// that the plan itself decides.
+func (r *Resolved) preflight() []string {
+	plan, cfg, request := r.Plan, r.Config, r.Request
+	var problems []string
+	add := func(format string, values ...any) { problems = append(problems, fmt.Sprintf(format, values...)) }
+	willWrite := request.Writes() || request.Action == "plan"
 	// A change this large is not reviewed well in one piece: past the limits it has to come in stages.
-	if limits := cfg.Staging; !plan.View && !request.Single && request.Writes() && !request.ReviewFirst() {
-		files, streams := len(plan.Files()), len(plan.Streams)
+	if limits := cfg.Staging; plan.Single && !request.Single && willWrite && !request.ReviewFirst() && len(plan.Stages) == 1 {
+		files, streams := len(exactPaths(plan.Files())), len(plan.Stages[0].Streams)
 		if (limits.MaxFiles > 0 && files > limits.MaxFiles) || (limits.MaxStreams > 0 && streams > limits.MaxStreams) {
-			return nil, fmt.Errorf("this plan changes %d files in %d streams, more than one pass reviews well (limits: %d files, %d streams). "+
+			add("this plan changes %d files in %d streams, more than one pass reviews well (limits: %d files, %d streams). "+
 				"Split it into stages [{name, goal, covers, streams}] with requirements, or pass --single when it really is one mechanical change",
 				files, streams, limits.MaxFiles, limits.MaxStreams)
 		}
 	}
-	ceiling := resolved.ModeConfig().EscalateTo
-	for _, stream := range plan.Streams {
-		if stream.Effort != "" && (!slices.Contains(config.Efforts, stream.Effort) ||
-			slices.Index(config.Efforts, stream.Effort) > slices.Index(config.Efforts, ceiling)) {
-			return nil, fmt.Errorf("stream %q: effort %q is above what %s allows (%s)", stream.Name, stream.Effort, resolved.Mode, ceiling)
+	for index, stage := range plan.Stages {
+		mode := cfg.Modes[r.Modes[index]]
+		label := ""
+		if !plan.Single {
+			label = fmt.Sprintf("stage %q: ", stage.Name)
+		}
+		for _, stream := range stage.Streams {
+			if stream.Effort != "" && (!slices.Contains(config.Efforts, stream.Effort) ||
+				slices.Index(config.Efforts, stream.Effort) > slices.Index(config.Efforts, mode.EscalateTo)) {
+				add("%sstream %q: effort %q is above what %s allows (%s)", label, stream.Name, stream.Effort, r.Modes[index], mode.EscalateTo)
+			}
+		}
+		if willWrite && r.Modes[index] != "light" && len(plan.checksFor(index)) == 0 && strings.TrimSpace(plan.ChecksWaiver) == "" {
+			add("%sthis mode needs at least one declared check; add one to the plan or the stage, or state checks_waiver: why no command can verify this change", label)
 		}
 	}
-	return resolved, resolved.validateUI()
+	return problems
 }
 
-func (r *Resolved) decideMode() error {
+func (r *Resolved) validateUI() []string {
 	plan := r.Plan
-	if r.Request.Action == "research" || r.Request.Action == "verify" {
-		r.Mode, r.Decision = "medium", Decision{"medium", "read-only", []string{"read-only consultation"}}
-		return nil
-	}
-	if r.Mode != "" {
-		r.Decision = Decision{r.Mode, "flag", []string{"selected explicitly in the request"}}
-		return nil
-	}
-	a := plan.Assessment
-	if a == nil || strings.TrimSpace(a.Evidence) == "" || !slices.Contains([]string{"trivial", "ordinary", "complex"}, a.Size) {
-		return errors.New("without a mode flag the plan needs assessment {size: trivial|ordinary|complex, risks, irreversible, uncertainty, evidence}")
-	}
-	if a.Uncertainty != "" && a.Uncertainty != "low" && a.Uncertainty != "material" {
-		return errors.New("assessment.uncertainty is low or material")
-	}
-	for _, risk := range a.Risks {
-		if !slices.Contains(Risks, risk) {
-			return fmt.Errorf("unknown risk %q; named risks are %s", risk, strings.Join(Risks, ", "))
-		}
-	}
-	r.Decision = decide(a, len(plan.Files()), len(plan.Streams))
-	r.Mode = r.Decision.Mode
-	return nil
-}
-
-func (r *Resolved) validateUI() error {
-	plan := r.Plan
+	var problems []string
 	for _, requirement := range plan.Requirements {
 		if requirement.Method == "browser" && (plan.Visual == nil || !plan.Visual.Enabled) {
-			return fmt.Errorf("requirement %q requests browser-scenario evidence but visual.enabled is false; use method check for rendered layout checks, or explicitly enable behavior scenarios", requirement.ID)
+			problems = append(problems, fmt.Sprintf("requirement %q requests browser-scenario evidence but visual.enabled is false; use method check for rendered layout checks, or explicitly enable behavior scenarios", requirement.ID))
 		}
 	}
 	visible := false
 	for _, file := range plan.Files() {
 		visible = visible || slices.Contains(uiSuffixes, filepath.Ext(file))
 	}
-	writes := r.Request.Action == "implement" || r.Request.Action == "fix"
+	writes := r.Request.Action == "implement" || r.Request.Action == "fix" || r.Request.Action == "plan"
 	if plan.UI == nil {
 		if visible && writes {
-			return errors.New("UI files are in scope: provide ui {summary, criteria, preserve}, {design, acceptance} or {skip}")
+			problems = append(problems, "UI files are in scope: provide ui {summary, criteria, preserve}, {design, acceptance} or {skip}")
 		}
 	} else {
 		ui := plan.UI
@@ -357,20 +651,21 @@ func (r *Resolved) validateUI() error {
 		}
 		switch {
 		case kinds != 1:
-			return errors.New("ui takes exactly one of a local contract (summary), a design or a skip")
+			problems = append(problems, "ui takes exactly one of a local contract (summary), a design or a skip")
 		case ui.Summary != "" && (len(ui.Criteria) == 0 || len(ui.Preserve) == 0):
-			return errors.New("a local ui contract needs criteria and preserve")
+			problems = append(problems, "a local ui contract needs criteria and preserve")
 		case ui.Design != "" && strings.TrimSpace(ui.Acceptance) == "":
-			return errors.New("record why the lead accepted the UI design")
+			problems = append(problems, "record why the lead accepted the UI design")
 		}
 	}
 	if plan.Visual != nil && plan.Visual.Enabled {
 		if plan.UI == nil || plan.UI.Skip != "" {
-			return errors.New("browser verification needs an accepted ui contract")
+			problems = append(problems, "browser verification needs an accepted ui contract")
+		} else if err := validateScenarios(plan.Visual.Scenarios); err != nil {
+			problems = append(problems, err.Error())
 		}
-		return validateScenarios(plan.Visual.Scenarios)
 	}
-	return nil
+	return problems
 }
 
 func validateScenarios(scenarios []Scenario) error {
@@ -392,14 +687,16 @@ func validateScenarios(scenarios []Scenario) error {
 	return nil
 }
 
+var checkKinds = []string{"test", "typecheck", "lint", "build", "measurement", "runtime", "command"}
+
 func validateChecks(checks []Check) error {
 	seen := map[string]bool{}
 	for _, check := range checks {
 		if check.Generated != "" && check.Generated != "design" {
 			return fmt.Errorf("unknown generated check owner %q", check.Generated)
 		}
-		if check.Kind != "" && !slices.Contains([]string{"test", "typecheck", "lint", "build", "measurement", "runtime", "command"}, check.Kind) {
-			return fmt.Errorf("unknown check kind %q", check.Kind)
+		if check.Kind != "" && !slices.Contains(checkKinds, check.Kind) {
+			return fmt.Errorf("unknown check kind %q; kinds are %s", check.Kind, strings.Join(checkKinds, ", "))
 		}
 		key := strings.Join(check.Argv, "\x00")
 		if len(check.Argv) == 0 || strings.TrimSpace(check.Argv[0]) == "" || slices.ContainsFunc(check.Argv, func(arg string) bool { return strings.ContainsRune(arg, '\x00') }) || seen[key] {
@@ -454,13 +751,13 @@ func waves(streams []Stream) ([][]Stream, error) {
 	return out, nil
 }
 
-// WriterRoute is the model that writes a stream in the mode. A stream may ask for more effort than the base;
+// writerRoute is the model that writes a stream in a mode. A stream may ask for more effort than the base;
 // boost adds the steps a stalled correction earned. Neither goes above the mode's ceiling.
-func (r *Resolved) WriterRoute(stream Stream, boost int) config.Route {
-	mode := r.ModeConfig()
-	route := r.Config.MustRoute(mode.Backend)
+func writerRoute(cfg *config.Config, modeName string, stream Stream, boost int) config.Route {
+	mode := cfg.Modes[modeName]
+	route := cfg.MustRoute(mode.Backend)
 	if stream.Domain == "frontend" {
-		route = r.Config.MustRoute(mode.Frontend)
+		route = cfg.MustRoute(mode.Frontend)
 	}
 	if stream.Effort != "" && slices.Index(config.Efforts, stream.Effort) > slices.Index(config.Efforts, route.Effort) {
 		route.Effort = stream.Effort
@@ -469,17 +766,38 @@ func (r *Resolved) WriterRoute(stream Stream, boost int) config.Route {
 	return route
 }
 
-// Parallelism is how many model processes may run at once.
-func (r *Resolved) Parallelism() (int, error) {
-	capacity := resourceCapacity(r.Config)
+// parallelism is how many model processes may run at once.
+func parallelism(cfg *config.Config, request Request) (int, error) {
+	capacity := resourceCapacity(cfg)
 	if capacity < 1 {
 		return 0, errors.New("not enough free CPU or memory for one worker; nothing started")
 	}
-	if r.Request.Parallel > 0 {
-		if r.Request.Parallel > capacity {
-			return 0, fmt.Errorf("-%d exceeds the free CPU/memory (%d workers); lower it explicitly", r.Request.Parallel, capacity)
+	if request.Parallel > 0 {
+		if request.Parallel > capacity {
+			return 0, fmt.Errorf("-%d exceeds the free CPU/memory (%d workers); lower it explicitly", request.Parallel, capacity)
 		}
-		return r.Request.Parallel, nil
+		return request.Parallel, nil
 	}
-	return min(r.Config.MaxParallel, capacity), nil
+	return min(cfg.MaxParallel, capacity), nil
+}
+
+// Parallelism is how many model processes the plan may run at once.
+func (r *Resolved) Parallelism() (int, error) { return parallelism(r.Config, r.Request) }
+
+// integrationNeeded says whether the whole change gets its own pass after the last stage: in the thorough
+// modes, and whenever there are enough stages for seams to matter.
+func integrationNeeded(mode string, stages int) bool {
+	return stages > 1 && (modeRank[mode] >= modeRank["heavy"] || stages >= 3)
+}
+
+// isolateStaged says whether a staged task works in its own worktree without being asked. It does when the
+// repository told how to prepare one: a bare worktree without dependencies would only fail the checks.
+func isolateStaged(cfg *config.Config) bool {
+	switch cfg.Staging.Isolate {
+	case "always":
+		return true
+	case "never":
+		return false
+	}
+	return len(cfg.Worktree.Setup) > 0 || len(cfg.Worktree.Copy) > 0
 }

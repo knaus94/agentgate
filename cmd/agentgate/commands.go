@@ -20,8 +20,11 @@ import (
 	"github.com/knaus94/agentgate/internal/update"
 )
 
-func gated(cfg *config.Config, action string, run func(gate *dev.Gate) (any, error)) (any, error) {
-	return dev.Execute(action, func() (any, error) {
+// gated runs an operation on this session's task. A command that is not legal now is not an error of the
+// tool: it answers with the task as it is, why the command was refused and what is possible instead.
+func gated(cfg *config.Config, action string, run func(gate *dev.Gate) (any, error)) (any, int, error) {
+	var refused *dev.Refusal
+	value, err := dev.Execute(action, func() (any, error) {
 		gate, err := dev.LoadCurrent()
 		if err != nil {
 			return nil, err
@@ -29,12 +32,32 @@ func gated(cfg *config.Config, action string, run func(gate *dev.Gate) (any, err
 		if gate == nil {
 			return nil, errors.New("there is no /dev task for this session in this checkout")
 		}
-		return run(gate)
+		value, err := run(gate)
+		if errors.As(err, &refused) {
+			return dev.Refused(cfg, gate, refused), nil
+		}
+		return value, err
 	})
+	if err == nil && refused != nil {
+		return value, 1, nil
+	}
+	return value, 0, err
+}
+
+// renamed are the commands of the protocol before 0.16. A lead session that began under it is told the
+// present name instead of being left to guess.
+var renamed = map[string]string{
+	"review": "`run` verifies: declared checks, then independent review. The lead's own review of a light task goes in through `decide {review}`.",
+	"fix":    "`run` sends accepted findings and failing checks back to their writers by itself. A new diagnosis goes in through `decide {reassessment}`.",
+	"finish": "`run` accepts a stage, and finishes the task, as soon as everything it requires is current. No summary is written by hand.",
+	"triage": "`decide {findings: [{id, decision, evidence}]}` rules on findings; blocking ones go to their authors without it.",
+	"launch": "`start` opens a task from a plan; `run` continues it; `amend` changes its plan.",
+	"replan": "`amend` changes the plan of an active task, at any step.",
+	"hold":   "`pause` parks the task with a reason.",
 }
 
 // sandboxSafe are the actions that only read or print: they work inside a caller's sandbox too.
-var sandboxSafe = []string{"", "help", "--help", "-h", "version", "guide", "reference", "parse", "preview", "route", "modes", "status", "watch", "hook"}
+var sandboxSafe = []string{"", "help", "--help", "-h", "version", "guide", "reference", "parse", "preview", "route", "modes", "status", "show", "watch", "hook"}
 
 func run(args arguments) (any, int, error) {
 	// Help and version are pure: even an invalid configuration or an old state
@@ -66,7 +89,15 @@ func run(args arguments) (any, int, error) {
 		}
 		return assets.Guide, 0, nil
 	case "reference":
-		return assets.Reference, 0, nil
+		topic := ""
+		if len(args.rest) > 0 {
+			topic = args.rest[0]
+		}
+		text, ok := assets.Reference(topic)
+		if !ok {
+			return nil, 0, fmt.Errorf("unknown reference topic %q; topics: %s", topic, strings.Join(assets.ReferenceTopics(), ", "))
+		}
+		return text, 0, nil
 	case "doctor":
 		result := dev.Doctor()
 		if result["healthy"] != true {
@@ -99,7 +130,7 @@ func run(args arguments) (any, int, error) {
 			out := map[string]any{}
 			raw, _ := json.Marshal(request)
 			_ = json.Unmarshal(raw, &out)
-			out["design"] = "The request holds a Figma link. Use `agentgate prepare --file <request JSON>`: the tool reads its catalogue and a read-only worker prepares the plan. " +
+			out["design"] = "The request holds a Figma link. `agentgate prepare` reads its catalogue and a read-only worker prepares the plan (`agentgate reference design`). " +
 				"Do not explore the repository, export frames, parse design data or inspect pictures as the lead."
 			return out, 0, nil
 		}
@@ -122,20 +153,16 @@ func run(args arguments) (any, int, error) {
 		plan := &dev.Plan{}
 		return plan, args.input(plan, true)
 	}
+	if hint, old := renamed[args.action]; old {
+		return nil, 0, fmt.Errorf("`%s` was replaced in 0.16: %s `agentgate guide` has the present protocol", args.action, hint)
+	}
 	switch args.action {
 	case "prepare":
 		input := dev.PrepareInput{}
-		if err := args.input(&input, true); err != nil {
+		if err := args.requestOrInput(&input, &input.Request); err != nil {
 			return nil, 0, err
 		}
 		value, err := dev.Execute("prepare", func() (any, error) { return dev.Prepare(cfg, input) })
-		return value, 0, err
-	case "replan":
-		plan, err := loadPlan()
-		if err != nil {
-			return nil, 0, err
-		}
-		value, err := gated(cfg, "replan", func(gate *dev.Gate) (any, error) { return dev.Replan(cfg, gate, plan) })
 		return value, 0, err
 	case "plan":
 		return planCommand(cfg, args)
@@ -163,17 +190,26 @@ func run(args arguments) (any, int, error) {
 		return nil, 0, nil
 	case "prune":
 		return map[string]any{"removed": dev.Prune(cfg.RetentionDays)}, 0, nil
-	case "status":
+	case "status", "show":
 		gate, err := dev.LoadCurrent()
 		if err != nil && !args.flags["all"] {
 			return nil, 0, err
 		}
-		if gate != nil && !args.flags["all"] {
-			var summary map[string]any
-			gate.Inside(func() { summary = gate.Summary(cfg) })
-			return summary, 0, nil
+		if gate == nil || args.flags["all"] {
+			return dev.Overview(), 0, nil
 		}
-		return dev.Overview(), 0, nil
+		what := ""
+		if args.action == "show" {
+			what = "all"
+			if len(args.rest) > 0 {
+				what = args.rest[0]
+			}
+		} else if args.flags["full"] {
+			what = "all"
+		}
+		var value any
+		gate.Inside(func() { value, err = dev.Status(cfg, gate, what) })
+		return value, 0, err
 	case "stop":
 		if dev.HasSession() {
 			value, err := dev.Stop(cfg)
@@ -202,13 +238,25 @@ func run(args arguments) (any, int, error) {
 		}
 		value, err := dev.Execute("architecture", func() (any, error) { return dev.Architecture(cfg, plan) })
 		return value, 0, err
-	case "launch":
+	case "start":
 		plan, err := loadPlan()
 		if err != nil {
 			return nil, 0, err
 		}
-		value, err := dev.Execute("launch", func() (any, error) { return dev.Launch(cfg, plan) })
+		value, err := dev.Execute("start", func() (any, error) { return dev.Start(cfg, plan, args.plan, args.flags["implement"], dev.RunInput{}) })
 		return value, 0, err
+	case "run", "continue":
+		input := dev.RunInput{}
+		if err := args.input(&input, false); err != nil {
+			return nil, 0, err
+		}
+		return gated(cfg, "run", func(gate *dev.Gate) (any, error) { return dev.Run(cfg, gate, input) })
+	case "amend":
+		plan, err := loadPlan()
+		if err != nil {
+			return nil, 0, err
+		}
+		return gated(cfg, "amend", func(gate *dev.Gate) (any, error) { return dev.Amend(cfg, gate, plan) })
 	case "design":
 		input := dev.DesignInput{}
 		if err := args.input(&input, true); err != nil {
@@ -228,77 +276,48 @@ func run(args arguments) (any, int, error) {
 		if err := args.input(&input, true); err != nil {
 			return nil, 0, err
 		}
-		value, err := gated(cfg, "answer", func(gate *dev.Gate) (any, error) { return dev.Answer(cfg, gate, input) })
-		return value, 0, err
+		return gated(cfg, "answer", func(gate *dev.Gate) (any, error) { return dev.Answer(cfg, gate, input) })
+	case "decide":
+		input := dev.DecideInput{}
+		if err := args.input(&input, true); err != nil {
+			return nil, 0, err
+		}
+		return gated(cfg, "decide", func(gate *dev.Gate) (any, error) { return dev.Decide(cfg, gate, input) })
 	case "check":
 		input := dev.CheckInput{All: args.flags["all"]}
 		if err := args.input(&input, !input.All); err != nil {
 			return nil, 0, err
 		}
-		code := 0
-		value, err := gated(cfg, "check", func(gate *dev.Gate) (any, error) {
+		failed := false
+		value, code, err := gated(cfg, "check", func(gate *dev.Gate) (any, error) {
 			result, err := dev.RunChecks(gate, input)
-			if err == nil && result.Failed {
-				code = 2
-			}
+			failed = err == nil && result.Failed
 			return result, err
 		})
-		return value, code, err
-	case "review":
-		input := dev.ReviewInput{}
-		if err := args.input(&input, false); err != nil {
-			return nil, 0, err
+		if failed {
+			code = 2
 		}
-		value, err := gated(cfg, "review", func(gate *dev.Gate) (any, error) { return dev.ReviewTask(cfg, gate, input) })
-		return value, 0, err
+		return value, code, err
 	case "visual":
 		input := dev.VisualInput{}
 		if err := args.input(&input, true); err != nil {
 			return nil, 0, err
 		}
-		value, err := gated(cfg, "visual", func(gate *dev.Gate) (any, error) { return dev.VisualPass(cfg, gate, input) })
-		return value, 0, err
-	case "triage":
-		input := dev.TriageInput{}
-		if err := args.input(&input, true); err != nil {
-			return nil, 0, err
-		}
-		value, err := gated(cfg, "triage", func(gate *dev.Gate) (any, error) { return dev.Triage(cfg, gate, input) })
-		return value, 0, err
-	case "fix":
-		input := dev.FixInput{}
-		if err := args.input(&input, false); err != nil {
-			return nil, 0, err
-		}
-		value, err := gated(cfg, "fix", func(gate *dev.Gate) (any, error) { return dev.Fix(cfg, gate, input) })
-		return value, 0, err
+		return gated(cfg, "visual", func(gate *dev.Gate) (any, error) { return dev.VisualPass(cfg, gate, input) })
 	case "land":
 		input := dev.LandInput{}
 		if err := args.input(&input, false); err != nil {
 			return nil, 0, err
 		}
-		value, err := gated(cfg, "land", func(gate *dev.Gate) (any, error) { return dev.Land(cfg, gate, input) })
-		return value, 0, err
-	case "finish":
-		input := dev.FinishInput{}
+		return gated(cfg, "land", func(gate *dev.Gate) (any, error) { return dev.Land(cfg, gate, input) })
+	case "pause":
+		input := dev.PauseInput{}
 		if err := args.input(&input, true); err != nil {
 			return nil, 0, err
 		}
-		value, err := gated(cfg, "finish", func(gate *dev.Gate) (any, error) { return dev.Finish(cfg, gate, input) })
-		return value, 0, err
-	case "hold":
-		input := dev.HoldInput{}
-		if err := args.input(&input, true); err != nil {
-			return nil, 0, err
-		}
-		value, err := gated(cfg, "hold", func(gate *dev.Gate) (any, error) { return dev.Hold(cfg, gate, input) })
-		return value, 0, err
+		return gated(cfg, "pause", func(gate *dev.Gate) (any, error) { return dev.Pause(cfg, gate, input) })
 	case "resume":
-		value, err := gated(cfg, "resume", func(gate *dev.Gate) (any, error) { return dev.Resume(cfg, gate) })
-		return value, 0, err
-	case "continue":
-		value, err := gated(cfg, "continue", func(gate *dev.Gate) (any, error) { return dev.Continue(cfg, gate) })
-		return value, 0, err
+		return gated(cfg, "resume", func(gate *dev.Gate) (any, error) { return dev.Resume(cfg, gate) })
 	}
 	return nil, 0, fmt.Errorf("unknown command %q; run `agentgate help`", args.action)
 }
@@ -317,8 +336,11 @@ func planCommand(cfg *config.Config, args arguments) (any, int, error) {
 		if err := args.input(plan, true); err != nil {
 			return nil, 0, err
 		}
-		value, err := dev.PlanSave(cfg, plan, name)
-		return value, 0, err
+		saved, err := dev.PlanSave(cfg, plan, name)
+		if err != nil {
+			return nil, 0, err
+		}
+		return saved, 0, nil
 	case "list":
 		value, err := dev.PlanList()
 		return value, 0, err

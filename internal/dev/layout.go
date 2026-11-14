@@ -176,14 +176,18 @@ func generatedDesignCheck(check Check) bool {
 		out == filepath.Join(filepath.Dir(baseline), "last")
 }
 
-// validateDesign checks every design of the plan and declares its layout check, once.
-func (r *Resolved) validateDesign() error {
+// validateDesign checks every design of the plan and gives each its screen, package and stream. The layout
+// check of a design belongs to the stage of the stream that builds it (see Plan.checksFor).
+func (r *Resolved) validateDesign() []string {
 	plan := r.Plan
-	plan.Checks = slices.DeleteFunc(slices.Clone(plan.Checks), generatedDesignCheck)
+	var problems []string
+	add := func(format string, values ...any) { problems = append(problems, fmt.Sprintf(format, values...)) }
+	streams := plan.allStreams()
 	for index := range plan.Design {
 		design := &plan.Design[index]
 		if design.Device != "" && design.Device != "desktop" && design.Device != "mobile" {
-			return fmt.Errorf("design device is desktop or mobile: %q", design.Device)
+			add("design device is desktop or mobile: %q", design.Device)
+			continue
 		}
 		if design.Figma != "" && design.Screen == "" {
 			name := design.Name
@@ -193,7 +197,8 @@ func (r *Resolved) validateDesign() error {
 				}
 			}
 			if name == "" || design.URL == "" || design.Root == "" {
-				return errors.New("a design given by its figma link needs the link to a frame (node-id), `url` — the page that will show it — and `root`")
+				add("a design given by its figma link needs the link to a frame (node-id), `url` — the page that will show it — and `root`")
+				continue
 			}
 			screens := r.Config.Design.Screens
 			if screens == "" {
@@ -211,7 +216,8 @@ func (r *Resolved) validateDesign() error {
 			fileExists(filepath.Join(design.Screen, "package", "data", "spec.json"))
 		if design.Screen != "" {
 			if !made && design.Figma == "" {
-				return fmt.Errorf("design %q is not a screen: it needs screen.json and package/, or a `figma` link to make them from", design.Screen)
+				add("design %q is not a screen: it needs screen.json and package/, or a `figma` link to make them from", design.Screen)
+				continue
 			}
 			design.Package = filepath.Join(design.Screen, "package")
 			if exceptions := filepath.Join(design.Screen, "map.json"); design.Map == "" && fileExists(exceptions) {
@@ -219,48 +225,58 @@ func (r *Resolved) validateDesign() error {
 			}
 		}
 		if _, err := os.Stat(filepath.Join(design.Package, "data", "spec.json")); err != nil && (made || design.Figma == "") {
-			return fmt.Errorf("design %q is not a package written by `agentgate figma pull`", design.Package)
+			add("design %q is not a package written by `agentgate figma pull`", design.Package)
+			continue
 		}
 		if fileExists(filepath.Join(design.Package, "data", "spec.json")) {
 			if err := verifyDesignPackage(design.Package); err != nil {
-				return err
+				add("%v", err)
+				continue
 			}
 		}
-		if design.Stream == "" && len(plan.Streams) == 1 {
-			design.Stream = plan.Streams[0].Name
+		if design.Stream == "" && len(streams) == 1 {
+			design.Stream = streams[0].Name
 		}
-		if !slices.ContainsFunc(plan.Streams, func(stream Stream) bool { return stream.Name == design.Stream }) {
-			return fmt.Errorf("design %q: say which stream builds it", design.Package)
+		if !slices.ContainsFunc(streams, func(stream Stream) bool { return stream.Name == design.Stream }) {
+			add("design %q: say which stream builds it", design.Package)
+			continue
 		}
 		if design.Screen != "" {
 			// the screen's own files say where it is shown; the check reads them
 		} else if parsed, parseErr := url.Parse(design.URL); parseErr == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != "" && parsed.User == nil {
 			if _, err := standOrigins([]string{parsed.Scheme + "://" + parsed.Host}); err != nil {
-				return err
+				add("%v", err)
 			}
 		} else if !strings.HasPrefix(design.URL, "file://") {
-			return fmt.Errorf("design %q: url is a page of a local stand", design.Package)
+			add("design %q: url is a page of a local stand", design.Package)
 		}
 		if design.Map != "" {
 			if _, err := os.Stat(design.Map); err != nil {
-				return fmt.Errorf("design %q: the map %s is missing", design.Package, design.Map)
+				add("design %q: the map %s is missing", design.Package, design.Map)
 			}
 		}
-		check := design.check()
-		if !slices.ContainsFunc(plan.Checks, func(other Check) bool { return slices.Equal(other.Argv, check.Argv) }) {
-			plan.Checks = append(plan.Checks, check)
-		}
 	}
-	return nil
+	return problems
 }
 
-// designBaselines measures every design's page before anyone writes: what differs already is not this task's.
-func (g *Gate) designBaselines() error {
-	return g.prepareDesigns(true)
+// stageStream is the name a stream of a design has in the pass over the whole change, where streams carry
+// the name of their stage.
+func (g *Gate) stageStream(name string) string {
+	if !g.Whole {
+		return name
+	}
+	for _, stage := range g.Plan.Stages {
+		for _, stream := range stage.Streams {
+			if stream.Name == name {
+				return stage.Name + "." + name
+			}
+		}
+	}
+	return name
 }
 
 func (g *Gate) prepareDesigns(measureBefore bool) error {
-	for _, design := range g.Plan.Design {
+	for _, design := range g.designs() {
 		if err := os.MkdirAll(design.dir(), 0o700); err != nil {
 			return err
 		}
@@ -303,8 +319,8 @@ func (g *Gate) prepareDesigns(measureBefore bool) error {
 // designFor is what the stream that builds a design is given: the brief and the picture, by path.
 func (g *Gate) designFor(stream string) any {
 	var out []map[string]any
-	for _, design := range g.Plan.Design {
-		if design.Stream != stream {
+	for _, design := range g.designs() {
+		if design.Stream != stream && g.stageStream(design.Stream) != stream {
 			continue
 		}
 		out = append(out, map[string]any{"brief": filepath.Join(design.Package, "brief.md"), "picture": filepath.Join(design.Package, "frame.png"),
@@ -321,8 +337,8 @@ func (g *Gate) designFor(stream string) any {
 
 func (g *Gate) designReadDirs(stream string) []string {
 	var dirs []string
-	for _, design := range g.Plan.Design {
-		if design.Stream == stream {
+	for _, design := range g.designs() {
+		if design.Stream == stream || g.stageStream(design.Stream) == stream {
 			path, _ := filepath.Abs(design.Package)
 			dirs = append(dirs, path)
 		}
@@ -335,7 +351,7 @@ func (g *Gate) designReadDirs(stream string) []string {
 func (g *Gate) designReview() ([]map[string]any, []string) {
 	var out []map[string]any
 	var dirs []string
-	for _, design := range g.Plan.Design {
+	for _, design := range g.designs() {
 		item := map[string]any{"id": design.reviewID(), "exceptions": design.Map, "stream": design.Stream}
 		for name, path := range design.reviewFiles() {
 			item[name] = path
@@ -364,9 +380,9 @@ func (g *Gate) designRules() []reviewRule {
 		{"coverage", "Read check_report, measurement and exceptions. Account for ignored subtrees and baseline differences; changed representation or unavailable data is not a blanket waiver of geometry, border or semantics. Prefer dynamic text mapping over ignoring a control subtree. Name exactly the observed devices, widths and states. Endpoint screenshots and no overflow do not prove responsive behavior between them. For a requested responsive range, require the agreed intermediate/breakpoint observations; absent required evidence means unavailable. Do not run extra browsers or widen authorization.", []string{"check_report", "measurement"}},
 	}
 	var out []reviewRule
-	for _, design := range g.Plan.Design {
+	for _, design := range g.designs() {
 		var files []string
-		for _, stream := range g.Plan.Streams {
+		for _, stream := range g.Plan.allStreams() {
 			if stream.Name == design.Stream {
 				files = stream.Files
 			}
@@ -389,7 +405,7 @@ func (g *Gate) designRules() []reviewRule {
 
 func (g *Gate) designDigests() []string {
 	var out []string
-	for _, design := range g.Plan.Design {
+	for _, design := range g.designs() {
 		out = append(out, design.digest())
 	}
 	return out
@@ -399,7 +415,7 @@ func (g *Gate) designDigests() []string {
 // filesystem paths it cannot see, or mistake an intentionally absent baseline for a missing prerequisite.
 func (g *Gate) designContext() []map[string]any {
 	var out []map[string]any
-	for _, design := range g.Plan.Design {
+	for _, design := range g.designs() {
 		var manifest struct {
 			Frame  json.RawMessage `json:"frame"`
 			Screen json.RawMessage `json:"screen"`

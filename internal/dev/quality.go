@@ -38,6 +38,24 @@ type QualityReport struct {
 	Rules        []RuleResult        `json:"rules"`
 }
 
+// unmet says that the report judges a requirement or a rule not satisfied.
+func (r *QualityReport) unmet() bool {
+	if r == nil {
+		return false
+	}
+	for _, result := range r.Requirements {
+		if result.Status != "verified" {
+			return true
+		}
+	}
+	for _, result := range r.Rules {
+		if result.Status == "block" || result.Status == "unavailable" {
+			return true
+		}
+	}
+	return false
+}
+
 type reviewRule struct {
 	ID           string            `json:"id"`
 	Mode         string            `json:"mode"`
@@ -54,7 +72,7 @@ type qualityCheck struct {
 }
 
 type qualityInputs struct {
-	Requirements []Requirement           `json:"requirements"`
+	Requirements []criterion             `json:"requirements"`
 	Rules        []reviewRule            `json:"rules"`
 	Checks       map[string]qualityCheck `json:"checks"`
 	Browser      *VisualRun              `json:"browser"`
@@ -80,6 +98,8 @@ func validateRequirements(requirements []Requirement) error {
 	return nil
 }
 
+// loadReviewRules returns the project rules that apply to a scope. An entry of the scope falls under a rule
+// when it could name a file the rule's patterns name; a rule without patterns applies to everything.
 func loadReviewRules(cfg *config.Config, files []string) ([]reviewRule, error) {
 	names := make([]string, 0, len(cfg.ReviewRules))
 	for name := range cfg.ReviewRules {
@@ -94,18 +114,17 @@ func loadReviewRules(cfg *config.Config, files []string) ([]reviewRule, error) {
 		if rule.Mode == "" {
 			rule.Mode = "blocking"
 		}
-		var patterns []*fileGlob
-		for _, pattern := range spec.Files {
-			compiled, err := compileGlob(filepath.ToSlash(filepath.Clean(pattern)))
-			if err != nil {
-				return nil, fmt.Errorf("review rule %s has an invalid file glob %q: %w", name, pattern, err)
+		var patterns []pattern
+		for _, value := range spec.Files {
+			clean := filepath.ToSlash(filepath.Clean(value))
+			if _, err := compileGlob(clean); err != nil {
+				return nil, fmt.Errorf("review rule %s has an invalid file glob %q: %w", name, value, err)
 			}
-			patterns = append(patterns, compiled)
+			patterns = append(patterns, compilePattern(clean))
 		}
 		for _, file := range files {
-			if len(patterns) == 0 || slices.ContainsFunc(patterns, func(pattern *fileGlob) bool {
-				return pattern.MatchString(filepath.ToSlash(file))
-			}) {
+			entry := compilePattern(filepath.ToSlash(file))
+			if len(patterns) == 0 || slices.ContainsFunc(patterns, func(rule pattern) bool { return overlap(entry, rule) }) {
 				rule.Files = append(rule.Files, file)
 			}
 		}
@@ -179,17 +198,18 @@ func reviewRuleSummary(cfg *config.Config, rules []reviewRule) []map[string]any 
 }
 
 func (g *Gate) qualityInputs(cfg *config.Config) (*qualityInputs, error) {
-	rules, err := loadReviewRules(cfg, g.Files)
+	rules, err := loadReviewRules(cfg, g.scope())
 	if err != nil {
 		return nil, err
 	}
 	rules = append(rules, g.designRules()...)
-	if len(g.Plan.Requirements) == 0 && len(rules) == 0 {
+	requirements := g.requirementsFor()
+	if len(requirements) == 0 && len(rules) == 0 {
 		return nil, nil
 	}
-	input := &qualityInputs{Requirements: g.Plan.Requirements, Rules: rules, Checks: map[string]qualityCheck{}}
+	input := &qualityInputs{Requirements: requirements, Rules: rules, Checks: map[string]qualityCheck{}}
 	current := g.currentReceipts()
-	for _, check := range g.Plan.Checks {
+	for _, check := range g.checks() {
 		kind := check.Kind
 		if kind == "" {
 			kind = "command"
@@ -200,10 +220,16 @@ func (g *Gate) qualityInputs(cfg *config.Config) (*qualityInputs, error) {
 			input.Checks[checkID(check.Argv)] = qualityCheck{Kind: kind, Receipt: &copy}
 		}
 	}
-	if content, _, err := g.contentDigest(); err != nil {
-		return nil, err
-	} else if g.visualRequired() {
-		input.Browser = g.currentVisual(content)
+	if g.visualRequired() {
+		now, err := g.snapshot()
+		if err != nil {
+			return nil, err
+		}
+		key, err := g.reviewKey(now)
+		if err != nil {
+			return nil, err
+		}
+		input.Browser = g.currentVisual(key)
 	}
 	return input, nil
 }
@@ -227,7 +253,7 @@ func (g *Gate) validateQuality(report *QualityReport, input *qualityInputs) erro
 	}
 	seen := map[string]bool{}
 	for _, result := range report.Requirements {
-		index := slices.IndexFunc(input.Requirements, func(r Requirement) bool { return r.ID == result.ID })
+		index := slices.IndexFunc(input.Requirements, func(r criterion) bool { return r.ID == result.ID })
 		if index < 0 || seen[result.ID] || !slices.Contains([]string{"verified", "partial", "missing"}, result.Status) || strings.TrimSpace(result.Reason) == "" {
 			return fmt.Errorf("invalid requirement result %q: needs a known unique id, status and reason", result.ID)
 		}
@@ -270,7 +296,7 @@ func (g *Gate) validateProof(proof Proof, input *qualityInputs, verified bool) e
 	case "code":
 		path, number, ok := strings.Cut(proof.Ref, ":")
 		line, err := strconv.Atoi(number)
-		if !ok || err != nil || line < 1 || (!slices.Contains(g.Files, path) && !slices.Contains(g.Context, path)) {
+		if !ok || err != nil || line < 1 || (!matchAny(compilePatterns(g.scope()), path) && !slices.Contains(g.context(), path)) {
 			return fmt.Errorf("code evidence %q must name a scoped file:line", proof.Ref)
 		}
 		raw, err := os.ReadFile(path)
@@ -299,10 +325,13 @@ func (g *Gate) validateProof(proof Proof, input *qualityInputs, verified bool) e
 	return nil
 }
 
+// qualityProblems lists what keeps the present position from being accepted. A requirement that is due at a
+// later stage is reported with its verdict and does not block this one.
 func qualityProblems(report *QualityReport, input *qualityInputs) []string {
 	var problems []string
 	for _, result := range report.Requirements {
-		if result.Status != "verified" {
+		index := slices.IndexFunc(input.Requirements, func(r criterion) bool { return r.ID == result.ID })
+		if result.Status != "verified" && input.Requirements[index].Due {
 			problems = append(problems, result.ID+": "+result.Status+" — "+result.Reason)
 		}
 	}
@@ -315,38 +344,51 @@ func qualityProblems(report *QualityReport, input *qualityInputs) []string {
 	return problems
 }
 
+// qualityStatus is the present verdict on the criteria: the report, whether it is current, and what it leaves open.
 func (g *Gate) qualityStatus(cfg *config.Config) map[string]any {
 	input, err := g.qualityInputs(cfg)
 	if err != nil {
 		return map[string]any{"current": false, "problems": []string{err.Error()}}
 	}
 	if input == nil {
-		if len(g.Reviews) > 0 && g.Reviews[len(g.Reviews)-1].QualityDigest != "" {
-			return map[string]any{"current": false, "problems": []string{"quality criteria changed; need a current review"}}
-		}
 		return nil
 	}
 	status := map[string]any{"current": false, "requirements": input.Requirements, "checks": input.Checks,
 		"problems": []string{"quality criteria need a current review"}}
-	if len(g.Reviews) == 0 {
+	report := g.qualityReport()
+	if report == nil {
 		return status
 	}
+	status["report"] = report
 	last := g.Reviews[len(g.Reviews)-1]
-	for _, lane := range last.Lanes {
-		if lane.Quality == nil {
-			continue
-		}
-		status["report"] = lane.Quality
-		content, _, err := g.contentDigest()
-		if err != nil || content != last.Digest || last.Contract != g.contract() || last.QualityDigest != input.fingerprint() {
-			return status
-		}
-		if err := g.validateQuality(lane.Quality, input); err != nil {
-			status["problems"] = []string{err.Error()}
-			return status
-		}
-		status["current"], status["problems"] = true, qualityProblems(lane.Quality, input)
+	now, err := g.snapshot()
+	if err != nil {
 		return status
 	}
+	if key, err := g.reviewKey(now); err != nil || key != last.Key || last.Contract != g.codeContract() || last.QualityDigest != input.fingerprint() {
+		return status
+	}
+	if err := g.validateQuality(report, input); err != nil {
+		status["problems"] = []string{err.Error()}
+		return status
+	}
+	problems := qualityProblems(report, input)
+	if problems == nil {
+		problems = []string{}
+	}
+	status["current"], status["problems"] = true, problems
 	return status
+}
+
+// qualityReport is the assessment of the criteria in the latest review, or nil.
+func (g *Gate) qualityReport() *QualityReport {
+	if len(g.Reviews) == 0 {
+		return nil
+	}
+	for _, lane := range g.Reviews[len(g.Reviews)-1].Lanes {
+		if lane.Quality != nil {
+			return lane.Quality
+		}
+	}
+	return nil
 }

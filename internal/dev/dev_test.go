@@ -119,6 +119,13 @@ func (f *fixture) fitAxes(answer string, packet map[string]any) string {
 	if json.Unmarshal([]byte(answer), &scripted) != nil {
 		return answer
 	}
+	if packet["axes"] == nil { // the reviewer is asked to reassess the criteria only
+		if scripted.Quality == nil {
+			scripted.Quality = fixtureQuality(packet)
+		}
+		raw, _ := json.Marshal(map[string]any{"quality": scripted.Quality})
+		return string(raw)
+	}
 	var mine []map[string]any
 	for _, report := range scripted.Reports {
 		if slices.Contains(packet["axes"].([]any), report["axis"]) {
@@ -147,8 +154,6 @@ func kindOf(call provider.Call) string {
 		return "writer"
 	case call.MCP["playwright"].Command != "":
 		return "visual"
-	case strings.Contains(call.Dir, "/scout/"):
-		return "scout"
 	case strings.Contains(call.Dir, "/preparations/"):
 		return "prepare"
 	case strings.Contains(call.Dir, "/consults/"):
@@ -163,9 +168,6 @@ func kindOf(call provider.Call) string {
 
 func (f *fixture) defaultAnswer(kind string, packet map[string]any) string {
 	switch kind {
-	case "scout":
-		return `{"summary":"a.txt holds one line","files":[{"path":"a.txt","role":"owned","symbols":[]}],"callers":[],` +
-			`"invariants":["keep the line format"],"conventions":[],"unknowns":[]}`
 	case "consult":
 		return "Verified in a.txt:1. Unknown: nothing."
 	case "design":
@@ -188,14 +190,20 @@ func (f *fixture) defaultAnswer(kind string, packet map[string]any) string {
 	case "writer":
 		stream := packet["stream"].(map[string]any)
 		for _, file := range stream["files"].([]any) {
-			_ = os.WriteFile(file.(string), []byte("after\n"), 0o644)
+			if exact(file.(string)) {
+				_ = os.WriteFile(file.(string), []byte("after\n"), 0o644)
+			}
 		}
-		return `{"status":"COMPLETED","summary":"implemented","blockers":[],"handoff":"contract of ` + stream["name"].(string) + `","deviations":[]}`
+		return `{"status":"COMPLETED","summary":"implemented","blockers":[],"handoff":"contract of ` + stream["name"].(string) + `","deviations":[],"disputes":[]}`
 	case "architecture":
 		if packet["round"] == "critique" {
 			return `{"summary":"critique","agreements":"sound","blockers":[]}`
 		}
 		return `{"summary":"design","design":"keep the contract","risks":[],"open_questions":[]}`
+	}
+	if packet["axes"] == nil { // the reviewer is asked to reassess the criteria only
+		raw, _ := json.Marshal(map[string]any{"quality": fixtureQuality(packet)})
+		return string(raw)
 	}
 	var reports []map[string]any
 	for _, axis := range packet["axes"].([]any) {
@@ -210,6 +218,7 @@ func (f *fixture) defaultAnswer(kind string, packet map[string]any) string {
 	return string(raw)
 }
 
+// fixtureQuality verifies every criterion a packet asks about, with the proof its method requires.
 func fixtureQuality(packet map[string]any) *QualityReport {
 	if packet["quality"] == nil {
 		return nil
@@ -217,9 +226,15 @@ func fixtureQuality(packet map[string]any) *QualityReport {
 	raw, _ := json.Marshal(packet["quality"])
 	var input qualityInputs
 	_ = json.Unmarshal(raw, &input)
+	cited := "a.txt"
+	if changes, _ := packet["changes"].([]any); len(changes) > 0 {
+		cited = changes[0].(map[string]any)["path"].(string)
+	} else if scope, _ := packet["scope_files"].([]any); len(scope) > 0 && exact(scope[0].(string)) {
+		cited = scope[0].(string)
+	}
 	report := &QualityReport{Requirements: []RequirementResult{}, Rules: []RuleResult{}}
 	for _, requirement := range input.Requirements {
-		proof := Proof{Kind: "code", Ref: packet["scope_files"].([]any)[0].(string) + ":1", Detail: "inspected the fixture change"}
+		proof := Proof{Kind: "code", Ref: cited + ":1", Detail: "inspected the fixture change"}
 		switch requirement.Method {
 		case "check":
 			proof.Kind, proof.Ref = "check", ""
@@ -277,14 +292,45 @@ func (f *fixture) plan(request string, streams ...Stream) *Plan {
 		Checks:     []Check{{Argv: []string{"true"}}}}
 }
 
-func (f *fixture) do(action string, run func() (any, error)) map[string]any {
-	f.t.Helper()
-	value, err := Execute(action, run)
-	must(f.t, err)
+func asMap(value any) map[string]any {
 	raw, _ := json.Marshal(value)
 	out := map[string]any{}
 	_ = json.Unmarshal(raw, &out)
 	return out
+}
+
+func (f *fixture) do(action string, run func() (any, error)) map[string]any {
+	f.t.Helper()
+	value, err := Execute(action, run)
+	must(f.t, err)
+	out := asMap(value)
+	f.noDeadEnd(action, out)
+	return out
+}
+
+// noDeadEnd holds every answer about a task to the promise of the protocol: each action it offers is legal
+// now, an unfinished task that is not parked offers one that moves it, and every need says how it is settled.
+func (f *fixture) noDeadEnd(action string, answer map[string]any) {
+	f.t.Helper()
+	list, described := answer["actions"].([]any)
+	gate := Current()
+	if !described || gate == nil || answer["task"] != gate.ID[:8] {
+		return
+	}
+	for _, name := range list {
+		if err := gate.can(Action(name.(string))); err != nil {
+			f.t.Fatalf("%s offers %q, which is refused: %v", action, name, err)
+		}
+	}
+	if gate.active() && (len(list) == 0 || gate.Pause == nil && !slices.Contains([]any{"run", "answer", "decide"}, list[0])) {
+		f.t.Fatalf("%s left an unfinished task without an action that moves it: %v", action, answer)
+	}
+	needs, _ := answer["needs"].([]any)
+	for _, need := range needs {
+		if resolve, _ := need.(map[string]any)["resolve"].(string); strings.TrimSpace(resolve) == "" {
+			f.t.Fatalf("%s reports a need without a way to settle it: %v", action, need)
+		}
+	}
 }
 
 func (f *fixture) fails(action, want string, run func() (any, error)) {
@@ -294,18 +340,61 @@ func (f *fixture) fails(action, want string, run func() (any, error)) {
 	}
 }
 
-func (f *fixture) launch(plan *Plan) map[string]any {
-	return f.do("launch", func() (any, error) { return Launch(f.cfg, plan) })
+// start opens a task for the plan and runs it until a person is needed or it is done.
+func (f *fixture) start(plan *Plan) map[string]any {
+	f.t.Helper()
+	return f.do("start", func() (any, error) { return Start(f.cfg, plan, "", false, RunInput{}) })
 }
 
-func (f *fixture) review() map[string]any {
-	return f.do("review", func() (any, error) { return ReviewTask(f.cfg, Current(), ReviewInput{}) })
+func (f *fixture) proceed() map[string]any {
+	f.t.Helper()
+	return f.do("run", func() (any, error) { return Run(f.cfg, Current(), RunInput{}) })
 }
 
-func (f *fixture) finish() map[string]any {
-	return f.do("finish", func() (any, error) {
-		return Finish(f.cfg, Current(), FinishInput{Summary: "done", ArchitectureEvidence: "matches the accepted design"})
-	})
+func (f *fixture) decide(input DecideInput) map[string]any {
+	f.t.Helper()
+	return f.do("decide", func() (any, error) { return Decide(f.cfg, Current(), input) })
+}
+
+// needs lists the kinds of what an answer says only a person can settle.
+func needs(summary map[string]any) []string {
+	var kinds []string
+	list, _ := summary["needs"].([]any)
+	for _, item := range list {
+		kinds = append(kinds, item.(map[string]any)["kind"].(string))
+	}
+	return kinds
+}
+
+// offered lists what an answer says is legal now.
+func offered(summary map[string]any) []string {
+	var out []string
+	list, _ := summary["actions"].([]any)
+	for _, item := range list {
+		out = append(out, item.(string))
+	}
+	return out
+}
+
+// reviewOnce scripts the first review of the correctness axis and lets every later review pass.
+func (f *fixture) reviewOnce(findings ...string) {
+	calls := 0
+	previous := f.model
+	f.model = func(kind string, packet map[string]any, call provider.Call) (string, error) {
+		if previous != nil {
+			if answer, err := previous(kind, packet, call); answer != "" || err != nil {
+				return answer, err
+			}
+		}
+		if kind != "review" || packet["axes"] == nil || !slices.Contains(packet["axes"].([]any), any("correctness")) {
+			return "", nil
+		}
+		if calls++; calls > 1 {
+			return "", nil
+		}
+		return `{"reports":[{"axis":"correctness","status":"NEEDS_FIX","findings":[` + strings.Join(findings, ",") +
+			`],"checked":["read"],"resolutions":[]}]}`, nil
+	}
 }
 
 func finding(severity string) string {
@@ -347,9 +436,12 @@ func TestModeIsDecidedFromFacts(t *testing.T) {
 		{Assessment{Size: "ordinary", Risks: []string{"migration"}, Irreversible: true}, 3, "ultra"},
 	}
 	for _, c := range cases {
-		if got := decide(&c.assessment, c.files, 1); got.Mode != c.want || len(got.Because) == 0 {
+		if got := decide(&c.assessment, c.files, 1, true); got.Mode != c.want || len(got.Because) == 0 {
 			t.Errorf("%+v with %d files: want %s, got %s", c.assessment, c.files, c.want, got.Mode)
 		}
+	}
+	if got := decide(&Assessment{Size: "trivial"}, 0, 1, false); got.Mode != "medium" {
+		t.Errorf("a scope of unknown size is never light, got %s", got.Mode)
 	}
 	f := newFixture(t)
 	flagged, err := Resolve(f.cfg, f.plan("-x task"))
@@ -364,28 +456,49 @@ func TestModeIsDecidedFromFacts(t *testing.T) {
 	}
 }
 
-func TestMediumFlowReusesCurrentEvidence(t *testing.T) {
+func TestOneCommandTakesACleanTaskToTheEnd(t *testing.T) {
+	f := newFixture(t)
+	summary := f.start(f.plan("change the line"))
+	if summary["step"] != StepDone || summary["mode"] != "medium" || len(needs(summary)) != 0 {
+		t.Fatalf("a clean task is written, checked, reviewed and accepted by one command: %v", summary)
+	}
+	gate := Current()
+	if f.count("writer") != 1 || f.count("review") != 1 || len(gate.Reviews) != 1 {
+		t.Fatalf("one writer and one reviewer were paid for: %d writers, %d reviews", f.count("writer"), f.count("review"))
+	}
+	lane := gate.Reviews[0].Lanes[0]
+	if lane.Route.Alias != "astra" || !slices.Equal(lane.Axes, []string{"correctness", "architecture", "simplicity"}) || len(gate.Reviews[0].Lanes) != 1 {
+		t.Fatalf("medium has one reviewer for every axis, on a model that did not write the code: %+v", lane)
+	}
+	if gate.Final == nil || gate.Final.Summary != "implemented" {
+		t.Fatalf("the completion record is assembled from the writers' reports: %+v", gate.Final)
+	}
+	if hook := StopHook(gate.Cwd, "fixture-session"); len(hook) != 0 {
+		t.Fatalf("a finished, unchanged task must not block the stop: %v", hook)
+	}
+	must(t, os.WriteFile("b.txt", []byte("somebody else's edit\n"), 0o644))
+	if hook := StopHook(gate.Cwd, "fixture-session"); len(hook) != 0 {
+		t.Fatalf("an edit outside the task's files must not reopen a finished task: %v", hook)
+	}
+	f.fails("run", "the task is done", func() (any, error) { return Run(f.cfg, Current(), RunInput{}) })
+}
+
+func TestEvidenceIsReusedWhileItIsCurrent(t *testing.T) {
 	f := newFixture(t)
 	counter := filepath.Join(t.TempDir(), "runs")
-	plan := f.plan("change the line")
+	plan := f.plan("-l change the line")
 	plan.Checks = []Check{{Argv: []string{"sh", "-c", "echo x >> " + counter}, Inputs: []string{"a.txt", "deps/**"}}}
-	if summary := f.launch(plan); summary["phase"] != "awaiting-review" || summary["mode"] != "medium" {
-		t.Fatalf("launch: %v", summary)
-	}
-	if summary := f.review(); summary["phase"] != "reviewed" {
-		t.Fatalf("review: %v", summary)
-	}
-	f.review() // identical content and contract: the reviewer is not paid twice
-	if f.count("review") != 2 {
-		t.Fatalf("review ran %d times for identical content", f.count("review"))
-	}
-	lane := Current().Reviews[0].Lanes[0]
-	if lane.Route.Alias != "fable" || !slices.Equal(lane.Axes, []string{"architecture", "simplicity"}) || len(Current().Reviews[0].Lanes) != 2 {
-		t.Fatalf("medium reviews design and simplicity on one model and correctness on another, got %+v", lane)
+	summary := f.start(plan)
+	if summary["step"] != StepDecide || !slices.Equal(needs(summary), []string{"review"}) {
+		t.Fatalf("light mode stops for the lead's own review: %v", summary)
 	}
 	runs := func() int { raw, _ := os.ReadFile(counter); return strings.Count(string(raw), "x") }
 	if runs() != 1 {
-		t.Fatalf("the outstanding check must run alongside the review, ran %d times", runs())
+		t.Fatalf("the declared check runs before any review, ran %d times", runs())
+	}
+	again := f.proceed()
+	if runs() != 1 || again["step"] != StepDecide || f.count("review") != 0 {
+		t.Fatalf("a run with nothing settled changes nothing and starts no model: %v", again)
 	}
 	must(t, os.WriteFile("b.txt", []byte("unrelated\n"), 0o644))
 	f.do("check", func() (any, error) { return RunChecks(Current(), CheckInput{All: true}) })
@@ -398,11 +511,21 @@ func TestMediumFlowReusesCurrentEvidence(t *testing.T) {
 	if runs() != 2 {
 		t.Fatal("a changed declared input must rerun the check")
 	}
-	if summary := f.finish(); summary["phase"] != "complete" {
-		t.Fatalf("finish: %v", summary)
+	// An edit that keeps a file's size, made in the second the index was written in, is invisible to git's
+	// stat cache unless the snapshot keeps the index's own time. Evidence must go stale all the same.
+	gitOut(t, "add", "a.txt")
+	write(t, "a.txt", "AFTER\n")
+	for written := time.Now().Unix(); time.Now().Unix() == written; {
+		time.Sleep(20 * time.Millisecond)
 	}
-	if hook := StopHook(Current().Cwd, "fixture-session"); len(hook) != 0 {
-		t.Fatalf("a finished, unchanged task must not block the stop: %v", hook)
+	f.fails("decide", "changed since the evidence was prepared", func() (any, error) {
+		return Decide(f.cfg, Current(), DecideInput{Review: &LeadReview{Summary: "read the patch as it was"}})
+	})
+	if again := f.proceed(); runs() != 3 || !slices.Equal(needs(again), []string{"review"}) {
+		t.Fatalf("the changed file is checked again and handed to the lead again: %v", again)
+	}
+	if done := f.decide(DecideInput{Review: &LeadReview{Summary: "read the one-line patch"}}); done["step"] != StepDone {
+		t.Fatalf("the lead's review completes a light task: %v", done)
 	}
 }
 
@@ -410,79 +533,73 @@ func TestBlockedWriterIsAnsweredInItsOwnSession(t *testing.T) {
 	f := newFixture(t)
 	f.model = func(kind string, packet map[string]any, call provider.Call) (string, error) {
 		if kind == "writer" && call.Resume == "" {
-			return `{"status":"BLOCKED","summary":"need the label","blockers":["Which label?"],"handoff":"","deviations":[]}`, nil
+			return `{"status":"BLOCKED","summary":"need the label","blockers":["Which label?"],"handoff":"","deviations":[],"disputes":[]}`, nil
 		}
 		if kind == "writer" && !strings.Contains(call.Prompt, "The label is answered") {
 			t.Errorf("the answer must reach the writer: %s", call.Prompt)
 		}
 		return "", nil
 	}
-	held := f.launch(f.plan("add the label"))
-	if held["phase"] != "held" || held["resume_phase"] != "implementing" {
-		t.Fatalf("a blocked writer holds the task: %v", held)
+	blocked := f.start(f.plan("add the label"))
+	if blocked["step"] != StepWrite || !slices.Equal(needs(blocked), []string{"answer"}) || offered(blocked)[0] != "answer" {
+		t.Fatalf("a blocked writer leaves the task at write, asking for an answer: %v", blocked)
 	}
 	gateID, session := Current().ID, Current().latest()["core"].Session
-	f.fails("launch", "on hold", func() (any, error) { return Launch(f.cfg, f.plan("add the label")) })
+	if again := f.proceed(); again["step"] != StepWrite || f.count("writer") != 1 {
+		t.Fatalf("running again does not restart a writer that waits for an answer: %v", again)
+	}
+	if hook := StopHook(Current().Cwd, "fixture-session"); hook["decision"] != "block" {
+		t.Fatal("a task that waits for the lead's answer must not let the turn end silently")
+	}
+	f.do("pause", func() (any, error) { return Pause(f.cfg, Current(), PauseInput{Reason: "the user decides the label"}) })
 	if hook := StopHook(Current().Cwd, "fixture-session"); len(hook) != 0 {
-		t.Fatal("an honest hold must not block the stop")
+		t.Fatal("an honest pause must not block the stop")
 	}
 	done := f.do("answer", func() (any, error) {
 		return Answer(f.cfg, Current(), AnswerInput{Stream: "core", Answer: "The label is answered"})
 	})
 	writer := Current().latest()["core"]
-	if done["phase"] != "awaiting-review" || Current().ID != gateID || writer.Session != session || writer.Status != "COMPLETED" {
-		t.Fatalf("the same gate and session must complete: %v %+v", done, writer)
-	}
-	if hook := StopHook(Current().Cwd, "fixture-session"); hook["decision"] != "block" {
-		t.Fatal("an unreviewed task must block the stop")
+	if done["step"] != StepDone || Current().ID != gateID || writer.Session != session || writer.Status != "COMPLETED" || Current().Pause != nil {
+		t.Fatalf("the answer lifts the pause, continues the same session and runs the task on: %v %+v", done, writer)
 	}
 }
 
-func TestFindingLifecycleUsesTheSameSessions(t *testing.T) {
+func TestFindingGoesToItsAuthorAndIsRecheckedInTheSameSessions(t *testing.T) {
 	f := newFixture(t)
-	reviews := 0
 	f.model = func(kind string, packet map[string]any, call provider.Call) (string, error) {
-		if kind != "review" {
-			return "", nil
-		}
-		if packet["axes"].([]any)[0] != "correctness" {
-			return "", nil
-		}
-		reviews++
-		if reviews == 1 {
-			return `{"reports":[{"axis":"correctness","status":"NEEDS_FIX","findings":[` + finding("P1") + `,` +
-				strings.Replace(finding("P3"), "wrong value", "naming", 1) + `],"checked":["read"],"resolutions":[]}]}`, nil
+		if kind == "writer" && packet["correction"] != nil {
+			must(t, os.WriteFile("a.txt", []byte("corrected\n"), 0o644))
+			return `{"status":"COMPLETED","summary":"used the agreed value","blockers":[],"handoff":"","deviations":[],"disputes":[]}`, nil
 		}
 		return "", nil
 	}
-	f.launch(f.plan("change the line"))
-	summary := f.review()
-	if len(summary["untriaged"].([]any)) != 1 || len(summary["notes"].([]any)) != 1 {
-		t.Fatalf("P1 needs triage, P3 is a note: %v", summary)
+	f.reviewOnce(finding("P1"), strings.Replace(finding("P3"), "wrong value", "naming", 1))
+	summary := f.start(f.plan("change the line"))
+	if summary["step"] != StepDone {
+		t.Fatalf("a blocking finding is fixed by its author without the lead: %v", summary)
 	}
-	id := summary["untriaged"].([]any)[0].(string)
-	f.fails("finish", "triage", func() (any, error) { return Finish(f.cfg, Current(), FinishInput{Summary: "done"}) })
-	f.do("triage", func() (any, error) {
-		return Triage(f.cfg, Current(), TriageInput{[]Disposition{{ID: id, Decision: "accepted", Evidence: "verified in a.txt"}}})
-	})
-	f.fails("finish", "block", func() (any, error) { return Finish(f.cfg, Current(), FinishInput{Summary: "done"}) })
-	writerSession, reviewSession := Current().latest()["core"].Session, Current().Reviews[0].Lanes[1].Session
-	fixed := f.do("fix", func() (any, error) { return Fix(f.cfg, Current(), FixInput{Brief: "use the agreed value"}) })
-	if fixed["phase"] != "awaiting-review" || Current().latest()["core"].Session != writerSession {
-		t.Fatalf("the writer that wrote the code corrects it in its session: %v", fixed)
+	gate := Current()
+	writers := gate.Writers
+	if len(writers) != 2 || writers[1].Session != writers[0].Session || !gate.Round.Correction || !gate.Round.Auto {
+		t.Fatalf("the writer that wrote the code corrects it in its own session: %+v", writers)
 	}
-	must(t, os.WriteFile("a.txt", []byte("corrected\n"), 0o644))
-	if summary := f.review(); len(summary["blocking"].([]any)) != 0 {
-		t.Fatalf("the resolved finding must not block: %v", summary)
+	if len(gate.Reviews) != 2 || gate.Reviews[1].Lanes[0].Session != gate.Reviews[0].Lanes[0].Session || gate.Reviews[1].Lanes[0].Route.Effort != "medium" {
+		t.Fatalf("the reviewer that raised the finding rechecks it in its own session: %+v", gate.Reviews[1].Lanes[0])
 	}
-	recheck := Current().Reviews[1].Lanes
-	if len(recheck) != 1 || recheck[0].Axes[0] != "correctness" || recheck[0].Session != reviewSession {
-		t.Fatalf("only the lane that raised the finding rechecks, in its own session: %+v", recheck)
+	var blocking, note Finding
+	for _, finding := range gate.Findings() {
+		if finding.Severity == "P1" {
+			blocking = finding
+		} else {
+			note = finding
+		}
 	}
-	if _, resolved := Current().Resolutions[id]; !resolved {
-		t.Fatal("the accepted finding must be recorded as resolved")
+	if _, resolved := gate.Resolutions[blocking.ID]; !resolved || !gate.Dispositions[blocking.ID].Auto {
+		t.Fatalf("the blocking finding was accepted by the rule and confirmed fixed: %+v", gate.Dispositions[blocking.ID])
 	}
-	f.finish()
+	if _, judged := gate.Dispositions[note.ID]; judged || !gate.isNote(f.cfg, note) {
+		t.Fatal("polish is a note: listed, never sent to a writer by itself")
+	}
 }
 
 func TestWavesHandOffContracts(t *testing.T) {
@@ -503,7 +620,7 @@ func TestWavesHandOffContracts(t *testing.T) {
 	plan := f.plan("-m build both", Stream{Name: "web", Domain: "frontend", Files: []string{"b.txt"}, After: []string{"api"}},
 		Stream{Name: "api", Domain: "backend", Files: []string{"a.txt"}})
 	plan.UI = nil
-	f.launch(plan)
+	f.start(plan)
 	if !slices.Equal(order, []string{"api", "web"}) {
 		t.Fatalf("api must finish before web starts: %v", order)
 	}
@@ -521,7 +638,7 @@ func TestWavesHandOffContracts(t *testing.T) {
 func TestHeavyNeedsAcceptedArchitecture(t *testing.T) {
 	f := newFixture(t)
 	plan := f.plan("-h change the contract")
-	f.fails("launch", "architecture", func() (any, error) { return Launch(f.cfg, plan) })
+	f.fails("start", "architecture", func() (any, error) { return Start(f.cfg, plan, "", false, RunInput{}) })
 	receipt := f.do("architecture", func() (any, error) { return Architecture(f.cfg, plan) })
 	if f.count("architecture") != 2 || len(receipt["lanes"].([]any)) != 2 {
 		t.Fatalf("heavy runs two independent designs: %v", receipt)
@@ -533,16 +650,23 @@ func TestHeavyNeedsAcceptedArchitecture(t *testing.T) {
 	plan.Architecture = &Accepted{ID: receipt["id"].(string), Acceptance: "the first design, with the second one's boundary"}
 	changed := *plan
 	changed.Brief = "A different contract"
-	f.fails("launch", "changed since the architecture pass", func() (any, error) { return Launch(f.cfg, &changed) })
-	if summary := f.launch(plan); summary["mode"] != "heavy" {
-		t.Fatalf("launch: %v", summary)
+	f.fails("start", "changed since the architecture pass", func() (any, error) { return Start(f.cfg, &changed, "", false, RunInput{}) })
+	criteria := *plan
+	criteria.Requirements = []Requirement{{ID: "R1", Text: "The contract holds"}}
+	if _, err := Resolve(f.cfg, &criteria); err != nil {
+		t.Fatal(err)
 	}
-	f.review()
+	resolved, _ := Resolve(f.cfg, &criteria)
+	if err := resolved.requireArchitecture(); err != nil {
+		t.Fatalf("adding a criterion must not throw an accepted design away: %v", err)
+	}
+	if summary := f.start(plan); summary["mode"] != "heavy" || summary["step"] != StepDone {
+		t.Fatalf("start: %v", summary)
+	}
 	lanes := Current().Reviews[0].Lanes
 	if len(lanes) != 2 || lanes[0].Route.Alias == lanes[1].Route.Alias {
 		t.Fatalf("heavy reviews two axes on two models: %+v", lanes)
 	}
-	f.fails("finish", "architecture_evidence", func() (any, error) { return Finish(f.cfg, Current(), FinishInput{Summary: "done"}) })
 }
 
 func TestUltraRequiresAnAnswerForEveryBlocker(t *testing.T) {
@@ -568,13 +692,12 @@ func TestUltraRequiresAnAnswerForEveryBlocker(t *testing.T) {
 		}
 	}
 	plan.Architecture = &Accepted{ID: receipt["id"].(string), Acceptance: "accepted"}
-	f.fails("launch", "blocker", func() (any, error) { return Launch(f.cfg, plan) })
+	f.fails("start", "blocker", func() (any, error) { return Start(f.cfg, plan, "", false, RunInput{}) })
 	plan.Architecture.Blockers = map[string]string{"fable/race": "resolved by the lock", "astra/race": "same root cause"}
-	f.launch(plan)
+	f.start(plan)
 	if writer := Current().latest()["core"]; writer.Route.Alias != "opus" || writer.Route.Effort != "xhigh" {
 		t.Fatalf("ultra writes with opus at xhigh by default, never max, got %s", writer.Route.Alias)
 	}
-	f.review()
 	for _, lane := range Current().Reviews[0].Lanes {
 		if lane.Route.Model == Current().latest()["core"].Route.Model {
 			t.Fatalf("the author's model must never review its code: %+v", lane.Route)
@@ -585,15 +708,14 @@ func TestUltraRequiresAnAnswerForEveryBlocker(t *testing.T) {
 func TestExhaustedPoolFallsBackAndIsReported(t *testing.T) {
 	f := newFixture(t)
 	f.model = func(kind string, packet map[string]any, call provider.Call) (string, error) {
-		if kind == "review" && call.Route.Alias == "fable" {
+		if kind == "review" && call.Route.Alias == "astra" {
 			return "", provider.ErrLimit
 		}
 		return "", nil
 	}
-	f.launch(f.plan("change the line"))
-	summary := f.review()
+	summary := f.start(f.plan("change the line"))
 	lane := Current().Reviews[0].Lanes[0]
-	if lane.Route.Alias != "astra" || lane.Route.SubstitutedFrom != "fable:medium" || len(summary["substitutions"].([]any)) != 1 {
+	if lane.Route.Alias != "fable" || lane.Route.SubstitutedFrom != "astra:medium" || len(summary["substitutions"].([]any)) != 1 {
 		t.Fatalf("the declared alternate must run and be reported: %+v %v", lane.Route, summary["substitutions"])
 	}
 	f.model = func(kind string, packet map[string]any, call provider.Call) (string, error) {
@@ -607,18 +729,53 @@ func TestExhaustedPoolFallsBackAndIsReported(t *testing.T) {
 
 func TestLightModeIsReviewedByTheLead(t *testing.T) {
 	f := newFixture(t)
+	corrections := 0
+	f.model = func(kind string, packet map[string]any, call provider.Call) (string, error) {
+		if kind != "writer" || packet["correction"] == nil {
+			return "", nil
+		}
+		correction := packet["correction"].(map[string]any)
+		id := correction["findings"].([]any)[0].(map[string]any)["id"].(string)
+		if corrections++; corrections == 1 {
+			// The author checks the finding against its brief first, and here it objects.
+			return `{"status":"COMPLETED","summary":"left the value as the brief has it","blockers":[],"handoff":"","deviations":[],` +
+				`"disputes":[{"id":"` + id + `","evidence":"the brief asks for this value: a.txt:1"}]}`, nil
+		}
+		if upheld := correction["upheld"].([]any); len(upheld) != 1 || upheld[0] != id {
+			t.Errorf("a finding its reviewer kept is to be fixed, not disputed again: %v", correction["upheld"])
+		}
+		must(t, os.WriteFile("a.txt", []byte("corrected\n"), 0o644))
+		return `{"status":"COMPLETED","summary":"used the agreed value","blockers":[],"handoff":"","deviations":[],"disputes":[]}`, nil
+	}
 	plan := f.plan("-l fix the typo")
 	plan.Checks = nil
-	f.launch(plan)
-	handed := f.review()
-	if handed["evidence"] == nil || f.count("review") != 0 {
-		t.Fatalf("light hands the diff to the lead and starts no reviewer: %v", handed)
+	handed := f.start(plan)
+	if handed["step"] != StepDecide || f.count("review") != 0 {
+		t.Fatalf("light hands the patch to the lead and starts no reviewer: %v", handed)
 	}
-	f.do("review", func() (any, error) {
-		return ReviewTask(f.cfg, Current(), ReviewInput{LeadReview: &LeadReview{Summary: "read the one-line diff"}})
-	})
-	if summary := f.finish(); summary["phase"] != "complete" {
-		t.Fatalf("finish: %v", summary)
+	need := handed["needs"].([]any)[0].(map[string]any)
+	patch, _ := os.ReadFile(need["detail"].(map[string]any)["patch"].(string))
+	if need["kind"] != "review" || !strings.Contains(string(patch), "+after") || !strings.Contains(string(patch), "-before") {
+		t.Fatalf("the lead is handed one patch of the change: %v\n%s", need, patch)
+	}
+	f.fails("decide", "summary", func() (any, error) { return Decide(f.cfg, Current(), DecideInput{Review: &LeadReview{}}) })
+	wrong := Finding{Severity: "P1", Confidence: "high", Category: "logic", Path: "a.txt", Line: 1, Evidence: "wrong value",
+		Impact: "wrong result", Remedy: "use the agreed value", Preserve: "the format"}
+	disputed := f.decide(DecideInput{Review: &LeadReview{Summary: "read the one-line patch", Findings: []Finding{wrong}}})
+	need = disputed["needs"].([]any)[0].(map[string]any)
+	packet := fileText(t, need["detail"].(map[string]any)["packet"].(string))
+	if disputed["step"] != StepDecide || f.count("writer") != 2 || need["kind"] != "review" || !strings.Contains(need["what"].(string), "disputes 1 of your findings") ||
+		!strings.Contains(packet, "the brief asks for this value") {
+		t.Fatalf("the lead raised the finding, so the lead is shown its author's objection: %v", disputed)
+	}
+	// Reported again under its id, the finding is upheld and goes back to be fixed; left out, it would be withdrawn.
+	wrong.ID = Current().Findings()[0].ID
+	found := f.decide(DecideInput{Review: &LeadReview{Summary: "the objection does not hold: the agreed value is another", Findings: []Finding{wrong}}})
+	if found["step"] != StepDecide || f.count("writer") != 3 || !slices.Equal(needs(found), []string{"review"}) || fileText(t, "a.txt") != "corrected\n" {
+		t.Fatalf("an upheld finding is corrected, and the corrected patch comes back to the lead: %v", found)
+	}
+	if done := f.decide(DecideInput{Review: &LeadReview{Summary: "the correction is right"}}); done["step"] != StepDone {
+		t.Fatalf("the lead's clean review completes the task: %v", done)
 	}
 }
 
@@ -626,36 +783,45 @@ func TestBaselineFailureIsRecordedButDoesNotWaiveCurrentFailures(t *testing.T) {
 	f := newFixture(t)
 	plan := f.plan("change the line")
 	plan.Checks = []Check{{Argv: []string{"false"}, Baseline: true}, {Argv: []string{"sh", "-c", "exit 3"}}}
-	f.launch(plan)
-	result, err := Execute("check", func() (any, error) { return RunChecks(Current(), CheckInput{All: true}) })
-	must(t, err)
-	receipts := result.(*CheckResult)
-	if !receipts.Failed || !receipts.Receipts[0].Preexisting || receipts.Receipts[1].Preexisting {
-		t.Fatalf("only the check that was red before the task is marked preexisting: %+v", receipts)
+	summary := f.start(plan)
+	if summary["step"] != StepDecide || !slices.Equal(needs(summary), []string{"stall"}) || f.count("review") != 0 {
+		t.Fatalf("failing checks go back to the writer once; a second failure asks for a new diagnosis, and no reviewer is paid: %v", summary)
 	}
-	if passed(&receipts.Receipts[0]) {
-		t.Fatal("a preexisting nonzero exit code is not a passing verification result")
+	gate := Current()
+	if f.count("writer") != 2 || len(gate.Round.Failures) != 2 {
+		t.Fatalf("the writer got both failing checks in one correction: %+v", gate.Round)
 	}
-	f.do("review", func() (any, error) { return ReviewTask(f.cfg, Current(), ReviewInput{SkipChecks: true}) })
-	f.fails("finish", "false", func() (any, error) { return Finish(f.cfg, Current(), FinishInput{Summary: "done"}) })
+	current := gate.currentReceipts()
+	first, second := current[checkID([]string{"false"})], current[checkID([]string{"sh", "-c", "exit 3"})]
+	if first == nil || second == nil || !first.Preexisting || second.Preexisting || passed(first) {
+		t.Fatalf("only the check that was red before the task is marked preexisting, and it still fails: %+v %+v", first, second)
+	}
+	f.decide(DecideInput{Reassessment: &Reassessment{Evidence: "the checks cannot pass here", ChangedApproach: "repair the fixture"}})
+	if gate = Current(); gate.Boost != 1 || gate.Corrections[len(gate.Corrections)-1].Reassessment == nil {
+		t.Fatalf("a new diagnosis earns the writers one step of effort: boost %d", gate.Boost)
+	}
 }
 
 func TestAnotherSessionCannotClaimOwnedFiles(t *testing.T) {
 	f := newFixture(t)
-	f.launch(f.plan("change the line"))
+	plan := f.plan("-l change the line")
+	plan.Checks = nil
+	f.start(plan) // light: stays active, waiting for the lead's review
 	t.Setenv("AGENTGATE_SESSION", "other-session")
-	f.fails("launch", "another session", func() (any, error) { return Launch(f.cfg, f.plan("change it too")) })
+	f.fails("start", "another session", func() (any, error) { return Start(f.cfg, f.plan("change it too"), "", false, RunInput{}) })
+	overlapping := f.plan("change by pattern", Stream{Name: "core", Domain: "backend", Files: []string{"*.txt"}})
+	f.fails("start", "another session", func() (any, error) { return Start(f.cfg, overlapping, "", false, RunInput{}) })
 	other := f.plan("change the neighbour", Stream{Name: "core", Domain: "backend", Files: []string{"b.txt"}})
-	if summary := f.launch(other); summary["phase"] != "awaiting-review" {
+	if summary := f.start(other); summary["step"] != StepDone {
 		t.Fatalf("disjoint files in a parallel session must work: %v", summary)
 	}
 	t.Setenv(provider.WorkerEnv, "1")
-	if _, err := Execute("finish", func() (any, error) { return nil, nil }); err == nil {
-		t.Fatal("a worker must not drive the gate")
+	if _, err := Execute("run", func() (any, error) { return nil, nil }); err == nil {
+		t.Fatal("a worker must not drive the task")
 	}
 }
 
-func TestStopCancelsTheRealProcessAndHoldsTheGate(t *testing.T) {
+func TestStopCancelsTheRealProcessAndParksTheTask(t *testing.T) {
 	if _, err := exec.LookPath("bwrap"); err != nil {
 		t.Skip("bwrap is not installed")
 	}
@@ -676,7 +842,7 @@ func TestStopCancelsTheRealProcessAndHoldsTheGate(t *testing.T) {
 		value, _ := Stop(f.cfg)
 		stopped <- value
 	}()
-	_, err := Execute("launch", func() (any, error) { return Launch(f.cfg, f.plan("-l change the line")) })
+	_, err := Execute("start", func() (any, error) { return Start(f.cfg, f.plan("-l change the line"), "", false, RunInput{}) })
 	if !ops.IsCancelled(err) {
 		t.Fatalf("want a cancellation, got %v", err)
 	}
@@ -684,14 +850,19 @@ func TestStopCancelsTheRealProcessAndHoldsTheGate(t *testing.T) {
 		t.Fatalf("stop must request cancellation: %v", value)
 	}
 	gate := Current()
-	if gate.Phase != "held" || gate.latest()["core"].Status != "CANCELLED" {
-		t.Fatalf("the gate must be held with a cancelled writer: %s %+v", gate.Phase, gate.latest()["core"])
+	if gate.Step != StepWrite || gate.Pause == nil || gate.Pause.Kind != PauseUser || gate.latest()["core"].Status != "CANCELLED" {
+		t.Fatalf("the task must be parked as stopped by the user with a cancelled writer: %s %+v %+v", gate.Step, gate.Pause, gate.latest()["core"])
 	}
 	if raw, _ := os.ReadFile("a.txt"); string(raw) != "partial\n" {
 		t.Fatal("partial work must be preserved")
 	}
 	if record := ops.Status(home()); record.State != "cancelled" || record.Live {
 		t.Fatalf("the operation receipt must say cancelled: %+v", record)
+	}
+	refused, err := Execute("run", func() (any, error) { return Run(f.cfg, Current(), RunInput{}) })
+	var refusal *Refusal
+	if !errors.As(err, &refusal) || refused != nil || !slices.Equal(refusal.Instead, []Action{ActResume, ActStop}) {
+		t.Fatalf("after a user stop only an explicit resume continues: %v", err)
 	}
 }
 

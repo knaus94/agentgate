@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -48,9 +47,19 @@ func slug(plan *Plan) string {
 	return "plan-" + time.Now().Format("20060102-1504")
 }
 
+// SavedPlan is where a plan was kept.
+type SavedPlan struct {
+	Name     string   `json:"name"`
+	Plan     string   `json:"plan"`
+	Brief    string   `json:"brief"`
+	Mode     string   `json:"mode"`
+	Decision Decision `json:"decision"`
+	Next     string   `json:"next"`
+}
+
 // PlanSave validates the plan and writes it with a readable brief next to it. Saving again under the same
 // name replaces both, so the file always shows the plan that will run.
-func PlanSave(cfg *config.Config, plan *Plan, name string) (any, error) {
+func PlanSave(cfg *config.Config, plan *Plan, name string) (*SavedPlan, error) {
 	resolved, err := Resolve(cfg, plan)
 	if err != nil {
 		return nil, err
@@ -69,17 +78,47 @@ func PlanSave(cfg *config.Config, plan *Plan, name string) (any, error) {
 	if err := os.WriteFile(path, append(raw, '\n'), 0o644); err != nil {
 		return nil, err
 	}
+	var revisions []Revision
+	if gate := Current(); gate != nil && gate.active() && gate.PlanName == name {
+		revisions = gate.Revisions
+	}
 	brief := filepath.Join(filepath.Dir(path), "brief.md")
-	if err := os.WriteFile(brief, []byte(renderBrief(name, resolved)), 0o644); err != nil {
+	if err := os.WriteFile(brief, []byte(renderBrief(name, resolved, revisions)), 0o644); err != nil {
 		return nil, err
 	}
-	next := "Show the user the brief path. Pass the plan to any command with `--plan " + name + "`; save again after every change to it."
+	next := "Show the user the brief path. `start --plan " + name + "` runs it; an active task takes it with `amend --plan " + name + "`. Save again after every change."
 	if resolved.Request.Action == "plan" {
-		next = "Show the saved brief. This is a read-only proposal, not authorization to implement. After explicit approval, change the request action to implementation while preserving scope and constraints, save again, and follow the normal launch gates."
+		next = "Show the saved brief. This is a read-only proposal, not authorization to implement. Once the user authorizes it: `start --plan " + name + " --implement`."
 	}
-	return map[string]any{"name": name, "plan": path, "brief": brief, "mode": resolved.Mode, "decision": resolved.Decision,
-		"next": next}, nil
+	return &SavedPlan{Name: name, Plan: path, Brief: brief, Mode: resolved.Mode, Decision: resolved.Decision, Next: next}, nil
 }
+
+// Proposal ties a saved plan to the preparation that drafted it: the worker session that can revise it and
+// the map of the code it drew. It lives with the checkout's state, not in the repository.
+type Proposal struct {
+	Name        string `json:"name"`
+	Digest      string `json:"digest"` // of the plan as it was saved; a plan edited by hand afterwards is no longer this proposal
+	Preparation string `json:"preparation"`
+	ContextPack string `json:"context_pack,omitempty"`
+}
+
+func proposalFile(name string) string {
+	return filepath.Join(checkoutDir(""), "proposals", name+".json")
+}
+
+func loadProposal(name string) *Proposal {
+	if !planName.MatchString(name) {
+		return nil
+	}
+	raw, err := os.ReadFile(proposalFile(name))
+	proposal := &Proposal{}
+	if err != nil || json.Unmarshal(raw, proposal) != nil || proposal.Name != name {
+		return nil
+	}
+	return proposal
+}
+
+func (p *Proposal) save() error { return writePacket(proposalFile(p.Name), p) }
 
 // PlanList names the saved plans of this repository, newest first.
 func PlanList() (any, error) {
@@ -127,13 +166,14 @@ func firstLine(text string) string {
 	return line
 }
 
-// renderBrief is the plan as a person reads it: what is built, by whom, how it is checked.
-func renderBrief(name string, resolved *Resolved) string {
+// renderBrief is the plan as a person reads it: what is built, by whom, how it is checked, and how the plan
+// changed while it ran.
+func renderBrief(name string, resolved *Resolved, revisions []Revision) string {
 	plan := resolved.Plan
 	var out strings.Builder
 	line := func(format string, values ...any) { fmt.Fprintf(&out, format+"\n", values...) }
 	line("# %s\n", name)
-	line("> Written by `agentgate plan save`; edit `plan.json` and save again rather than this file.\n")
+	line("> Written by `agentgate`; edit `plan.json` and save again rather than this file.\n")
 	if plan.Request != "" {
 		line("**Request:** %s\n", strings.TrimSpace(plan.Request))
 	}
@@ -152,9 +192,9 @@ func renderBrief(name string, resolved *Resolved) string {
 		line("**Assessment:** %s. %s\n", strings.Join(facts, "; "), strings.TrimSpace(assessment.Evidence))
 	}
 	line("## Brief\n\n%s\n", strings.TrimSpace(plan.Brief))
-	streams := func(resolved *Resolved, list []Stream, heading string) {
+	streams := func(mode string, list []Stream, heading string) {
 		for _, stream := range list {
-			title := fmt.Sprintf("%s %s — %s, %s", heading, stream.Name, stream.Domain, resolved.WriterRoute(stream, 0))
+			title := fmt.Sprintf("%s %s — %s, %s", heading, stream.Name, stream.Domain, writerRoute(resolved.Config, mode, stream, 0))
 			switch {
 			case stream.Done:
 				title = fmt.Sprintf("%s %s — %s, already done", heading, stream.Name, stream.Domain)
@@ -171,30 +211,35 @@ func renderBrief(name string, resolved *Resolved) string {
 			line("")
 		}
 	}
-	if plan.staged() {
+	staged := len(plan.Stages) > 1 || !plan.Single
+	if len(plan.Requirements) > 0 {
 		line("## Requirements\n")
 		for _, requirement := range plan.Requirements {
-			var where []string
-			for _, stage := range plan.Stages {
-				if slices.Contains(stage.Covers, requirement.ID) {
-					where = append(where, stage.Name)
-				}
+			where := ""
+			if last := plan.lastCover(requirement.ID); staged && last >= 0 {
+				where = " (due at " + plan.Stages[last].Name + ")"
 			}
-			line("- **%s** (%s): %s", requirement.ID, strings.Join(where, ", "), requirement.Text)
+			line("- **%s**%s: %s", requirement.ID, where, requirement.Text)
 			if requirement.Method != "" {
 				line("  - evidence method: %s", requirement.Method)
 			}
 		}
-		line("\n## Stages\n\nDone and reviewed one after another; a stage starts when the one before it is accepted.\n")
+		line("")
+	}
+	if staged {
+		line("## Stages\n\nDone and reviewed one after another; a stage starts when the one before it is accepted.\n")
 		for index, stage := range plan.Stages {
-			line("### %d. %s — %s\n\n%s\n", index+1, stage.Name, resolved.Stages[index].Mode, strings.TrimSpace(stage.Goal))
+			line("### %d. %s — %s\n\n%s\n", index+1, stage.Name, resolved.Modes[index], strings.TrimSpace(stage.Goal))
+			if len(stage.Covers) > 0 {
+				line("Works on: %s\n", strings.Join(stage.Covers, ", "))
+			}
 			for _, item := range stage.Acceptance {
 				line("- accepted when: %s", item)
 			}
 			if len(stage.Acceptance) > 0 {
 				line("")
 			}
-			streams(resolved.Stages[index], stage.Streams, "####")
+			streams(resolved.Modes[index], stage.Streams, "####")
 			for _, check := range stage.Checks {
 				line("- check: `%s`", strings.Join(check.Argv, " "))
 			}
@@ -206,18 +251,8 @@ func renderBrief(name string, resolved *Resolved) string {
 			line("After the last stage the whole change gets one more review, for the seams between the stages.\n")
 		}
 	} else {
-		if len(plan.Requirements) > 0 {
-			line("## Requirements\n")
-			for _, requirement := range plan.Requirements {
-				line("- **%s**: %s", requirement.ID, requirement.Text)
-				if requirement.Method != "" {
-					line("  - evidence method: %s", requirement.Method)
-				}
-			}
-			line("")
-		}
 		line("## Streams\n")
-		streams(resolved, plan.Streams, "###")
+		streams(resolved.Modes[0], plan.Stages[0].Streams, "###")
 	}
 	if len(plan.Checks) > 0 {
 		line("## Checks\n")
@@ -229,6 +264,9 @@ func renderBrief(name string, resolved *Resolved) string {
 			line("- `%s`%s", strings.Join(check.Argv, " "), note)
 		}
 		line("")
+	}
+	if strings.TrimSpace(plan.ChecksWaiver) != "" {
+		line("No command verifies this change: %s\n", strings.TrimSpace(plan.ChecksWaiver))
 	}
 	if len(plan.Context) > 0 {
 		line("## Context\n")
@@ -269,7 +307,17 @@ func renderBrief(name string, resolved *Resolved) string {
 		}
 		line("")
 	}
-	line("---\n\nRun it: `agentgate launch --plan %s` (inside `/dev`, any session of this checkout).", name)
+	if len(revisions) > 1 {
+		line("## Revisions\n\nThe plan changed while the task ran. Each change is recorded with its reason.\n")
+		for _, revision := range revisions[1:] {
+			line("%d. %s — %s", revision.Number, time.Unix(revision.At, 0).Format("2006-01-02 15:04"), oneLine(revision.Reason))
+			for _, change := range revision.Changes {
+				line("   - %s", change)
+			}
+		}
+		line("")
+	}
+	line("---\n\nRun it: `agentgate start --plan %s` (inside `/dev`, any session of this checkout).", name)
 	return out.String()
 }
 

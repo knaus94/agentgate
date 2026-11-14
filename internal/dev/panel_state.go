@@ -63,12 +63,14 @@ func (t *taskView) phase() string {
 		return "state error"
 	case t.Gate == nil:
 		return "preparing"
-	case t.Gate.Worktree != "" && t.Gate.Landed == "" && t.Gate.Phase == "complete":
+	case t.Gate.Worktree != "" && t.Gate.Landed == "" && t.Gate.Step == StepDone:
 		return "ready to land"
 	case t.Gate.Landed != "":
 		return "landed: " + t.Gate.Landed
+	case t.Gate.Pause != nil && t.Gate.active():
+		return "paused"
 	}
-	return t.Gate.Phase
+	return t.Gate.Step
 }
 
 func (t *taskView) elapsed(now int64) float64 {
@@ -113,17 +115,13 @@ func loadTasks(global bool) []*taskView {
 			continue
 		}
 		task := &taskView{Dir: dir, Op: ops.Status(dir)}
-		if raw, err := os.ReadFile(filepath.Join(dir, "state.json")); err == nil {
-			gate := &Gate{}
-			if err := json.Unmarshal(raw, gate); err != nil {
-				task.Warning = "Task state cannot be decoded. Preserve state.json and restore its last good copy."
-			} else if validateGateState(gate) != nil || sessionDir(gate.Cwd, gate.Session) != dir {
-				task.Warning = "Task state is incomplete or belongs to another checkout. Preserve state.json and restore its last good copy."
-			} else {
-				task.Gate, task.Title, task.Repo = gate, gate.Request.Task, filepath.Base(gate.Cwd)
-			}
-		} else if !os.IsNotExist(err) {
-			task.Warning = "Task state cannot be read: " + err.Error()
+		switch gate, err := loadGateFile(filepath.Join(dir, "state.json")); {
+		case err != nil:
+			task.Warning = "Task state cannot be read. Preserve state.json and restore its last good copy: " + err.Error()
+		case gate != nil && sessionDir(gate.Cwd, gate.Session) != dir:
+			task.Warning = "Task state belongs to another checkout. Preserve state.json and restore its last good copy."
+		case gate != nil:
+			task.Gate, task.Title, task.Repo = gate, gate.Request.Task, filepath.Base(gate.Cwd)
 		}
 		if task.Gate == nil {
 			if task.Warning != "" {
@@ -131,7 +129,7 @@ func loadTasks(global bool) []*taskView {
 			} else if !task.live() {
 				continue
 			} else {
-				task.Title = "(" + task.Op.Action + " before launch)"
+				task.Title = "(" + task.Op.Action + " before a task starts)"
 			}
 		} else if task.live() && task.Op.GateID != "" && task.Op.GateID != task.Gate.ID {
 			task.Title = "(" + task.Op.Action + " for the next task) · last: " + task.Title
@@ -377,7 +375,7 @@ func (t *taskView) describeWithChecks(cfg *config.Config, verify bool) {
 			continue // a superseded stream or failed fallback attempt has an archived receipt
 		}
 		// A staged task shows the workers of its present stage; those of accepted stages are in the archive.
-		if t.Gate != nil && t.Gate.Epic != nil && lane.Kind == "writer" && !lane.Live &&
+		if t.Gate != nil && len(t.Gate.Plan.Stages) > 1 && lane.Kind == "writer" && !lane.Live &&
 			!slices.ContainsFunc(t.Gate.Writers, func(writer *Writer) bool { return writer.Dir == lane.Dir }) {
 			continue
 		}
@@ -432,7 +430,10 @@ func (t *taskView) describeWithChecks(cfg *config.Config, verify bool) {
 		if _, resolved := gate.Resolutions[finding.ID]; resolved {
 			continue
 		}
-		if gate.isNote(finding) {
+		if gate.Dispositions[finding.ID].Decision == "rejected" {
+			continue
+		}
+		if gate.isNote(cfg, finding) {
 			t.Notes++
 			continue
 		}
@@ -452,11 +453,12 @@ func (t *taskView) describeWithChecks(cfg *config.Config, verify bool) {
 	}
 	inPlace := os.Chdir(where) == nil
 	receipts := map[string]*CheckReceipt{}
-	if inPlace {
+	if inPlace && gate.legacy == nil {
 		receipts = gate.currentReceipts()
 	}
-	for index := range gate.Plan.Checks {
-		check := &gate.Plan.Checks[index]
+	checks := gate.checks()
+	for index := range checks {
+		check := &checks[index]
 		view := checkView{Argv: commandText(check.Argv), State: "not run"}
 		for position := len(gate.Checks) - 1; position >= 0; position-- {
 			if slices.Equal(gate.Checks[position].Argv, check.Argv) {
@@ -480,10 +482,23 @@ func (t *taskView) describeWithChecks(cfg *config.Config, verify bool) {
 		}
 		t.Checks = append(t.Checks, view)
 	}
-	if inPlace {
-		t.Next = gate.nextWithReceipts(cfg, t.Blocked > 0, receipts)
+	switch {
+	case inPlace && gate.legacy != nil:
+		t.Next = "Saved by an earlier version of the tool: its next command in the owning lead session brings it to the present format."
 		_ = os.Chdir(here)
-	} else {
+	case inPlace:
+		needs := gate.needs(cfg)
+		t.Next = gate.next(needs)
+		// A person watching wants to know what the task waits for, not only that it waits.
+		for index, need := range needs {
+			if index == 2 {
+				t.Next += fmt.Sprintf(" (+%d more)", len(needs)-index)
+				break
+			}
+			t.Next += " · " + need.Kind + ": " + oneLine(need.What)
+		}
+		_ = os.Chdir(here)
+	default:
 		t.Next = "The task checkout is unavailable; restore it before continuing."
 	}
 }

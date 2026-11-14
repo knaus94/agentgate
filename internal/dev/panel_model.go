@@ -80,7 +80,7 @@ func (m *panel) refresh() {
 		proofKey := ""
 		if task.Gate != nil {
 			gate := task.Gate
-			proofKey = digest([]any{task.Dir, gate.ID, gate.Phase, gate.PlanVersion, gate.Checks, gate.Plan.Checks, gate.ReviewDigest, gate.Resolutions, gate.Dispositions})
+			proofKey = digest([]any{task.Dir, gate.ID, gate.Step, gate.Pause, gate.Stage, len(gate.Revisions), gate.Checks, len(gate.Reviews), gate.Resolutions, gate.Dispositions})
 		}
 		verify := oldTask == nil || proofKey != m.proofKey || time.Since(m.proofAt) >= 5*time.Second
 		task.describeWithChecks(m.cfg, verify)

@@ -45,21 +45,19 @@ func modeTable(cfg *config.Config, name string) map[string]any {
 		review = append(review, strings.Join(lane.Axes, "+")+" → "+lane.Route)
 	}
 	if len(review) == 0 {
-		review = []string{"the lead reads the diff"}
+		review = []string{"the lead reads the patch"}
 	}
-	design := "the lead (its brief is the design)"
+	design := "the plan (its brief is the design)"
 	if len(mode.Architecture) > 0 {
 		design = strings.Join(mode.Architecture, " ∥ ")
 		if mode.Critique {
 			design += ", then cross-critique"
 		}
 	}
+	// The discovery route prepares the plan and draws the map of the code its workers start from.
 	scout := mode.Scout
 	if scout == "" {
-		scout = "the lead's own context"
-		if len(mode.Architecture) > 0 {
-			scout = "none: the accepted design"
-		}
+		scout = cfg.Modes["medium"].Scout + " (as in medium)"
 	}
 	return map[string]any{"scout": scout, "design": design, "backend": mode.Backend, "frontend": mode.Frontend, "review": review,
 		"blocking": mode.Blocking, "escalate_to": mode.EscalateTo}
@@ -70,7 +68,7 @@ func Modes(cfg *config.Config) string {
 	var out strings.Builder
 	for _, name := range config.ModeNames {
 		table := modeTable(cfg, name)
-		fmt.Fprintf(&out, "%s\n  scout     %s\n  architect %s\n  backend   %s\n  frontend  %s\n  review    %s\n  blocking  %s\n  escalate  up to %s when a correction stalls\n",
+		fmt.Fprintf(&out, "%s\n  planning  %s\n  architect %s\n  backend   %s\n  frontend  %s\n  review    %s\n  blocking  %s\n  escalate  up to %s when a correction stalls\n",
 			name, table["scout"], table["design"], table["backend"], table["frontend"], strings.Join(table["review"].([]string), " ∥ "),
 			strings.Join(cfg.Modes[name].Blocking, ", "), table["escalate_to"])
 	}
@@ -94,42 +92,52 @@ func Route(cfg *config.Config, plan *Plan) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if plan.staged() {
-		// A staged plan is shown stage by stage: each has its own mode and so its own models.
-		var stages []map[string]any
-		for index, stage := range resolved.Stages {
-			writers := map[string]string{}
-			for _, stream := range stage.Plan.Streams {
-				writers[stream.Name] = stage.WriterRoute(stream, 0).String()
-			}
-			table := modeTable(cfg, stage.Mode)
-			stages = append(stages, map[string]any{"stage": plan.Stages[index].Name, "decision": stage.Decision, "writers": writers,
-				"scout": table["scout"], "review": table["review"], "blocking": table["blocking"]})
-		}
-		return map[string]any{"decision": resolved.Decision, "design": modeTable(cfg, resolved.Mode)["design"], "stages": stages,
-			"integration_review": integrationNeeded(resolved.Mode, len(plan.Stages)), "isolated": resolved.Request.Worktree || isolateStaged(cfg),
-			"read_only": true}, nil
-	}
-	writers := map[string]string{}
-	for _, stream := range plan.Streams {
-		writers[stream.Name] = resolved.WriterRoute(stream, 0).String()
-	}
-	order, _ := waves(plan.Streams)
-	var names [][]string
-	for _, wave := range order {
-		var row []string
-		for _, stream := range wave {
-			row = append(row, stream.Name)
-		}
-		names = append(names, row)
-	}
 	limit, err := resolved.Parallelism()
 	if err != nil {
 		return nil, err
 	}
+	describe := func(index int) map[string]any {
+		stage := resolved.Plan.Stages[index]
+		writers := map[string]string{}
+		for _, stream := range stage.Streams {
+			writers[stream.Name] = writerRoute(cfg, resolved.Modes[index], stream, 0).String()
+		}
+		order, _ := waves(stage.Streams)
+		var names [][]string
+		for _, wave := range order {
+			var row []string
+			for _, stream := range wave {
+				row = append(row, stream.Name)
+			}
+			names = append(names, row)
+		}
+		table := modeTable(cfg, resolved.Modes[index])
+		return map[string]any{"decision": resolved.Decisions[index], "writers": writers, "waves": names, "review": table["review"], "blocking": table["blocking"]}
+	}
 	table := modeTable(cfg, resolved.Mode)
-	return map[string]any{"decision": resolved.Decision, "scout": table["scout"], "design": table["design"], "writers": writers, "waves": names,
-		"review": table["review"], "blocking": table["blocking"], "parallel": limit, "read_only": true}, nil
+	out := map[string]any{"decision": resolved.Decision, "planning": table["scout"], "design": table["design"], "parallel": limit, "read_only": true}
+	if err := resolved.independent(); err != nil {
+		out["problem"] = err.Error()
+	}
+	if len(resolved.Plan.Stages) == 1 {
+		for key, value := range describe(0) {
+			if key != "decision" {
+				out[key] = value
+			}
+		}
+		return out, nil
+	}
+	// A plan of several stages is shown stage by stage: each has its own mode and so its own models.
+	var stages []map[string]any
+	for index, stage := range resolved.Plan.Stages {
+		item := describe(index)
+		item["stage"] = stage.Name
+		stages = append(stages, item)
+	}
+	out["stages"] = stages
+	out["integration_review"] = integrationNeeded(resolved.Mode, len(resolved.Plan.Stages))
+	out["isolated"] = resolved.Request.Worktree || isolateStaged(cfg)
+	return out, nil
 }
 
 type probe struct {
@@ -576,25 +584,28 @@ func installZed() map[string]any {
 		"optional_keymap_entry": keymap}
 }
 
-// Overview lists the gates of this checkout without touching any of them.
+// Overview lists the tasks of this checkout without touching any of them.
 func Overview() map[string]any {
 	var gates []map[string]any
 	paths, _ := filepath.Glob(filepath.Join(checkoutDir(""), "*", "state.json"))
 	for _, path := range paths {
-		raw, _ := os.ReadFile(path)
-		gate := &Gate{}
-		if json.Unmarshal(raw, gate) == nil {
-			live := false
-			if record := ops.Status(filepath.Dir(path)); record != nil {
-				live = record.Live
-			}
-			item := map[string]any{"session": gate.Session, "id": gate.ID, "mode": gate.Mode, "phase": gate.Phase,
-				"task": gate.Request.Task, "operation_live": live}
-			if gate.Worktree != "" {
-				item["isolated"] = gate.landing()
-			}
-			gates = append(gates, item)
+		gate, err := loadGateFile(path)
+		if err != nil || gate == nil {
+			continue
 		}
+		live := false
+		if record := ops.Status(filepath.Dir(path)); record != nil {
+			live = record.Live
+		}
+		item := map[string]any{"session": gate.Session, "id": gate.ID, "mode": gate.Mode, "step": gate.Step,
+			"task": gate.Request.Task, "operation_live": live}
+		if gate.Pause != nil {
+			item["paused"] = gate.Pause.Reason
+		}
+		if gate.Worktree != "" {
+			item["isolated"] = gate.landing()
+		}
+		gates = append(gates, item)
 	}
 	return map[string]any{"gates": gates, "read_only": true,
 		"note": "Recorded state only. The owning lead session drives the task."}
@@ -614,7 +625,7 @@ func StopFromOutside() (any, error) {
 		return map[string]any{"stopped": false, "note": "no operation is running in this checkout"}, nil
 	case 1:
 		ops.RequestStop(live[0], "the user stopped /dev")
-		return map[string]any{"cancellation_requested": true, "next": "The task will be put on hold; `agentgate watch` shows it."}, nil
+		return map[string]any{"cancellation_requested": true, "next": "The task will be parked as stopped by the user; `agentgate watch` shows it."}, nil
 	}
 	return nil, errors.New("several sessions are running here; stop from the owning lead session")
 }

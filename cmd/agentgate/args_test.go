@@ -45,7 +45,7 @@ func TestHelpCannotInstallUpdateOrStop(t *testing.T) {
 			}
 		}
 	}
-	for _, command := range []string{"install", "update", "stop", "prune", "launch", "finish", "land", "doctor", "config"} {
+	for _, command := range []string{"install", "update", "stop", "prune", "start", "run", "decide", "amend", "land", "doctor", "config"} {
 		for _, option := range []string{"--help", "-h"} {
 			stdout, stderr, code := s.run("", command, option)
 			if code != 0 || !strings.Contains(stdout, "Usage") || stderr != "" {
@@ -53,7 +53,7 @@ func TestHelpCannotInstallUpdateOrStop(t *testing.T) {
 			}
 		}
 	}
-	for _, args := range [][]string{{"help", "task"}, {"task", "--help"}, {"task"}, {"setup"}, {"help", "setup", "install"}, {"task", "launch", "--file", "missing.json", "--help"}} {
+	for _, args := range [][]string{{"help", "task"}, {"task", "--help"}, {"task"}, {"setup"}, {"help", "setup", "install"}, {"task", "start", "--file", "missing.json", "--help"}} {
 		stdout, stderr, code := s.run("", args...)
 		if code != 0 || !strings.Contains(stdout, "agentgate") || stderr != "" {
 			t.Errorf("%v: %d %q %q", args, code, stdout, stderr)
@@ -63,9 +63,10 @@ func TestHelpCannotInstallUpdateOrStop(t *testing.T) {
 
 func TestCommandGrammarRejectsIgnoredOptionsAndArguments(t *testing.T) {
 	for _, input := range [][]string{
-		{"launch", "--fle", "plan.json"}, {"stop", "--once"}, {"update", "--lead", "codex"},
-		{"install", "--lead", "invalid"}, {"install", "--lead"}, {"launch", "--file", "--all"},
-		{"launch", "--file", "a", "--file", "b"}, {"launch", "--file", "a", "--plan", "b"},
+		{"start", "--fle", "plan.json"}, {"stop", "--once"}, {"update", "--lead", "codex"},
+		{"install", "--lead", "invalid"}, {"install", "--lead"}, {"start", "--file", "--all"},
+		{"start", "--file", "a", "--file", "b"}, {"start", "--file", "a", "--plan", "b"},
+		{"run", "--implement"}, {"show", "findings", "plan"}, {"reference", "plan", "inputs"}, {"resume", "now"},
 		{"config", "show", "extra"}, {"plan", "list", "extra"}, {"plan", "show"},
 		{"accounts", "list", "--save"}, {"accounts", "remove", "a", "--paid"}, {"accounts", "discover", "--json"},
 		{"status", "unexpected"}, {"--unknown"}, {"task", "instal"}, {"setup", "stop"},
@@ -76,7 +77,8 @@ func TestCommandGrammarRejectsIgnoredOptionsAndArguments(t *testing.T) {
 		}
 	}
 	for _, input := range [][]string{
-		{"launch", "--file=plan.json"}, {"task", "launch", "--plan", "wallet"},
+		{"start", "--file=plan.json"}, {"task", "start", "--plan", "wallet", "--implement"},
+		{"run"}, {"task", "show", "findings"}, {"reference", "plan"}, {"status", "--full"}, {"amend", "--plan", "wallet"},
 		{"setup", "install", "--lead=both"}, {"--file", "-", "check"},
 		{"parse", "--", "-h", "fix totals"}, {"status", "--all"}, {"watch", "--json"},
 		{"--version"}, {"-v"}, {"limits", "--json"},
@@ -96,14 +98,17 @@ func TestGroupedCommandsAndPositionalRequest(t *testing.T) {
 	if status := s.ok("", "task", "status"); status["read_only"] != true {
 		t.Fatal(status)
 	}
-	if snapshot := s.ok("", "task", "watch", "--json"); snapshot["read_only"] != true || snapshot["schema_version"] != float64(1) || len(snapshot["tasks"].([]any)) != 0 {
+	if snapshot := s.ok("", "task", "watch", "--json"); snapshot["read_only"] != true || snapshot["schema_version"] != float64(2) || len(snapshot["tasks"].([]any)) != 0 {
 		t.Fatal(snapshot)
 	}
 }
 
 func TestSavedPlanShowAndConfigurationValidationDispatch(t *testing.T) {
 	s := newSandbox(t)
-	plan := `{"request":"fix the file","assessment":{"size":"ordinary","evidence":"one text file"},"brief":"a.txt must say fixed","streams":[{"name":"core","domain":"backend","files":["a.txt"]}]}`
+	plan := `{"request":"fix the file","assessment":{"size":"ordinary","evidence":"one text file"},"brief":"a.txt must say fixed","streams":[{"name":"core","domain":"backend","files":["a.txt"]}],"checks":[["grep","-q","fixed","a.txt"]]}`
+	if _, stderr, code := s.run(strings.Replace(plan, `,"checks":[["grep","-q","fixed","a.txt"]]`, "", 1), "plan", "save", "example", "--file", "-"); code != 1 || !strings.Contains(stderr, "checks_waiver") {
+		t.Fatalf("a plan that could not be finished is refused when it is saved, not after the work: %s", stderr)
+	}
 	saved := s.ok(plan, "plan", "save", "example", "--file", "-")
 	briefPath := saved["brief"].(string)
 	if !filepath.IsAbs(briefPath) {
@@ -144,8 +149,8 @@ func TestJSONInputIsExactlyOneObject(t *testing.T) {
 	}
 	s := newSandbox(t)
 	for _, input := range []string{"null", `{"reason":"ok"} {}`} {
-		_, stderr, code := s.run(input, "hold", "--file", "-")
-		if code != 1 || !strings.Contains(stderr, "hold input") {
+		_, stderr, code := s.run(input, "pause", "--file", "-")
+		if code != 1 || !strings.Contains(stderr, "pause input") {
 			t.Fatalf("%s: code %d, stderr %s", input, code, stderr)
 		}
 	}

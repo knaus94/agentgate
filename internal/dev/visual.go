@@ -72,9 +72,9 @@ func (g *Gate) visualContract() string {
 }
 
 // currentVisual is the browser run that observed exactly the present code and contract, or nil.
-func (g *Gate) currentVisual(content string) *VisualRun {
+func (g *Gate) currentVisual(key string) *VisualRun {
 	for index := len(g.VisualRuns) - 1; index >= 0; index-- {
-		if run := &g.VisualRuns[index]; run.Digest == content && run.Contract == g.visualContract() {
+		if run := &g.VisualRuns[index]; run.Key == key && run.Contract == g.visualContract() {
 			return run
 		}
 	}
@@ -109,8 +109,12 @@ func (g *Gate) visualSummary() map[string]any {
 	out := map[string]any{"required": g.visualRequired(), "choice": g.Plan.Visual, "skip": g.VisualSkip}
 	if len(g.VisualRuns) > 0 {
 		last := g.VisualRuns[len(g.VisualRuns)-1]
+		reviewed := ""
+		if len(g.Reviews) > 0 {
+			reviewed = g.Reviews[len(g.Reviews)-1].Key
+		}
 		out["latest"] = map[string]any{"status": last.Status, "summary": last.Summary, "coverage": last.Coverage,
-			"console_errors": last.Console, "current": last.Digest == g.ReviewDigest && last.Contract == g.visualContract(), "dir": last.Dir}
+			"console_errors": last.Console, "current": last.Key == reviewed && last.Contract == g.visualContract(), "dir": last.Dir}
 	}
 	return out
 }
@@ -148,7 +152,7 @@ type visualStage struct {
 	apply func() error
 }
 
-func (g *Gate) prepareVisual(cfg *config.Config, input VisualInput, now Snapshot, content string) (*visualStage, error) {
+func (g *Gate) prepareVisual(cfg *config.Config, input VisualInput, now, key string) (*visualStage, error) {
 	if !g.visualRequired() {
 		return nil, errors.New("browser verification is not opted in; record the user's choice first")
 	}
@@ -230,12 +234,12 @@ func (g *Gate) prepareVisual(cfg *config.Config, input VisualInput, now Snapshot
 			recheck = append(recheck, finding)
 		}
 	}
-	changes, err := evidence(filepath.Join(dir, "evidence"), g.Baseline, now, g.Files)
+	changes, _, err := g.evidence(filepath.Join(dir, "evidence"), g.origin(), now)
 	if err != nil {
 		return nil, err
 	}
 	packet := map[string]any{"task": g.Request.Task, "brief": g.Plan.Brief, "ui": ui, "scenarios": active, "exclusions": input.Exclusions,
-		"prior_decisions": g.decisions(), "changes": changes, "recheck": recheck, "screenshots_dir": shots,
+		"prior_decisions": g.decisions(), "changes": changes, "patch": filepath.Join(dir, "evidence", "change.patch"), "recheck": recheck, "screenshots_dir": shots,
 		"stand": map[string]any{"url": input.URL, "origins": origins, "viewports": viewports, "login": input.Login, "notes": input.Notes,
 			"entry_points": input.EntryPoints, "session_preloaded": input.StorageState != ""}}
 	if len(g.VisualRuns) > 0 {
@@ -245,7 +249,7 @@ func (g *Gate) prepareVisual(cfg *config.Config, input VisualInput, now Snapshot
 	if err := writePacket(path, packet); err != nil {
 		return nil, err
 	}
-	run := VisualRun{Iteration: g.Iteration, Digest: content, Contract: g.visualContract(), Excluded: input.Exclusions, Dir: dir,
+	run := VisualRun{Iteration: g.Iteration, Key: key, Contract: g.visualContract(), Excluded: input.Exclusions, Dir: dir,
 		Findings: []Finding{}, Console: []string{}}
 	resolved := map[string]string{}
 	subs := &substitutions{}
@@ -336,7 +340,11 @@ func (g *Gate) prepareVisual(cfg *config.Config, input VisualInput, now Snapshot
 		return nil
 	}
 	stage.apply = func() error {
-		if after, _, _ := g.contentDigest(); after != content {
+		after, err := g.snapshot()
+		if err != nil {
+			return err
+		}
+		if afterKey, err := g.reviewKey(after); err != nil || afterKey != key {
 			return errors.New("files changed during the browser pass; its evidence is stale")
 		}
 		for id, evidence := range resolved {
@@ -346,6 +354,10 @@ func (g *Gate) prepareVisual(cfg *config.Config, input VisualInput, now Snapshot
 			delete(g.Resolutions, finding.ID)
 			if decision := g.Dispositions[finding.ID].Decision; decision == "rejected" || decision == "deferred" {
 				delete(g.Dispositions, finding.ID)
+			}
+			// What the browser saw goes to its author by the same rule as what a reviewer read.
+			if _, judged := g.Dispositions[finding.ID]; !judged && g.blocks(cfg, finding) {
+				g.Dispositions[finding.ID] = Disposition{ID: finding.ID, Decision: "accepted", Auto: true, Evidence: g.whyBlocks(cfg, finding)}
 			}
 		}
 		g.VisualRuns = append(g.VisualRuns, run)
@@ -362,11 +374,27 @@ func fileExists(path string) bool {
 	return err == nil && info.Mode().IsRegular()
 }
 
+// observe runs one browser pass on the present code and records it.
+func (g *Gate) observe(cfg *config.Config, input VisualInput, now, key string) error {
+	stage, err := g.prepareVisual(cfg, input, now, key)
+	if err != nil {
+		return err
+	}
+	if err := stage.run(); err != nil {
+		return err
+	}
+	if err := stage.apply(); err != nil {
+		return err
+	}
+	return g.save()
+}
+
 // VisualPass records the user's choice or a skip, or runs a standalone browser pass.
 func VisualPass(cfg *config.Config, gate *Gate, input VisualInput) (any, error) {
-	if !gate.active() || gate.Phase == "held" {
-		return nil, errors.New("the gate is not active")
+	if err := gate.can(ActVisual); err != nil {
+		return nil, err
 	}
+	did := []string{}
 	switch {
 	case input.Choice != nil:
 		if input.Choice.Enabled {
@@ -378,24 +406,27 @@ func VisualPass(cfg *config.Config, gate *Gate, input VisualInput) (any, error) 
 			}
 		}
 		gate.Plan.Visual, gate.VisualSkip = input.Choice, ""
+		did = append(did, "browser verification choice recorded")
 	case input.SkipReason != "":
 		// A truthful record that the stand was declined or cannot run; the report must say the UI was not seen.
 		gate.VisualSkip = input.SkipReason
+		did = append(did, "browser verification skipped: "+input.SkipReason)
 	default:
-		content, now, err := gate.contentDigest()
+		now, err := gate.snapshot()
 		if err != nil {
 			return nil, err
 		}
-		stage, err := gate.prepareVisual(cfg, input, now, content)
+		key, err := gate.reviewKey(now)
 		if err != nil {
 			return nil, err
 		}
-		if err := stage.run(); err != nil {
+		if err := gate.observe(cfg, input, now, key); err != nil {
 			return nil, err
 		}
-		if err := stage.apply(); err != nil {
-			return nil, err
-		}
+		did = append(did, "browser scenarios observed")
 	}
-	return gate.Summary(cfg), gate.save()
+	if err := gate.save(); err != nil {
+		return nil, err
+	}
+	return gate.report(cfg, did), nil
 }

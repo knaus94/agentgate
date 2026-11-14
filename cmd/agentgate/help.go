@@ -18,7 +18,7 @@ type commandSpec struct {
 
 var commandSpecs = []commandSpec{
 	{name: "watch", group: "Tasks", summary: "Live terminal dashboard; open workers, checks and findings", syntax: "watch [--all] [--once] [--json] [--no-color]", flags: []string{"all", "once", "json", "no-color"}, example: "agentgate task watch"},
-	{name: "status", group: "Tasks", summary: "Current task, or the checkout's task overview, as JSON", syntax: "status [--all]", flags: []string{"all"}, example: "agentgate task status"},
+	{name: "status", group: "Tasks", summary: "Where the task is, what it needs and which actions are legal; the checkout's overview with --all", syntax: "status [--full] [--all]", flags: []string{"all", "full"}, example: "agentgate task status"},
 	{name: "stop", group: "Tasks", summary: "Stop workers in this session, or this checkout from outside", syntax: "stop", example: "agentgate task stop"},
 	{name: "plan", group: "Tasks", summary: "Save, list, inspect and share reusable plans", syntax: "plan save [name] --file <path>|- | list | show <name> | link [directory]", input: true, plan: true, example: "agentgate plan save wallet --file plan.json"},
 	{name: "install", group: "Setup", summary: "Install lead commands and editor integration", syntax: "install [--lead claude|codex|both] [--zed] [--uninstall]", flags: []string{"lead", "zed", "uninstall"}, example: "agentgate setup install --lead both"},
@@ -33,32 +33,30 @@ var commandSpecs = []commandSpec{
 	{name: "fixtures", group: "Design tools", summary: "Serve or record GraphQL fixtures for a screen", syntax: "fixtures <dir> [--port 5999] [--record <url>]", example: "agentgate fixtures --help"},
 	{name: "parse", group: "Lead protocol", summary: "Parse a /dev request without starting work", syntax: "parse [request] [--file <path>|-]", input: true, example: "agentgate parse -- '-h move invoice totals to integer cents'"},
 	{name: "preview", group: "Lead protocol", summary: "Preview routing and work without starting workers", syntax: "preview [request] [--file <path>|-]", input: true, example: "agentgate preview -- '-m add pagination'"},
-	{name: "prepare", group: "Lead protocol", summary: "Prepare a plan with a read-only discovery worker", syntax: "prepare --file <path>|-", input: true},
+	{name: "prepare", group: "Lead protocol", summary: "Draft or revise a plan with a read-only worker; the same worker continues with answers and notes", syntax: "prepare [--file <path>|-]", input: true},
 	{name: "route", group: "Lead protocol", summary: "Validate a plan and resolve model routing", syntax: "route --file <path>|- | --plan <name>", input: true, plan: true},
 	{name: "architecture", group: "Lead protocol", summary: "Run independent architecture proposals and critiques", syntax: "architecture --file <path>|- | --plan <name>", input: true, plan: true},
 	{name: "design", group: "Lead protocol", summary: "Prepare or revise an interface specification", syntax: "design --file <path>|-", input: true},
-	{name: "consult", group: "Lead protocol", summary: "Ask a read-only consultant for scoped advice", syntax: "consult --file <path>|-", input: true},
-	{name: "launch", group: "Lead protocol", summary: "Launch a validated plan and its worker streams", syntax: "launch --file <path>|- | --plan <name>", input: true, plan: true},
-	{name: "replan", group: "Lead protocol", summary: "Revise the current task's plan", syntax: "replan --file <path>|- | --plan <name>", input: true, plan: true},
-	{name: "answer", group: "Lead protocol", summary: "Answer a blocked worker in its existing session", syntax: "answer --file <path>|-", input: true},
-	{name: "tell", group: "Lead protocol", summary: "Send additional instructions to a running worker", syntax: "tell --file <path>|-", input: true},
+	{name: "consult", group: "Lead protocol", summary: "Ask read-only consultants scoped questions", syntax: "consult --file <path>|-", input: true},
+	{name: "start", group: "Lead protocol", summary: "Open a task from a plan and run it", syntax: "start --plan <name> | --file <path>|- [--implement]", input: true, plan: true, flags: []string{"implement"}, example: "agentgate start --plan wallet"},
+	{name: "run", group: "Lead protocol", summary: "Take every determined step — write, check, review, correct, accept — until a person is needed", syntax: "run [--file <path>|-]", input: true, example: "agentgate run"},
+	{name: "answer", group: "Lead protocol", summary: "Answer a blocked writer in its own session and run on", syntax: "answer --file <path>|-", input: true},
+	{name: "decide", group: "Lead protocol", summary: "Rule on findings, give the lead's own review, send an unmet criterion to the writers; then run on", syntax: "decide --file <path>|-", input: true},
+	{name: "amend", group: "Lead protocol", summary: "Replace the plan of the active task, with a reason", syntax: "amend --file <path>|- | --plan <name>", input: true, plan: true},
+	{name: "show", group: "Lead protocol", summary: "Print one part of the task in full", syntax: "show [findings|plan|stage|checks|report|all]", example: "agentgate show findings"},
+	{name: "tell", group: "Lead protocol", summary: "Leave a note on the writers' shared board", syntax: "tell --file <path>|-", input: true},
 	{name: "check", group: "Lead protocol", summary: "Run declared verification checks", syntax: "check --all | --file <path>|-", input: true, flags: []string{"all"}},
-	{name: "review", group: "Lead protocol", summary: "Review the current change with independent workers", syntax: "review [--file <path>|-]", input: true},
-	{name: "visual", group: "Lead protocol", summary: "Record visual acceptance evidence", syntax: "visual --file <path>|-", input: true},
-	{name: "triage", group: "Lead protocol", summary: "Accept or reject review findings with reasons", syntax: "triage --file <path>|-", input: true},
-	{name: "fix", group: "Lead protocol", summary: "Return accepted findings and failed checks to their writers", syntax: "fix [--file <path>|-]", input: true},
-	{name: "finish", group: "Lead protocol", summary: "Close a task only when its evidence satisfies the gate", syntax: "finish --file <path>|-", input: true},
+	{name: "visual", group: "Lead protocol", summary: "Record the browser choice or a skip, or run a browser pass", syntax: "visual --file <path>|-", input: true},
 	{name: "land", group: "Lead protocol", summary: "Apply or drop a completed isolated worktree", syntax: "land [--file <path>|-]", input: true},
-	{name: "hold", group: "Lead protocol", summary: "Pause a task with a recorded reason", syntax: "hold --file <path>|-", input: true},
-	{name: "resume", group: "Lead protocol", summary: "Resume a held task", syntax: "resume"},
-	{name: "continue", group: "Lead protocol", summary: "Continue unfinished streams after an interrupted writer round", syntax: "continue", example: "agentgate task continue"},
+	{name: "pause", group: "Lead protocol", summary: "Park the task with the true reason", syntax: "pause --file <path>|-", input: true},
+	{name: "resume", group: "Lead protocol", summary: "Lift a pause", syntax: "resume"},
 	{name: "guide", group: "Reference", summary: "Print the lead's workflow guide", syntax: "guide"},
-	{name: "reference", group: "Reference", summary: "Print the full JSON protocol and schemas", syntax: "reference"},
+	{name: "reference", group: "Reference", summary: "Print the protocol: commands and inputs, or one topic", syntax: "reference [plan|inputs|config|design|isolation]"},
 	{name: "hook", group: "Reference", summary: "Read a Claude Stop-hook payload from stdin", syntax: "hook"},
 	{name: "version", group: "Reference", summary: "Print the installed version", syntax: "version"},
 }
 
-var taskCommands = []string{"status", "watch", "stop", "parse", "preview", "prepare", "route", "architecture", "design", "consult", "launch", "replan", "answer", "tell", "check", "review", "visual", "triage", "fix", "finish", "land", "hold", "resume", "continue"}
+var taskCommands = []string{"status", "show", "watch", "stop", "parse", "preview", "prepare", "route", "architecture", "design", "consult", "start", "run", "answer", "decide", "amend", "tell", "check", "visual", "land", "pause", "resume"}
 var setupCommands = []string{"install", "doctor", "update", "config", "accounts", "modes"}
 
 func command(name string) (commandSpec, bool) {
@@ -97,7 +95,7 @@ func rootHelp() string {
 	out.WriteString("Use agentgate help <command> for syntax and examples. Every command accepts --help.\n")
 	out.WriteString("Groups: task <command>, setup <command>. Existing flat commands remain supported.\n")
 	out.WriteString("JSON inputs: --file <path>, --file - (stdin), or --plan <name> for saved plans.\n")
-	out.WriteString("JSON results go to stdout; errors go to stderr. Exit 0: success, 1: command error,\n2: failed checks. Design tools document their own exit codes.\n")
+	out.WriteString("JSON results go to stdout; errors go to stderr. Exit 0: success, 1: command error or a\ncommand refused in the task's present state (the answer says what is possible), 2: failed\nchecks. Design tools document their own exit codes.\n")
 	return out.String()
 }
 
@@ -138,6 +136,10 @@ func helpFor(parts []string) (string, error) {
 		if spec.name == "parse" || spec.name == "preview" {
 			out.WriteString("  --file <path>  Read request text from a file; use - for stdin.\n")
 			out.WriteString("  Request text can also be passed as an argument or read from stdin.\n")
+		} else if spec.name == "prepare" {
+			out.WriteString("  --file <path>  Read the input from a file; use - for stdin.\n")
+			out.WriteString("  The first call takes the user's request as it was typed. Later calls take one JSON\n")
+			out.WriteString("  object with answers or notes; unknown fields and trailing input are errors.\n")
 		} else {
 			out.WriteString("  --file <path>  Read JSON from a file; use - for stdin.\n")
 			out.WriteString("  Exactly one JSON object is accepted; unknown fields and trailing input are errors.\n")
@@ -150,7 +152,7 @@ func helpFor(parts []string) (string, error) {
 		fmt.Fprintf(&out, "\nExample\n  %s\n", spec.example)
 	}
 	if spec.group == "Lead protocol" {
-		out.WriteString("\nThis is a lead protocol command. Run `agentgate reference` for JSON fields.\n")
+		out.WriteString("\nThis is a lead protocol command. Run `agentgate reference` for its JSON fields.\n")
 	}
 	out.WriteString("\n-h, --help  Show help without performing the command.\n")
 	return out.String(), nil

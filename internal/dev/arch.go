@@ -80,25 +80,16 @@ func (r *Receipt) save() error {
 	return ops.WriteJSON(filepath.Join(r.Dir, "receipt.json"), r)
 }
 
-// fingerprint binds an architecture receipt to the contract, not to file contents:
-// source drift after a long pass must not throw the design away.
+// fingerprint binds an architecture receipt to what was asked, not to file contents or to how the work is
+// split: source drift after a long pass, a stage added later or an intermediate criterion must not throw
+// the design away.
 func (r *Resolved) fingerprint(rules []reviewRule) string {
-	parts := map[string]any{"brief": r.Plan.Brief, "files": r.Plan.Files(), "ui": r.Plan.UI, "mode": r.Mode}
-	if r.Plan.staged() {
-		// The design of a staged task is bound to what is asked and to the shape of the split, not to the
-		// file lists of stages that are still ahead and may be revised.
-		var names []string
-		for _, stage := range r.Plan.Stages {
-			names = append(names, stage.Name)
-		}
-		delete(parts, "files")
-		parts["stages"] = names
-	}
-	if len(r.Plan.Requirements) > 0 {
-		parts["requirements"] = r.Plan.Requirements
+	parts := map[string]any{"brief": r.Plan.Brief, "ui": r.Plan.UI, "mode": r.Mode}
+	if len(r.Plan.Stages) == 1 {
+		// A task of one stage is designed for exactly its files.
+		parts["files"] = r.Plan.Files()
 	}
 	if len(rules) > 0 {
-		// Future staged file lists may change without changing the instructions themselves.
 		policies := map[string]any{}
 		for _, rule := range rules {
 			policies[rule.ID] = map[string]any{"mode": rule.Mode, "scope": r.Config.ReviewRules[rule.ID].Files,
@@ -158,9 +149,10 @@ func Architecture(cfg *config.Config, plan *Plan) (any, error) {
 	receipt := &Receipt{ID: newID(), Kind: "architecture", Fingerprint: resolved.fingerprint(rules), Mode: resolved.Mode}
 	receipt.Dir = filepath.Join(designsDir(), receipt.ID)
 	subs := &substitutions{}
+	plan = resolved.Plan
 	packet := map[string]any{"brief": plan.Brief, "requirements": plan.Requirements, "files": plan.Files(), "streams": plan.allStreams(), "context": plan.Context, "ui": ui, "review_rules": rules}
-	if plan.staged() {
-		packet["requirements"], packet["stages"] = plan.Requirements, plan.Stages
+	if len(plan.Stages) > 1 {
+		packet["stages"] = plan.Stages
 	}
 	run := func(round, name string, route config.Route, extra map[string]any, schema any, from *ArchLane) (ArchLane, error) {
 		body := map[string]any{"round": round}

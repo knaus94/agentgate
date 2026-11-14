@@ -1,14 +1,14 @@
 package dev
 
-// currentReceipts evaluates one consistent view for all checks. Whole-task and
-// repository fingerprints are computed at most once per view, not once per
-// historical receipt or per row in the terminal panel.
+// currentReceipts evaluates one consistent view for all checks. The working tree is recorded at most once per
+// view, not once per historical receipt or per row in the terminal panel.
 func (g *Gate) currentReceipts() map[string]*CheckReceipt {
-	checks := make([]*Check, len(g.Plan.Checks))
-	for index := range g.Plan.Checks {
-		checks[index] = &g.Plan.Checks[index]
+	checks := g.checks()
+	pointers := make([]*Check, len(checks))
+	for index := range checks {
+		pointers[index] = &checks[index]
 	}
-	return g.receiptsFor(checks)
+	return g.receiptsFor(pointers)
 }
 
 func (g *Gate) currentReceipt(check *Check) *CheckReceipt {
@@ -22,8 +22,8 @@ func (g *Gate) receiptsFor(checks []*Check) map[string]*CheckReceipt {
 		latest[checkID(receipt.Argv)] = receipt
 	}
 	current := make(map[string]*CheckReceipt, len(checks))
-	var content, repository string
-	var measured, valid bool
+	var tree string
+	var measured bool
 	for _, check := range checks {
 		id := checkID(check.Argv)
 		receipt := latest[id]
@@ -39,12 +39,9 @@ func (g *Gate) receiptsFor(checks []*Check) map[string]*CheckReceipt {
 		}
 		if !measured {
 			measured = true
-			var contentErr, repositoryErr error
-			content, _, contentErr = g.contentDigest()
-			repository, repositoryErr = repositoryDigest()
-			valid = contentErr == nil && repositoryErr == nil
+			tree, _ = g.snapshot()
 		}
-		if valid && receipt.Repository != "" && receipt.Repository == repository && receipt.Digest == content {
+		if tree != "" && receipt.Tree == tree {
 			current[id] = receipt
 		}
 	}

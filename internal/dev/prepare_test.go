@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -11,73 +12,152 @@ import (
 	"github.com/knaus94/agentgate/internal/provider"
 )
 
-func TestPreparationDraftsWithoutWritingAndReusesDiscovery(t *testing.T) {
+// prepared is the answer of a scripted preparation worker.
+func prepared(status, summary string, plan any, questions []Question, pack any) string {
+	if questions == nil {
+		questions = []Question{}
+	}
+	raw, _ := json.Marshal(map[string]any{"status": status, "summary": summary, "questions": questions, "setup": []string{}, "plan": plan, "context_pack": pack})
+	return string(raw)
+}
+
+var fixturePack = map[string]any{"summary": "fixture map", "files": []packFile{{Path: "a.txt", Role: "owned"}}, "callers": []any{},
+	"invariants": []string{}, "conventions": []string{}, "unknowns": []string{}}
+
+func (f *fixture) prepare(input PrepareInput) map[string]any {
+	f.t.Helper()
+	return f.do("prepare", func() (any, error) { return Prepare(f.cfg, input) })
+}
+
+func TestPreparationDraftsWithoutWritingAndCorrectsItsPlanInTheSameSession(t *testing.T) {
 	f := newFixture(t)
 	plan := f.plan("-l the worker must not change the requested mode")
 	policy := ".agents/skills/client-ui/SKILL.md"
-	must(t, os.MkdirAll(filepath.Dir(policy), 0o755))
 	write(t, policy, "Use the project's field components.")
 	f.cfg.ReviewRules = map[string]config.ReviewRule{
 		"ui":        {Instructions: []string{policy}, Files: []string{"a.*"}},
 		"unrelated": {Instructions: []string{"missing-backend.md"}, Files: []string{"server/**"}},
 	}
 	f.cfg.ReviewRuleSources = map[string][]string{"ui": {".agentgate.json"}}
-	f.cfg.Design.Stand = json.RawMessage(`{"command":["yarn","dev"],"ready":"http://127.0.0.1:4200","cookies":[{"value":"private-cookie"}],"env":{"TOKEN":"private-value"}}`)
 	var attempts int
+	var session string
 	f.model = func(kind string, packet map[string]any, call provider.Call) (string, error) {
 		if kind != "prepare" {
 			return "", nil
 		}
 		attempts++
-		if call.Writer || (attempts == 2 && call.Resume == "") {
-			t.Fatal("preparation must read only and repair its draft in the same session")
+		if call.Writer || (attempts > 1 && call.Resume == "") {
+			t.Fatal("preparation must read only and correct its draft in the same session")
 		}
-		raw, _ := json.Marshal(packet)
-		if strings.Contains(string(raw), "private-cookie") || strings.Contains(string(raw), "private-value") {
-			t.Fatal("stand credentials reached the preparation worker")
-		}
-		catalogue, _ := json.Marshal(packet["review_rule_catalogue"])
-		if !strings.Contains(string(catalogue), policy) || !strings.Contains(string(catalogue), "a.*") ||
-			strings.Contains(string(catalogue), "field components") {
-			t.Fatal("discovery needs scoped instruction paths, not the bodies of every skill")
-		}
-		proposal, _ := json.Marshal(plan)
 		if attempts == 1 {
-			proposal = []byte(`{"brief":"missing streams"}`)
+			catalogue, _ := json.Marshal(packet["review_rule_catalogue"])
+			if !strings.Contains(string(catalogue), policy) || !strings.Contains(string(catalogue), "a.*") || strings.Contains(string(catalogue), "field components") {
+				t.Fatal("discovery needs scoped instruction paths, not the bodies of every skill")
+			}
+			// Three mistakes of form at once: a citation in the scope, an unknown kind of check, no domain.
+			return prepared("READY", "one line change", map[string]any{"brief": "Change the line",
+				"assessment": map[string]any{"size": "ordinary", "evidence": "one fixture"},
+				"streams":    []map[string]any{{"name": "core", "files": []string{"/abs/a.txt:10-20 — the line"}}},
+				"checks":     []map[string]any{{"argv": []string{"true"}, "kind": "check"}}}, nil, fixturePack), nil
 		}
-		answer := map[string]any{"status": "READY", "summary": "one line change", "questions": []string{}, "setup": []string{}, "plan_json": string(proposal),
-			"context_pack": map[string]any{"summary": "fixture map", "files": []packFile{{Path: "a.txt", Role: "owned"}}}}
-		out, _ := json.Marshal(answer)
-		return string(out), nil
+		if attempts == 2 {
+			problems := asStrings(packet["validation_problems"])
+			if len(problems) < 3 || !strings.Contains(strings.Join(problems, "\n"), "repository-relative") || !strings.Contains(strings.Join(problems, "\n"), `unknown check kind "check"`) {
+				t.Fatalf("the worker is told every problem of its plan at once: %v", problems)
+			}
+		}
+		session = call.Resume
+		return prepared("READY", "one line change", plan, nil, fixturePack), nil
 	}
-	result := f.do("prepare", func() (any, error) {
-		return Prepare(f.cfg, PrepareInput{Request: "-m change the line", Name: "prepared"})
-	})
+	result := f.prepare(PrepareInput{Request: "-m change the line", Name: "prepared"})
+	first := session
 	if result["status"] != "READY" || attempts != 2 || fileText(t, "a.txt") != "before\n" || Current() != nil {
-		t.Fatalf("preparation executed work: %v", result)
+		t.Fatalf("preparation executed work or was not corrected in place: %v", result)
 	}
 	rules := result["review_rules"].([]any)
-	if len(rules) != 1 || rules[0].(map[string]any)["id"] != "ui" ||
-		rules[0].(map[string]any)["sources"].([]any)[0] != ".agentgate.json" {
+	if len(rules) != 1 || rules[0].(map[string]any)["id"] != "ui" || rules[0].(map[string]any)["sources"].([]any)[0] != ".agentgate.json" {
 		t.Fatalf("preparation must report the applied rules and their sources: %v", rules)
+	}
+	if stages := result["stages"].([]any); len(stages) != 1 || result["mode"] != "medium" || !strings.Contains(result["next"].(string), "start --plan prepared") {
+		t.Fatalf("the lead gets the facts it decides on, not the whole plan: %v", result)
 	}
 	path, err := PlanFile("prepared")
 	must(t, err)
-	var saved Plan
-	must(t, json.Unmarshal([]byte(fileText(t, path)), &saved))
+	saved := &Plan{}
+	must(t, json.Unmarshal([]byte(fileText(t, path)), saved))
 	if saved.Request != "-m change the line" {
 		t.Fatal("the original request was weakened")
 	}
-	f.model = nil
-	f.launch(&saved)
-	if f.count("scout") != 0 || Current().ContextPack == "" {
-		t.Fatal("preparation's discovery must be handed to the writer without another scout")
+
+	// A note of the lead continues the same worker; it does not explore again.
+	f.prepare(PrepareInput{Notes: "Keep the trailing newline"})
+	if last := f.calls[len(f.calls)-1]; last.Resume != first || !strings.Contains(last.Prompt, "You already read the repository") {
+		t.Fatalf("a later call continues the open preparation: %+v", last.Resume)
 	}
-	f.review()
-	f.finish()
+
+	f.model = nil
+	saved = &Plan{}
+	must(t, json.Unmarshal([]byte(fileText(t, path)), saved))
+	done := f.do("start", func() (any, error) { return Start(f.cfg, saved, "prepared", false, RunInput{}) })
+	gate := Current()
+	if done["step"] != StepDone || gate.ContextPack == "" || gate.Preparation == "" || gate.PlanName != "prepared" {
+		t.Fatalf("the map drawn by preparation goes to the task's workers, and its worker can revise the plan later: %+v", gate.ContextPack)
+	}
+	for _, call := range f.calls {
+		if kindOf(call) == "writer" && !slices.Contains(call.ReadDirs, filepath.Dir(gate.ContextPack)) {
+			t.Fatal("the writer must be able to read the context pack")
+		}
+	}
 }
 
-func TestPreparationSavesStagedPlanningWithoutStartingImplementation(t *testing.T) {
+func TestAnswersGoToTheSameWorker(t *testing.T) {
+	f := newFixture(t)
+	plan := f.plan("-m add a page")
+	var sessions []string
+	f.model = func(kind string, packet map[string]any, call provider.Call) (string, error) {
+		if kind != "prepare" {
+			return "", nil
+		}
+		sessions = append(sessions, call.Resume)
+		if len(sessions) == 1 {
+			return prepared("BLOCKED", "the balance has two possible sources", nil, []Question{{ID: "source", Question: "Which API supplies the balance?",
+				Options: []string{"wallet service", "ledger export"}, Recommended: "wallet service"}}, nil), nil
+		}
+		answers, _ := json.Marshal(packet["answers"])
+		if !strings.Contains(string(answers), "Which API supplies the balance?") || !strings.Contains(string(answers), "the wallet service") {
+			t.Fatalf("the answer travels with its question: %s", answers)
+		}
+		return prepared("READY", "one page", plan, nil, fixturePack), nil
+	}
+	blocked := f.prepare(PrepareInput{Request: plan.Request, Name: "page"})
+	questions := blocked["questions"].([]any)
+	if blocked["status"] != "BLOCKED" || len(questions) != 1 || questions[0].(map[string]any)["id"] != "source" || Current() != nil {
+		t.Fatalf("a missing decision comes back as a question the lead can pass on: %v", blocked)
+	}
+	if _, err := os.Stat(filepath.Join(PlansDir, "page", "plan.json")); !os.IsNotExist(err) {
+		t.Fatal("a blocked draft was saved as a plan")
+	}
+	ready := f.prepare(PrepareInput{Answers: map[string]string{"source": "the wallet service"}})
+	if ready["status"] != "READY" || len(sessions) != 2 || sessions[0] != "" || sessions[1] == "" || ready["plan"] != "page" {
+		t.Fatalf("the user's answer continues the worker that asked: %v %v", ready, sessions)
+	}
+	if blocked["preparation"] != ready["preparation"] {
+		t.Fatal("an answer must not start another preparation")
+	}
+
+	// A different request is a different preparation.
+	f.model = func(kind string, _ map[string]any, call provider.Call) (string, error) {
+		if kind == "prepare" && call.Resume != "" {
+			t.Error("another request must not inherit a worker's conversation")
+		}
+		return prepared("READY", "another task", f.plan("-m rename the label"), nil, nil), nil
+	}
+	if other := f.prepare(PrepareInput{Request: "-m rename the label", Name: "label"}); other["preparation"] == ready["preparation"] {
+		t.Fatal("a new request needs its own preparation")
+	}
+}
+
+func TestAProposalIsNotAnAuthorization(t *testing.T) {
 	f := newFixture(t)
 	plan := f.plan("-m --staged plan integrate the backend")
 	plan.Streams = nil
@@ -90,45 +170,50 @@ func TestPreparationSavesStagedPlanningWithoutStartingImplementation(t *testing.
 		if kind != "prepare" {
 			return "", nil
 		}
-		proposal, _ := json.Marshal(plan)
-		answer, _ := json.Marshal(map[string]any{"status": "READY", "summary": "Two backend stages", "questions": []string{}, "setup": []string{}, "plan_json": string(proposal), "context_pack": map[string]any{}})
-		return string(answer), nil
+		return prepared("READY", "Two backend stages", plan, nil, nil), nil
 	}
-	result := f.do("prepare", func() (any, error) {
-		return Prepare(f.cfg, PrepareInput{Request: plan.Request, Name: "backend-proposal"})
-	})
-	if result["status"] != "READY" || f.count("prepare") != 1 || Current() != nil || f.count("writer") != 0 {
-		t.Fatal(result)
+	result := f.prepare(PrepareInput{Request: plan.Request, Name: "backend-proposal"})
+	if result["status"] != "READY" || f.count("prepare") != 1 || Current() != nil || f.count("writer") != 0 || !strings.Contains(result["next"].(string), "--implement") {
+		t.Fatalf("a planning request keeps the stages it proposes and starts nothing: %v", result)
 	}
 	path, err := PlanFile("backend-proposal")
 	must(t, err)
-	var saved Plan
-	must(t, json.Unmarshal([]byte(fileText(t, path)), &saved))
+	saved := &Plan{}
+	must(t, json.Unmarshal([]byte(fileText(t, path)), saved))
 	if saved.Request != plan.Request || len(saved.Stages) != 2 {
-		t.Fatal("planning lost its scope or read-only authority")
+		t.Fatal("planning lost its scope or changed what the user asked for")
 	}
-	f.fails("launch", "read-only", func() (any, error) { return Launch(f.cfg, &saved) })
-	if fileText(t, "a.txt") != "before\n" || fileText(t, "b.txt") != "before\n" {
-		t.Fatal("planning changed application files")
+	f.fails("start", "--implement", func() (any, error) { return Start(f.cfg, saved, "backend-proposal", false, RunInput{}) })
+	if fileText(t, "a.txt") != "before\n" || fileText(t, "b.txt") != "before\n" || Current() != nil {
+		t.Fatal("planning changed application files or opened a task")
+	}
+	f.model = nil
+	done := f.do("start", func() (any, error) { return Start(f.cfg, saved, "backend-proposal", true, RunInput{}) })
+	if done["step"] != StepDone || Current().Request.Action != "implement" || fileText(t, "b.txt") != "after\n" {
+		t.Fatalf("the same plan runs once the user authorized it, without being edited: %v", done)
 	}
 }
 
-func TestInvalidPreparationStopsWithPublicDiagnostics(t *testing.T) {
+func TestAPlanThatStaysInvalidStopsWithEveryProblemNamed(t *testing.T) {
 	f := newFixture(t)
-	f.model = func(kind string, _ map[string]any, _ provider.Call) (string, error) {
+	f.model = func(kind string, _ map[string]any, call provider.Call) (string, error) {
 		if kind == "prepare" {
-			return `{"status":"READY","summary":"invalid proposal","questions":[],"setup":[],"plan_json":"{\"brief\":\"no streams\"}","context_pack":{}}`, nil
+			return prepared("READY", "invalid proposal", map[string]any{"brief": "no streams"}, nil, nil), nil
 		}
 		return "", nil
 	}
-	result := f.do("prepare", func() (any, error) {
-		return Prepare(f.cfg, PrepareInput{Request: "-m plan the backend", Name: "invalid-proposal"})
-	})
-	if result["status"] != "BLOCKED" || result["reason"] != "invalid_plan" || !strings.Contains(result["validation_error"].(string), "streams are required") || f.count("prepare") != 2 || Current() != nil {
-		t.Fatalf("invalid preparation lost its bounded diagnostic: %v", result)
+	result := f.prepare(PrepareInput{Request: "-m plan the backend", Name: "invalid-proposal"})
+	if result["status"] != "BLOCKED" || result["reason"] != "invalid_plan" || !strings.Contains(strings.Join(asStrings(result["problems"]), "\n"), "streams are required") ||
+		f.count("prepare") != corrections+1 || Current() != nil {
+		t.Fatalf("an invalid preparation ends with a bounded, public diagnostic: %v", result)
+	}
+	for index, call := range f.calls {
+		if (index > 0) != (call.Resume != "") {
+			t.Fatal("every correction goes into the session of the worker that made the mistake")
+		}
 	}
 	if _, err := os.Stat(filepath.Join(PlansDir, "invalid-proposal", "plan.json")); !os.IsNotExist(err) {
-		t.Fatal("invalid proposal was saved")
+		t.Fatal("an invalid proposal was saved")
 	}
 }
 
@@ -140,45 +225,30 @@ func TestPreparationReportsMissingInstructionsForTheDiscoveredScope(t *testing.T
 		if kind != "prepare" {
 			return "", nil
 		}
-		proposal, _ := json.Marshal(plan)
-		answer, _ := json.Marshal(map[string]any{"status": "READY", "summary": "scoped the UI", "questions": []string{}, "setup": []string{}, "plan_json": string(proposal), "context_pack": map[string]any{}})
-		return string(answer), nil
+		return prepared("READY", "scoped the UI", plan, nil, nil), nil
 	}
-	result := f.do("prepare", func() (any, error) { return Prepare(f.cfg, PrepareInput{Request: plan.Request, Name: "missing-rules"}) })
+	result := f.prepare(PrepareInput{Request: plan.Request, Name: "missing-rules"})
 	if result["status"] != "BLOCKED" || !strings.Contains(result["summary"].(string), "missing-skill.md") || len(result["review_rules"].([]any)) != 1 {
 		t.Fatalf("missing applicable instructions need a visible setup blocker: %v", result)
 	}
 	if _, err := os.Stat(filepath.Join(PlansDir, "missing-rules", "plan.json")); !os.IsNotExist(err) {
-		t.Fatal("an executable plan was saved without its required project rules")
+		t.Fatal("a plan was saved without its required project rules")
 	}
 }
 
-func TestPreparationKeepsMissingDecisionsAndToolFailuresOutOfTheLead(t *testing.T) {
+func TestATechnicalBlockerAndAFailedCatalogueReachTheLeadAsTheyAre(t *testing.T) {
 	f := newFixture(t)
 	f.model = func(kind string, _ map[string]any, _ provider.Call) (string, error) {
 		if kind == "prepare" {
-			return `{"status":"BLOCKED","summary":"no business contract","questions":["Which API supplies the balance?"],"setup":[],"plan_json":"","context_pack":{}}`, nil
+			raw, _ := json.Marshal(map[string]any{"status": "BLOCKED", "summary": "measurement requires a supported mobile context", "questions": []Question{},
+				"setup": []string{"Enable mobile emulation"}, "plan": nil, "context_pack": nil})
+			return string(raw), nil
 		}
 		return "", nil
 	}
-	result := f.do("prepare", func() (any, error) { return Prepare(f.cfg, PrepareInput{Request: "-m add a page", Name: "blocked"}) })
-	if result["status"] != "BLOCKED" || Current() != nil {
-		t.Fatal(result)
-	}
-	if _, err := os.Stat(filepath.Join(PlansDir, "blocked", "plan.json")); !os.IsNotExist(err) {
-		t.Fatal("a blocked draft was saved as executable")
-	}
-	f.model = func(kind string, _ map[string]any, _ provider.Call) (string, error) {
-		if kind == "prepare" {
-			return `{"status":"BLOCKED","summary":"measurement requires a supported mobile context","questions":[],"setup":["Enable mobile emulation"],"plan_json":"","context_pack":{}}`, nil
-		}
-		return "", nil
-	}
-	result = f.do("prepare", func() (any, error) {
-		return Prepare(f.cfg, PrepareInput{Request: "-m repair measurement", Name: "technical-blocker"})
-	})
-	if result["status"] != "BLOCKED" || f.count("prepare") != 2 {
-		t.Fatal("a technical blocker without product questions must be returned, not retried or hidden in a private result file")
+	result := f.prepare(PrepareInput{Request: "-m repair measurement", Name: "technical-blocker"})
+	if result["status"] != "BLOCKED" || f.count("prepare") != 1 || len(asStrings(result["setup"])) != 1 || !strings.Contains(result["next"].(string), "prerequisite") {
+		t.Fatalf("a technical blocker without product questions is returned, not retried: %v", result)
 	}
 	command := filepath.Join(t.TempDir(), "catalogue")
 	write(t, command, "#!/bin/sh\nprintf '%s\\n' 'profile unavailable' >&2\nexit 2\n")
@@ -187,70 +257,70 @@ func TestPreparationKeepsMissingDecisionsAndToolFailuresOutOfTheLead(t *testing.
 	layoutCommand = func() string { return command }
 	t.Cleanup(func() { layoutCommand = old })
 	f.fails("prepare", "profile unavailable", func() (any, error) {
-		return Prepare(f.cfg, PrepareInput{Request: "-m build https://www.figma.com/design/abc/example?node-id=1-2"})
+		return Prepare(f.cfg, PrepareInput{Request: "-m build https://www.figma.com/design/abc/example?node-id=1-2", Fresh: true})
 	})
-	if f.count("prepare") != 2 {
+	if f.count("prepare") != 1 {
 		t.Fatal("do not spend a worker when the design catalogue is unavailable")
 	}
 }
 
-func TestReplanKeepsTheTaskAndRequiresFreshReview(t *testing.T) {
+func TestPreparationRevisesThePlanOfARunningTask(t *testing.T) {
 	f := newFixture(t)
-	plan := f.plan("-m change the line")
-	f.launch(plan)
-	f.review()
-	before := Current()
-	plan.Update = "Add a precise check without changing the implementation"
-	plan.Checks = append(plan.Checks, Check{Argv: []string{"test", "-s", "a.txt"}})
-	f.do("replan", func() (any, error) { return Replan(f.cfg, Current(), plan) })
-	after := Current()
-	if after.ID != before.ID || digest(after.Baseline) != digest(before.Baseline) || len(after.Writers) != len(before.Writers) || after.Phase != "awaiting-review" {
-		t.Fatal("replan reset the task or its original snapshot")
-	}
-	f.fails("finish", "no current independent review", func() (any, error) { return Finish(f.cfg, Current(), FinishInput{Summary: "not yet"}) })
-	f.do("hold", func() (any, error) { return Hold(f.cfg, Current(), HoldInput{Reason: "user pause"}) })
-	f.fails("replan", "explicitly resume", func() (any, error) { return Replan(f.cfg, Current(), plan) })
-	f.do("resume", func() (any, error) { return Resume(f.cfg, Current()) })
-	f.review()
-	f.finish()
-}
-
-func TestReplanCanRepairABlockedCorrectionAfterExplicitResume(t *testing.T) {
-	f := newFixture(t)
-	plan := f.plan("-m correct the page")
-	f.launch(plan)
-	f.model = func(kind string, _ map[string]any, _ provider.Call) (string, error) {
-		if kind == "review" {
-			return `{"reports":[{"axis":"correctness","status":"NEEDS_FIX","findings":[` + finding("P1") + `],"checked":["read"],"resolutions":[]}]}`, nil
+	plan := stagedPlan("-m build the feature")
+	changeQuality(f, func(q *QualityReport) { q.Requirements[0].Status = "partial" })
+	reviewer := f.model
+	f.model = func(kind string, packet map[string]any, call provider.Call) (string, error) {
+		if kind == "prepare" {
+			return prepared("READY", "three stages", plan, nil, fixturePack), nil
 		}
-		if kind == "writer" {
-			return `{"status":"BLOCKED","summary":"measurement contract needs correction","blockers":["Which content boundary should be measured?"],"handoff":"","deviations":[]}`, nil
+		return reviewer(kind, packet, call)
+	}
+	f.prepare(PrepareInput{Request: plan.Request, Name: "feature"})
+	saved := &Plan{}
+	path, _ := PlanFile("feature")
+	must(t, json.Unmarshal([]byte(fileText(t, path)), saved))
+	stopped := f.do("start", func() (any, error) { return Start(f.cfg, saved, "feature", false, RunInput{}) })
+	if !slices.Equal(needs(stopped), []string{"requirement"}) {
+		t.Fatalf("the fixture must stop on the partial requirement: %v", stopped)
+	}
+	session := loadPreparation(Current().Preparation).Session
+	revised := revisedFoundation(t, plan)
+	var seen map[string]any
+	f.model = func(kind string, packet map[string]any, call provider.Call) (string, error) {
+		if kind != "prepare" {
+			return "", nil
 		}
-		return "", nil
+		if seen == nil {
+			seen = packet
+			if call.Resume != session {
+				t.Error("the worker that drafted the plan revises it")
+			}
+			forgetful := clonePlan(t, revised)
+			forgetful.Update = ""
+			return prepared("READY", "moved R1 to the stage that completes it", forgetful, nil, nil), nil
+		}
+		if !strings.Contains(strings.Join(asStrings(packet["validation_problems"]), "\n"), "set update") {
+			t.Errorf("a revision without its reason is sent back: %v", packet["validation_problems"])
+		}
+		return prepared("READY", "moved R1 to the stage that completes it", revised, nil, nil), nil
 	}
-	result := f.review()
-	id := result["untriaged"].([]any)[0].(string)
-	f.do("triage", func() (any, error) {
-		return Triage(f.cfg, Current(), TriageInput{Dispositions: []Disposition{{ID: id, Decision: "accepted", Evidence: "confirmed"}}})
-	})
-	f.do("fix", func() (any, error) { return Fix(f.cfg, Current(), FixInput{}) })
-	before := Current()
-	if before.Phase != "held" || before.ResumePhase != "correcting" {
-		t.Fatal("fixture did not reproduce the blocked correction")
+	result := f.prepare(PrepareInput{Notes: "R1 is completed by the last stage"})
+	needed, _ := json.Marshal(seen["needs"])
+	if seen["current_plan"] == nil || seen["position"] == nil || !strings.Contains(string(needed), `"kind":"requirement"`) {
+		t.Fatalf("the worker sees the task it revises and what the task needs: %s", needed)
 	}
-	plan.Update = "Correct the verification contract, preserving unfinished findings"
-	plan.Checks = append(plan.Checks, Check{Argv: []string{"test", "-s", "a.txt"}})
-	f.fails("replan", "explicitly resume", func() (any, error) { return Replan(f.cfg, Current(), plan) })
-	f.do("resume", func() (any, error) { return Resume(f.cfg, Current()) })
-	f.do("replan", func() (any, error) { return Replan(f.cfg, Current(), plan) })
-	after := Current()
-	if after.ID != before.ID || digest(after.Baseline) != digest(before.Baseline) || len(after.accepted()) != 1 || after.Phase != "held" || after.ResumePhase != "correcting" {
-		t.Fatal("measurement repair reset the task or waived an unfinished finding")
+	gate := Current()
+	if result["status"] != "READY" || !strings.Contains(result["next"].(string), "amend --plan feature") || len(gate.Revisions) != 1 || gate.ContextPack == "" {
+		t.Fatalf("a revision is a proposal until it is amended, and it keeps the map it had: %v", result)
 	}
-	f.model = nil
-	f.do("answer", func() (any, error) {
-		return Answer(f.cfg, Current(), AnswerInput{Stream: "core", Answer: "Use the corrected measurement contract"})
-	})
-	f.review()
-	f.finish()
+	must(t, json.Unmarshal([]byte(fileText(t, path)), saved))
+	f.raw, f.model = false, nil
+	f.amend(saved)
+	if done := f.proceed(); done["step"] != StepDone || len(Current().Revisions) != 2 {
+		t.Fatalf("the amended task runs to its end: %v", done)
+	}
+	brief, _ := PlanShow("feature")
+	if !strings.Contains(brief.(string), "## Requirements") {
+		t.Fatalf("the brief of the plan stays readable: %v", brief)
+	}
 }

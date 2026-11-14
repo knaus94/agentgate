@@ -84,8 +84,8 @@ func TestTerminalTextCannotSetClipboardOrMoveCursor(t *testing.T) {
 }
 
 func renderFixture(width, height int) *panel {
-	gate := &Gate{ID: strings.Repeat("a", 32), Session: "session", Cwd: "/tmp/repo", Phase: "awaiting-review", Mode: "medium", CreatedAt: time.Now().Unix() - 10,
-		Plan: &Plan{Brief: "A readable plan", Streams: []Stream{{Name: "core", Files: []string{"main.go"}}}}}
+	gate := &Gate{ID: strings.Repeat("a", 32), Session: "session", Cwd: "/tmp/repo", Step: StepVerify, Mode: "medium", Modes: []string{"medium"}, CreatedAt: time.Now().Unix() - 10,
+		Plan: &Plan{Brief: "A readable plan", Single: true, Stages: []Stage{{Name: "main", Streams: []Stream{{Name: "core", Files: []string{"main.go"}}}}}}}
 	task := &taskView{Dir: "task", Gate: gate, Title: "Проверить 你好 task \x1b]52;c;clipboard\x07", Repo: "repo"}
 	for i := 0; i < 30; i++ {
 		task.Lanes = append(task.Lanes, laneView{Kind: "writer", Name: fmt.Sprintf("stream-%02d", i), Route: "sol:high", Status: "COMPLETED", Note: "done"})
@@ -153,7 +153,7 @@ func TestDashboardDoesNotReportAReusedPIDAsRunning(t *testing.T) {
 func TestWatchSnapshotIsReadOnlyAndDoesNotNeedATerminal(t *testing.T) {
 	f := newFixture(t)
 	out := WatchSnapshot(f.cfg, false)
-	if out["schema_version"] != 1 || out["read_only"] != true || len(out["tasks"].([]map[string]any)) != 0 {
+	if out["schema_version"] != 2 || out["read_only"] != true || len(out["tasks"].([]map[string]any)) != 0 {
 		t.Fatal(out)
 	}
 	text := PanelText(f.cfg, false, false, 60, 0)
@@ -164,7 +164,7 @@ func TestWatchSnapshotIsReadOnlyAndDoesNotNeedATerminal(t *testing.T) {
 
 func TestDashboardUsesRecordedReviewOrderAndLatestWriterRoute(t *testing.T) {
 	f := newFixture(t)
-	f.launch(f.plan("-m change the line"))
+	f.start(f.plan("-m change the line"))
 	gate := Current()
 	for index, name := range []string{"review-9-ffff", "review-10-aaaa"} {
 		dir := filepath.Join(gate.dir(), name)

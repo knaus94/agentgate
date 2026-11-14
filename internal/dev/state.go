@@ -2,17 +2,12 @@ package dev
 
 import (
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"slices"
-	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -63,7 +58,7 @@ func Confined() bool {
 	return false
 }
 
-// Root is where gates, receipts and designs live; tests replace it.
+// Root is where tasks, receipts and designs live; tests replace it.
 var Root = func() string {
 	base := os.Getenv("XDG_STATE_HOME")
 	if base == "" {
@@ -84,7 +79,7 @@ func newID() string {
 	return hex.EncodeToString(sum[:16])
 }
 
-// session identifies the lead conversation that owns a gate.
+// session identifies the lead conversation that owns a task.
 func session() string {
 	if value := os.Getenv("AGENTGATE_SESSION"); value != "" {
 		return value
@@ -105,10 +100,10 @@ func checkoutDir(cwd string) string {
 	return filepath.Join(Root(), digest(cwd)[:24])
 }
 
-// sessionDir holds one lead session's gate in one checkout, so parallel sessions never block each other.
+// sessionDir holds one lead session's task in one checkout, so parallel sessions never block each other.
 func sessionDir(cwd, id string) string {
-	// Session identifiers come from CLI environments and hooks. Preserve normal
-	// UUIDs and names, but never let an identifier become a path expression.
+	// Session identifiers come from CLI environments and hooks. Preserve normal UUIDs and names, but never
+	// let an identifier become a path expression.
 	if id != "" && !safeName.MatchString(id) {
 		id = "session-" + digest(id)[:24]
 	}
@@ -118,6 +113,9 @@ func sessionDir(cwd, id string) string {
 func home() string { return sessionDir("", session()) }
 
 func (g *Gate) dir() string { return filepath.Join(sessionDir(g.Cwd, g.Session), g.ID) }
+
+// objects is the task's private object directory: its trees, and the blobs the repository does not have.
+func (g *Gate) objects() string { return filepath.Join(g.dir(), "objects") }
 
 func readGate(cwd, id string) *Gate {
 	gate, _ := loadGate(cwd, id)
@@ -138,6 +136,8 @@ func loadGate(cwd, id string) (*Gate, error) {
 	return gate, nil
 }
 
+// loadGateFile reads one task. A task saved by an earlier format is translated in memory; its origin trees
+// are built later, under the task's own lock and in its own checkout (see upgrade).
 func loadGateFile(path string) (*Gate, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -146,9 +146,24 @@ func loadGateFile(path string) (*Gate, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read task state: %w", err)
 	}
-	gate := &Gate{}
-	if err := json.Unmarshal(raw, gate); err != nil {
+	var probe struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
 		return nil, fmt.Errorf("task state is corrupt; preserve state.json and restore its last good copy: %w", err)
+	}
+	gate := &Gate{}
+	switch {
+	case probe.Version > stateVersion:
+		return nil, fmt.Errorf("task state was written by a newer agentgate (format %d); update the tool", probe.Version)
+	case probe.Version < stateVersion:
+		if gate, err = migrateState(raw); err != nil {
+			return nil, fmt.Errorf("task state of an earlier version cannot be read; preserve state.json: %w", err)
+		}
+	default:
+		if err := json.Unmarshal(raw, gate); err != nil {
+			return nil, fmt.Errorf("task state is corrupt; preserve state.json and restore its last good copy: %w", err)
+		}
 	}
 	if err := validateGateState(gate); err != nil {
 		return nil, fmt.Errorf("task state is invalid; preserve state.json and restore its last good copy: %w", err)
@@ -162,14 +177,17 @@ func loadGateFile(path string) (*Gate, error) {
 	if gate.Baselines == nil {
 		gate.Baselines = map[string]int{}
 	}
+	if gate.Disputes == nil {
+		gate.Disputes = map[string]Dispute{}
+	}
 	return gate, nil
 }
 
-// Current is this session's gate in this checkout, or nil.
+// Current is this session's task in this checkout, or nil.
 func Current() *Gate { return readGate("", session()) }
 
-// LoadCurrent distinguishes a missing task from an unreadable or damaged one.
-// Mutations must use it so corruption can never silently start another task.
+// LoadCurrent distinguishes a missing task from an unreadable or damaged one. Mutations must use it so
+// corruption can never silently start another task.
 func LoadCurrent() (*Gate, error) { return loadGate("", session()) }
 
 func (g *Gate) save() error {
@@ -180,18 +198,16 @@ func (g *Gate) save() error {
 	return ops.WriteJSON(filepath.Join(dir, "state.json"), g)
 }
 
-func (g *Gate) active() bool { return g.Phase != "complete" && g.Phase != "cancelled" }
-
-// requireLead refuses to let a spawned worker, or a different session, drive the gate.
+// requireLead refuses to let a spawned worker, or a different session, drive the task.
 func requireLead(gate *Gate) error {
 	if os.Getenv(provider.WorkerEnv) != "" {
-		return errors.New("a worker cannot approve, triage or complete the gate")
+		return errors.New("a worker cannot approve, decide or complete the task")
 	}
 	if session() == "" {
 		return errors.New("no lead session: run inside Claude Code or Codex, or set AGENTGATE_SESSION")
 	}
 	if gate != nil && gate.Session != session() {
-		return errors.New("the gate belongs to another lead session")
+		return errors.New("the task belongs to another lead session")
 	}
 	return nil
 }
@@ -227,10 +243,18 @@ func flock(path string, how int, busy string) (func(), error) {
 	return func() { file.Close() }, nil
 }
 
+// claims is what the task owns in a shared checkout: the scope of its whole plan, for as long as it is active.
+func (g *Gate) claims() []string {
+	if !g.active() || g.Worktree != "" {
+		return nil
+	}
+	return g.Plan.Files()
+}
+
 // checkOwnership refuses both known conflicts and unreadable claims. Corrupt peer state does not release
 // its files; the caller holds scopeLock while checking and recording a claim.
-func checkOwnership(files []string) error {
-	if len(files) == 0 {
+func checkOwnership(scope []string) error {
+	if len(scope) == 0 {
 		return nil
 	}
 	var out []string
@@ -257,50 +281,62 @@ func checkOwnership(files []string) error {
 		if err != nil {
 			return fmt.Errorf("cannot verify file ownership from %s: %w; preserve the file and restore its last good copy", path, err)
 		}
-		if other.Session == session() || !other.active() || other.Worktree != "" {
+		if other.Session == session() {
 			continue
 		}
-		for _, file := range files {
-			if slices.Contains(other.Files, file) {
-				out = append(out, fmt.Sprintf("%s (session %s, %s)", file, other.Session, other.Phase))
+		if mine, theirs, collide := firstOverlap(scope, other.claims()); collide {
+			what := mine
+			if mine != theirs {
+				what = mine + " (their " + theirs + ")"
 			}
+			out = append(out, fmt.Sprintf("%s (session %s, %s)", what, other.Session, other.Step))
 		}
 	}
 	if len(out) > 0 {
-		return fmt.Errorf("files are owned by another session's gate: %s", strings.Join(out, "; "))
+		return fmt.Errorf("files are owned by another session's task: %s", strings.Join(out, "; "))
 	}
 	return nil
 }
 
-func subtract(values, remove []string) []string {
-	var out []string
-	for _, value := range values {
-		if !slices.Contains(remove, value) {
-			out = append(out, value)
-		}
+// atRoot refuses to open a task anywhere but the root of the working tree: every recorded path is relative to it.
+func atRoot() error {
+	top, err := git("rev-parse", "--show-toplevel")
+	if err != nil {
+		return errors.New("run inside a git repository")
 	}
-	sort.Strings(out)
-	return slices.Compact(out)
+	here, _ := os.Getwd()
+	root, _ := filepath.EvalSymlinks(strings.TrimSpace(top))
+	if real, err := filepath.EvalSymlinks(here); err == nil {
+		here = real
+	}
+	if root != here {
+		return fmt.Errorf("run agentgate from the root of the working tree: %s", strings.TrimSpace(top))
+	}
+	return nil
 }
 
-// begin creates the gate and freezes the pre-task state of every owned file, including the user's uncommitted edits.
-func begin(resolved *Resolved) (gate *Gate, err error) {
-	if previous := Current(); previous != nil && previous.active() {
-		return nil, errors.New("an unfinished gate already exists; resume it or hold it explicitly")
+// begin opens the task and records the working tree as the task finds it, including the user's uncommitted edits.
+func begin(resolved *Resolved, name string) (gate *Gate, err error) {
+	previous, err := LoadCurrent()
+	if err != nil {
+		return nil, err
 	}
-	if previous := Current(); previous != nil && previous.Worktree != "" && previous.Landed == "" {
+	if previous != nil && previous.active() {
+		return nil, errors.New("an unfinished task already exists; `run` continues it, `amend` changes its plan, `pause` {cancelled: true} drops it")
+	}
+	if previous != nil && previous.Worktree != "" && previous.Landed == "" {
 		return nil, errors.New("this session's finished isolated task is not landed yet: `land` it (or drop it) before starting another")
 	}
-	// A staged task begins with its first stage; the gate keeps the whole plan beside it.
-	whole := resolved
-	if len(resolved.Stages) > 0 {
-		resolved = resolved.Stages[0]
+	if err := atRoot(); err != nil {
+		return nil, err
 	}
 	plan := resolved.Plan
-	files := plan.Files()
-	gate = &Gate{ID: newID(), Session: session(), Request: resolved.Request, Cwd: base()}
-	if resolved.Request.Worktree || (resolved.Config.Worktree.Default && !resolved.Request.ReviewFirst()) ||
-		(len(whole.Stages) > 0 && isolateStaged(resolved.Config)) {
+	gate = &Gate{Version: stateVersion, ID: newID(), Session: session(), Request: resolved.Request, Cwd: base(), Plan: plan, PlanName: name,
+		Modes: resolved.Modes, Mode: resolved.Modes[0], Step: StepWrite, CreatedAt: time.Now().Unix(),
+		Dispositions: map[string]Disposition{}, Resolutions: map[string]string{}, Baselines: map[string]int{}, Disputes: map[string]Dispute{}}
+	gate.Revisions = []Revision{{Number: 1, At: gate.CreatedAt, Digest: digest(plan)}}
+	staged := len(plan.Stages) > 1
+	if resolved.Request.Worktree || (resolved.Config.Worktree.Default && !resolved.Request.ReviewFirst()) || (staged && isolateStaged(resolved.Config)) {
 		// An isolated task shares no file with anyone, so it claims none. Preparing the worktree can take
 		// minutes and must not hold the checkout's lock.
 		if err := gate.isolate(resolved.Config); err != nil {
@@ -319,102 +355,31 @@ func begin(resolved *Resolved) (gate *Gate, err error) {
 	}
 	defer unlock()
 	if gate.Worktree == "" {
-		if err := checkOwnership(files); err != nil {
+		if err := checkOwnership(plan.Files()); err != nil {
 			return nil, err
 		}
 	}
-	context := subtract(append(slices.Clone(plan.Context), guidance(files)...), files)
-	baseline, err := capture(append(slices.Clone(files), context...))
-	if err != nil {
+	if gate.BaseTree, err = gate.snapshot(); err != nil {
 		return nil, err
 	}
-	phase := "implementing"
 	if resolved.Request.ReviewFirst() {
-		phase = "awaiting-review"
+		// A review of existing work is measured from the commit it started at, not from the present tree.
 		ref := plan.BaseRef
 		if ref == "" {
 			ref = "HEAD"
 		}
-		commit, err := git("rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
-		if err != nil {
+		if gate.BaseTree = commitTree(gate.objects(), ref); gate.BaseTree == "" {
 			return nil, fmt.Errorf("base_ref %q is not a commit", ref)
 		}
-		commit = strings.TrimSpace(commit)
-		for _, file := range files {
-			baseline[file] = nil
-			if raw, err := exec.Command("git", "show", commit+":"+file).Output(); err == nil {
-				mode := uint32(0o644)
-				if tree, _ := git("ls-tree", commit, "--", file); strings.HasPrefix(tree, "100755") {
-					mode = 0o755
-				}
-				baseline[file] = &FileState{Bytes: base64.StdEncoding.EncodeToString(raw), Mode: mode}
-			}
-		}
+		gate.Step = StepVerify
 	}
-	head, _ := git("rev-parse", "HEAD")
-	files0, err := manifest()
-	if err != nil {
-		return nil, err
-	}
-	gate.Mode, gate.Plan, gate.PlanVersion = resolved.Mode, plan, 1
-	gate.Files, gate.Context, gate.Baseline, gate.HeadBefore, gate.Manifest = files, context, baseline, strings.TrimSpace(head), files0
-	gate.WriteFiles, gate.Phase, gate.CreatedAt = files, phase, time.Now().Unix()
-	gate.Dispositions, gate.Resolutions, gate.Baselines = map[string]Disposition{}, map[string]string{}, map[string]int{}
-	if len(whole.Stages) > 0 {
-		gate.Epic = whole.Plan
-		gate.EpicHead, gate.EpicManifest = gate.HeadBefore, maps.Clone(gate.Manifest)
-		if gate.EpicBaseline, err = capture(whole.Plan.Files()); err != nil {
-			return nil, err
-		}
-	}
+	gate.StageTree = gate.BaseTree
 	ops.BindGate(gate.ID)
 	prune(resolved.Config.RetentionDays)
 	return gate, gate.save()
 }
 
-// extend replaces the contract of an unfinished task. Accumulated files and original baselines are kept.
-func (g *Gate) extend(resolved *Resolved) error {
-	plan := resolved.Plan
-	if strings.TrimSpace(plan.Update) == "" {
-		return errors.New("a continuation needs update: what changed and why, plus the complete replacement plan")
-	}
-	files := plan.Files()
-	if missing := subtract(g.Files, files); len(missing) > 0 {
-		return fmt.Errorf("a continuation keeps every owned file; missing: %s", strings.Join(missing, ", "))
-	}
-	if resolved.Request.Mode == "" {
-		resolved.Mode = g.Mode // a continuation keeps its mode unless the request names another
-	}
-	unlock, err := scopeLock()
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	added := subtract(files, g.Files)
-	if g.Worktree == "" {
-		if err := checkOwnership(added); err != nil {
-			return err
-		}
-	}
-	context := subtract(append(append(slices.Clone(g.Context), plan.Context...), guidance(files)...), files)
-	fresh, err := capture(append(added, subtract(context, g.Context)...))
-	if err != nil {
-		return err
-	}
-	for name, state := range fresh {
-		if _, known := g.Baseline[name]; !known {
-			g.Baseline[name] = state
-		}
-	}
-	g.Files, g.Context, g.WriteFiles = files, context, files
-	g.Foreign = subtract(g.Foreign, files)
-	g.Plan, g.Mode, g.PlanVersion = plan, resolved.Mode, g.PlanVersion+1
-	// Keep the original checkout manifest: changing a plan must not turn
-	// unreviewed writes outside its scope into an accepted baseline.
-	return g.save()
-}
-
-// prune removes finished gates older than the retention period.
+// prune removes finished tasks older than the retention period.
 func prune(days int) int {
 	if days <= 0 {
 		return 0
@@ -424,20 +389,24 @@ func prune(days int) int {
 	paths, _ := filepath.Glob(filepath.Join(Root(), "*", "*", "state.json"))
 	for _, path := range paths {
 		info, err := os.Stat(path)
-		raw, _ := os.ReadFile(path)
-		gate := &Gate{}
-		if err != nil || info.ModTime().After(limit) || json.Unmarshal(raw, gate) != nil || gate.active() ||
-			(gate.Worktree != "" && gate.Landed == "") { // finished work nobody landed yet is not garbage
+		if err != nil || info.ModTime().After(limit) {
+			continue
+		}
+		gate, err := loadGateFile(path)
+		if err != nil || gate == nil || gate.active() || (gate.Worktree != "" && gate.Landed == "") { // finished work nobody landed yet is not garbage
 			continue
 		}
 		if os.RemoveAll(filepath.Dir(path)) == nil {
 			removed++
 		}
 	}
-	// Designs and context packs belong to a checkout; an old one is not counted, only dropped.
-	shared, _ := filepath.Glob(filepath.Join(Root(), "*", "designs", "*"))
-	packs, _ := filepath.Glob(filepath.Join(Root(), "*", "scout", "*"))
-	for _, path := range append(shared, packs...) {
+	// Designs, preparations and context packs belong to a checkout; an old one is not counted, only dropped.
+	var shared []string
+	for _, kind := range []string{"designs", "preparations", "packs", "scout"} {
+		found, _ := filepath.Glob(filepath.Join(Root(), "*", kind, "*"))
+		shared = append(shared, found...)
+	}
+	for _, path := range shared {
 		if info, err := os.Stat(path); err == nil && info.ModTime().Before(limit) {
 			_ = os.RemoveAll(path)
 		}

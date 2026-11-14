@@ -12,9 +12,6 @@ var Config []byte
 //go:embed guide.md
 var Guide string
 
-//go:embed reference.md
-var Reference string
-
 //go:embed dev.md
 var Command string
 
@@ -29,6 +26,32 @@ var SkillPolicy string
 
 //go:embed prompts/*.md
 var prompts embed.FS
+
+//go:embed reference/*.md
+var reference embed.FS
+
+// Reference returns one topic of the protocol reference; the empty topic is the index: commands and inputs.
+// A lead loads a topic when it needs it, so the plan schema or the design workflow is not carried through a
+// task that never touches them.
+func Reference(topic string) (string, bool) {
+	if topic == "" {
+		topic = "index"
+	}
+	raw, err := reference.ReadFile("reference/" + topic + ".md")
+	return string(raw), err == nil && !strings.ContainsAny(topic, "/.")
+}
+
+// ReferenceTopics lists the topics besides the index.
+func ReferenceTopics() []string {
+	entries, _ := reference.ReadDir("reference")
+	var out []string
+	for _, entry := range entries {
+		if name := strings.TrimSuffix(entry.Name(), ".md"); name != "index" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
 
 //go:embed profiles/*.json
 var profiles embed.FS

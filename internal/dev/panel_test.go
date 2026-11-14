@@ -85,9 +85,9 @@ func TestPanelShowsTasksStagesWorkersAndOpensDetails(t *testing.T) {
 	if text := strings.Join(empty.frame(), "\n"); !strings.Contains(text, "No /dev task here yet") {
 		t.Fatalf("an empty checkout says so:\n%s", text)
 	}
-	plan := f.plan("-m change the line")
+	plan := f.plan("-l change the line")
 	plan.Checks = []Check{{Argv: []string{"env", "NX_DAEMON=false", "sh", "-c", "echo checked the line"}}}
-	f.launch(plan)
+	f.start(plan) // light: written and checked, waiting for the lead's review
 	gate := Current()
 
 	// A reviewer is running right now: a receipt with a live process and a stream of events.
@@ -102,8 +102,9 @@ func TestPanelShowsTasksStagesWorkersAndOpensDetails(t *testing.T) {
 	m := &panel{cfg: f.cfg, width: 120, height: 40, paint: paint{}}
 	m.refresh()
 	text := strings.Join(m.frame(), "\n")
-	for _, want := range []string{"TASKS 1", "awaiting-review", "steps    launch", "WORKERS", "writer  core", "review  correctness", "astra:medium @codex",
-		"1m15s ×2", "✔ reported: correctness PASS, 0 findings", "CHECKS", "sh -c echo checked the line", "PLAN  1 streams", "enter open"} {
+	for _, want := range []string{"TASKS 1", "decide", "steps    start", "WORKERS", "writer  core", "review  correctness", "astra:medium @codex",
+		"1m15s ×2", "✔ reported: correctness PASS, 0 findings", "CHECKS", "sh -c echo checked the line", "PLAN  1 stages · 1 streams", "enter open",
+		"this mode has no reviewer process"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the panel lacks %q:\n%s", want, text)
 		}

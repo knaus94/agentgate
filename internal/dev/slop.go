@@ -55,50 +55,48 @@ func scannable(path string) bool {
 	return true
 }
 
-// scanSignals looks at the lines the task added to its files. A line that already existed anywhere in the
-// file before the task is not the task's: moving code does not raise a signal.
-func scanSignals(from, to Snapshot, files []string) []Signal {
+// signalLimit bounds what a reviewer is handed: past it the list stops being a lead and becomes a task.
+const signalLimit = 60
+
+// scanText looks at the lines a change added to one file. A line that already existed anywhere in the file
+// before is not the task's: moving code does not raise a signal.
+func scanText(path, before, after string) []Signal {
 	out := []Signal{}
-	for _, path := range files {
-		if !scannable(path) || to[path] == nil || same(from[path], to[path]) {
+	existing := map[string]int{}
+	for _, line := range strings.Split(before, "\n") {
+		existing[strings.TrimSpace(line)]++
+	}
+	lines := strings.Split(after, "\n")
+	for index, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
 			continue
 		}
-		existing := map[string]int{}
-		for _, line := range strings.Split(from[path].text(), "\n") {
-			existing[strings.TrimSpace(line)]++
+		if existing[trimmed] > 0 {
+			existing[trimmed]--
+			continue
 		}
-		lines := strings.Split(to[path].text(), "\n")
-		for index, line := range lines {
-			trimmed := strings.TrimSpace(line)
-			if trimmed == "" {
-				continue
+		kind := ""
+		for _, rule := range signalRules {
+			if rule.pattern.MatchString(line) {
+				kind = rule.kind
+				break
 			}
-			if existing[trimmed] > 0 {
-				existing[trimmed]--
-				continue
+		}
+		if kind == "" && index+1 < len(lines) {
+			next := strings.TrimSpace(lines[index+1])
+			if (catchOpens.MatchString(line) && next == "}") || (exceptOpens.MatchString(line) && next == "pass") {
+				kind = "swallowed-error"
 			}
-			kind := ""
-			for _, rule := range signalRules {
-				if rule.pattern.MatchString(line) {
-					kind = rule.kind
-					break
-				}
-			}
-			if kind == "" && index+1 < len(lines) {
-				next := strings.TrimSpace(lines[index+1])
-				if (catchOpens.MatchString(line) && next == "}") || (exceptOpens.MatchString(line) && next == "pass") {
-					kind = "swallowed-error"
-				}
-			}
-			if kind == "" {
-				continue
-			}
-			if len([]rune(trimmed)) > 160 {
-				trimmed = string([]rune(trimmed)[:160]) + "…"
-			}
-			if out = append(out, Signal{Path: path, Line: index + 1, Kind: kind, Text: trimmed}); len(out) >= 60 {
-				return out
-			}
+		}
+		if kind == "" {
+			continue
+		}
+		if len([]rune(trimmed)) > 160 {
+			trimmed = string([]rune(trimmed)[:160]) + "…"
+		}
+		if out = append(out, Signal{Path: path, Line: index + 1, Kind: kind, Text: trimmed}); len(out) >= signalLimit {
+			return out
 		}
 	}
 	return out

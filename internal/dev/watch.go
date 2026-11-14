@@ -27,11 +27,11 @@ func (p paint) cyan(value string) string   { return p.wrap("36", value) }
 
 func (p paint) status(value string) string {
 	switch value {
-	case "COMPLETED", "complete", "reviewed", "PASS":
+	case "COMPLETED", "done", "PASS":
 		return p.green(value)
-	case "RUNNING", "implementing", "correcting", "reviewing", "awaiting-review":
+	case "RUNNING", "write", "verify":
 		return p.cyan(value)
-	case "BLOCKED", "held", "NEEDS_FIX":
+	case "BLOCKED", "paused", "decide", "NEEDS_FIX":
 		return p.yellow(value)
 	case "FAILED", "CANCELLED", "cancelled":
 		return p.red(value)
@@ -80,13 +80,19 @@ func WatchSnapshot(cfg *config.Config, global bool) map[string]any {
 	rows := make([]map[string]any, 0, len(tasks))
 	for _, task := range tasks {
 		task.describe(cfg)
-		row := map[string]any{"task": task.Title, "repository": task.Repo, "phase": task.phase(), "running": task.live(),
+		row := map[string]any{"task": task.Title, "repository": task.Repo, "status": task.phase(), "running": task.live(),
 			"elapsed_seconds": max(0, task.elapsed(time.Now().Unix())), "blocking_findings": task.Blocked, "next": task.Next}
 		if task.Warning != "" {
 			row["error"] = task.Warning
 		}
 		if task.Gate != nil {
-			row["id"], row["mode"], row["session"] = task.Gate.ID, task.Gate.Mode, task.Gate.Session
+			row["id"], row["mode"], row["session"], row["step"] = task.Gate.ID, task.Gate.Mode, task.Gate.Session, task.Gate.Step
+			if task.Gate.Pause != nil {
+				row["paused"] = map[string]string{"kind": task.Gate.Pause.Kind, "reason": task.Gate.Pause.Reason}
+			}
+			if position := task.Gate.position(); position != nil {
+				row["stage"] = position
+			}
 		}
 		workers := make([]map[string]any, 0, len(task.Lanes))
 		for _, lane := range task.Lanes {
@@ -103,5 +109,5 @@ func WatchSnapshot(cfg *config.Config, global bool) map[string]any {
 	if global {
 		scope = "all"
 	}
-	return map[string]any{"schema_version": 1, "read_only": true, "scope": scope, "tasks": rows}
+	return map[string]any{"schema_version": 2, "read_only": true, "scope": scope, "tasks": rows}
 }

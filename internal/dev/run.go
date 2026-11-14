@@ -15,7 +15,7 @@ import (
 )
 
 // Execute runs one lead operation under the session lock and leaves a receipt.
-// A stop request ends it with the gate on hold, never half-applied.
+// A stop request ends it with the task parked as stopped by the user, never half-applied.
 func Execute(action string, run func() (any, error)) (any, error) {
 	if err := requireLead(nil); err != nil {
 		return nil, err
@@ -44,11 +44,16 @@ func Execute(action string, run func() (any, error)) (any, error) {
 	if err := gate.enter(); err != nil && action != "land" {
 		return nil, errors.Join(err, ops.End(err))
 	}
+	// A task saved by an earlier version gets its origin trees here: under its lock, in its own checkout.
+	if err := gate.upgrade(); err != nil {
+		return nil, errors.Join(err, ops.End(err))
+	}
 	value, err := run()
 	err = errors.Join(err, ops.End(err))
 	if ops.IsCancelled(err) {
-		if gate := Current(); gate != nil && gate.active() && gate.Phase != "held" {
-			gate.holdNow(err.Error())
+		if gate := Current(); gate != nil && gate.active() {
+			gate.pause(PauseUser, err.Error())
+			_ = gate.save()
 		}
 	}
 	return value, err

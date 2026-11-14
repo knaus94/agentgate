@@ -35,10 +35,12 @@ func TestReviewExcludesFrontendAndSupersededWriters(t *testing.T) {
 	mode := f.cfg.Modes["medium"]
 	mode.Frontend = "astra:medium"
 	f.cfg.Modes["medium"] = mode
-	f.launch(f.plan("-m implement both", Stream{Name: "api", Domain: "backend", Files: []string{"a.txt"}},
+	f.start(f.plan("-m implement both", Stream{Name: "api", Domain: "backend", Files: []string{"a.txt"}},
 		Stream{Name: "ui", Domain: "frontend", Files: []string{"b.txt"}}))
-	f.review()
 	gate := Current()
+	if len(gate.Reviews) == 0 {
+		t.Fatal("the change was not reviewed")
+	}
 	for _, lane := range gate.Reviews[0].Lanes {
 		if slices.Contains(gate.authors(), lane.Route.Model) {
 			t.Fatalf("author reviewed its own work: %s", lane.Route.Model)
@@ -50,42 +52,35 @@ func TestReviewExcludesFrontendAndSupersededWriters(t *testing.T) {
 	}
 }
 
-func TestInterruptedCorrectionResumesTheSameRound(t *testing.T) {
+func TestAnInterruptedCorrectionIsRetriedInTheSameRound(t *testing.T) {
 	f := newFixture(t)
 	plan := f.plan("-m fix the content")
 	plan.Checks = []Check{{Argv: []string{"sh", "-c", "grep -q fixed a.txt"}}}
-	f.launch(plan)
-	f.review() // failing check is sent to the writer before review
 	failed := false
 	f.model = func(kind string, packet map[string]any, call provider.Call) (string, error) {
-		if kind != "writer" {
+		if kind != "writer" || packet["correction"] == nil {
 			return "", nil
-		}
-		if packet["correction"] == nil {
-			t.Error("resumed correction lost its assignment")
 		}
 		if !failed {
 			failed = true
 			return "", errors.New("interrupted correction")
 		}
 		write(t, "a.txt", "fixed\n")
-		return `{"status":"COMPLETED","summary":"fixed","blockers":[],"handoff":"","deviations":[]}`, nil
+		return `{"status":"COMPLETED","summary":"fixed","blockers":[],"handoff":"","deviations":[],"disputes":[]}`, nil
 	}
-	f.fails("fix", "interrupted correction", func() (any, error) { return Fix(f.cfg, Current(), FixInput{}) })
+	stopped := f.start(plan) // the failing check goes to the writer, whose process then dies
 	before := Current()
-	if before.Phase != "held" || before.ResumePhase != "correcting" {
-		t.Fatalf("correction did not hold honestly: %s / %s", before.Phase, before.ResumePhase)
+	if stopped["step"] != StepWrite || !slices.Equal(needs(stopped), []string{"failed"}) || !before.Round.Correction || f.count("review") != 0 {
+		t.Fatalf("an interrupted correction is reported as it is: %v", stopped)
 	}
-	f.do("resume", func() (any, error) { return Resume(f.cfg, Current()) })
-	f.do("continue", func() (any, error) { return Continue(f.cfg, Current()) })
-	if after := Current(); after.Phase != "awaiting-review" || after.Round.Batch != before.Round.Batch || after.Iteration != before.Iteration {
-		t.Fatalf("continuation lost the saved correction: %+v", after.Round)
+	done := f.proceed()
+	after := Current()
+	if done["step"] != StepDone || after.Round.Batch != before.Round.Batch || after.Iteration != before.Iteration {
+		t.Fatalf("the retry lost the saved correction: %v %+v", done, after.Round)
 	}
-	f.review()
-	f.finish()
 }
 
-func TestFailedWriterCannotBeReviewedAfterResume(t *testing.T) {
+func TestAFailedWriterIsRetriedAndNeverReviewed(t *testing.T) {
 	f := newFixture(t)
 	f.model = func(kind string, packet map[string]any, call provider.Call) (string, error) {
 		if kind == "writer" {
@@ -94,16 +89,18 @@ func TestFailedWriterCannotBeReviewedAfterResume(t *testing.T) {
 		}
 		return "", nil
 	}
-	f.fails("launch", "writer failed", func() (any, error) { return Launch(f.cfg, f.plan("-m implement")) })
-	f.do("resume", func() (any, error) { return Resume(f.cfg, Current()) })
-	f.fails("review", "writer round", func() (any, error) { return ReviewTask(f.cfg, Current(), ReviewInput{}) })
-	if f.count("review") != 0 {
-		t.Fatal("an incomplete implementation started a reviewer")
+	stopped := f.start(f.plan("-m implement"))
+	if stopped["step"] != StepWrite || !slices.Equal(needs(stopped), []string{"failed"}) {
+		t.Fatalf("a failed writer leaves its round open: %v", stopped)
+	}
+	again := f.do("run", func() (any, error) { return Run(f.cfg, Current(), RunInput{Recheck: true}) })
+	if again["step"] != StepWrite || f.count("writer") != 2 || f.count("review") != 0 {
+		t.Fatalf("an incomplete implementation started a reviewer: %v", again)
 	}
 }
 
 func TestInterruptedWritersCannotResumeUnderChangedArchitectureRules(t *testing.T) {
-	for _, action := range []string{"continue", "launch", "answer"} {
+	for _, action := range []string{"run", "answer"} {
 		t.Run(action, func(t *testing.T) {
 			f := newFixture(t)
 			write(t, "policy.md", "Keep the line contract.")
@@ -114,34 +111,23 @@ func TestInterruptedWritersCannotResumeUnderChangedArchitectureRules(t *testing.
 			f.model = func(kind string, _ map[string]any, _ provider.Call) (string, error) {
 				if kind == "writer" {
 					if action == "answer" {
-						return `{"status":"BLOCKED","summary":"need a decision","blockers":["Which wording?"],"handoff":"","deviations":[]}`, nil
+						return `{"status":"BLOCKED","summary":"need a decision","blockers":["Which wording?"],"handoff":"","deviations":[],"disputes":[]}`, nil
 					}
 					return "", errors.New("interrupted writer")
 				}
 				return "", nil
 			}
-			if action == "answer" {
-				f.launch(plan)
-			} else {
-				f.fails("launch", "interrupted writer", func() (any, error) { return Launch(f.cfg, plan) })
-			}
+			f.start(plan)
 			before := Current()
 			write(t, "policy.md", "Keep the line contract and its terminator.")
-			if action != "answer" {
-				f.do("resume", func() (any, error) { return Resume(f.cfg, Current()) })
-			}
 			calls := f.count("writer")
 			f.fails(action, "project rules changed", func() (any, error) {
-				switch action {
-				case "launch":
-					return Launch(f.cfg, plan)
-				case "answer":
+				if action == "answer" {
 					return Answer(f.cfg, Current(), AnswerInput{Stream: "core", Answer: "Use the approved wording"})
-				default:
-					return Continue(f.cfg, Current())
 				}
+				return Run(f.cfg, Current(), RunInput{})
 			})
-			if f.count("writer") != calls || Current().Round.Batch != before.Round.Batch || digest(Current().Baseline) != digest(before.Baseline) {
+			if after := Current(); f.count("writer") != calls || after.Round.Batch != before.Round.Batch || after.StageTree != before.StageTree {
 				t.Fatal("rejected continuation changed the round or started a writer")
 			}
 		})
@@ -150,44 +136,51 @@ func TestInterruptedWritersCannotResumeUnderChangedArchitectureRules(t *testing.
 
 func TestCorruptPeerStateDoesNotReleaseItsFileOwnership(t *testing.T) {
 	f := newFixture(t)
-	f.launch(f.plan("-m own the line"))
+	f.waiting("own the line")
 	state := filepath.Join(home(), "state.json")
 	original := fileText(t, state)
 	before := fileText(t, "a.txt")
 	write(t, state, "{broken")
 	t.Setenv("AGENTGATE_SESSION", "another-lead")
 	calls := f.count("writer")
-	f.fails("launch", "ownership", func() (any, error) { return Launch(f.cfg, f.plan("-m change the owned line")) })
+	f.fails("start", "ownership", func() (any, error) { return Start(f.cfg, f.plan("-m change the owned line"), "", false, RunInput{}) })
 	if f.count("writer") != calls || fileText(t, "a.txt") != before {
 		t.Fatal("a corrupt peer allowed an overlapping writer")
 	}
 	write(t, state, original)
-	f.launch(f.plan("-m change another file", Stream{Name: "other", Domain: "backend", Files: []string{"b.txt"}}))
+	f.start(f.plan("-m change another file", Stream{Name: "other", Domain: "backend", Files: []string{"b.txt"}}))
 }
 
 func TestInputFingerprintErrorsCannotReusePassingReceipts(t *testing.T) {
 	f := newFixture(t)
-	plan := f.plan("-m implement")
+	plan := f.plan("-l implement")
 	plan.Checks = []Check{{Argv: []string{"true"}, Inputs: []string{"context.txt"}}}
-	f.launch(plan)
-	f.review()
+	f.start(plan) // light: written and checked, the lead's review is owed
+	gate := Current()
+	if !passed(gate.currentReceipt(&gate.checks()[0])) {
+		t.Fatal("the check must have a current passing receipt first")
+	}
 	must(t, os.Remove("context.txt"))
 	must(t, os.Symlink("b.txt", "context.txt"))
-	if Current().currentReceipt(&Current().Plan.Checks[0]) != nil {
+	if gate.currentReceipt(&gate.checks()[0]) != nil {
 		t.Fatal("an unreadable/symlinked input fell back to a passing task digest")
 	}
-	f.fails("finish", "check has no current passing result", func() (any, error) {
-		return Finish(f.cfg, Current(), FinishInput{Summary: "done"})
-	})
+	f.fails("run", "is a symlink", func() (any, error) { return Run(f.cfg, Current(), RunInput{}) })
+	if Current().Step == StepDone {
+		t.Fatal("the task finished on a check whose inputs cannot be read")
+	}
 }
 
 func TestImplicitCheckInputsIncludeSiblingDependencies(t *testing.T) {
 	f := newFixture(t)
-	f.launch(f.plan("-m implement"))
-	f.review()
-	write(t, "b.txt", "dependency changed\n")
+	plan := f.plan("-l implement")
+	f.start(plan)
 	gate := Current()
-	if gate.currentReceipt(&gate.Plan.Checks[0]) != nil {
+	if !passed(gate.currentReceipt(&gate.checks()[0])) {
+		t.Fatal("the check must have a current passing receipt first")
+	}
+	write(t, "b.txt", "dependency changed\n")
+	if gate.currentReceipt(&gate.checks()[0]) != nil {
 		t.Fatal("check remained current after an undeclared sibling dependency changed")
 	}
 }
@@ -214,9 +207,7 @@ func TestInputGlobsSupportClassesAndRejectAncestorSymlinks(t *testing.T) {
 func TestCommitLandingPreservesTheUsersIndex(t *testing.T) {
 	f := newFixture(t)
 	identity(t)
-	f.launch(f.plan("-w -m implement"))
-	f.review()
-	f.finish()
+	f.start(f.plan("-w -m implement"))
 	write(t, "b.txt", "user's staged change\n")
 	gitOut(t, "add", "b.txt")
 	staged := gitOut(t, "diff", "--cached", "--binary")
@@ -230,44 +221,68 @@ func TestCommitLandingPreservesTheUsersIndex(t *testing.T) {
 	}
 }
 
-func TestPrivateCommitNeverIncludesUnreviewedFiles(t *testing.T) {
+func TestAnIsolatedTaskNeverLandsAFileNoStreamOwns(t *testing.T) {
 	f := newFixture(t)
 	identity(t)
-	f.launch(f.plan("-w -m implement"))
-	write(t, filepath.Join(Current().Worktree, "b.txt"), "outside the accepted scope\n")
-	f.review()
-	f.fails("finish", "outside its reviewed scope", func() (any, error) {
-		return Finish(f.cfg, Current(), FinishInput{Summary: "done"})
-	})
-	if Current().Phase != "reviewed" || fileText(t, "b.txt") != "before\n" {
-		t.Fatal("unreviewed foreign files were committed or applied")
+	f.model = func(kind string, _ map[string]any, _ provider.Call) (string, error) {
+		if kind == "writer" {
+			write(t, "b.txt", "outside the accepted scope\n")
+		}
+		return "", nil
+	}
+	stopped := f.start(f.plan("-w -m implement"))
+	if !slices.Equal(needs(stopped), []string{"scope"}) || f.count("review") != 0 || Current().Step == StepDone {
+		t.Fatalf("a file outside the plan is settled before anything is paid to review the rest: %v", stopped)
+	}
+	need := stopped["needs"].([]any)[0].(map[string]any)
+	if !strings.Contains(need["what"].(string), "b.txt") || !slices.Contains(offered(stopped), "amend") {
+		t.Fatalf("the answer names the file and what can be done about it: %v", stopped)
+	}
+	worktree := Current().Worktree
+	if again := f.proceed(); !slices.Equal(needs(again), []string{"scope"}) || f.count("review") != 0 {
+		t.Fatalf("running again changes nothing while the file is there: %v", again)
+	}
+	write(t, filepath.Join(worktree, "b.txt"), "before\n")
+	done := f.proceed()
+	f.land("apply")
+	if done["step"] != StepDone || fileText(t, "a.txt") != "after\n" || fileText(t, "b.txt") != "before\n" {
+		t.Fatalf("unreviewed foreign files were committed or applied: %v", done)
 	}
 }
 
 func TestCorruptStateCannotBeMistakenForNoTask(t *testing.T) {
 	f := newFixture(t)
-	f.launch(f.plan("-m implement"))
+	f.waiting("implement")
 	state := filepath.Join(home(), "state.json")
 	write(t, state, "{broken")
 	called := false
-	_, err := Execute("launch", func() (any, error) { called = true; return nil, nil })
+	_, err := Execute("start", func() (any, error) { called = true; return nil, nil })
 	if err == nil || !strings.Contains(err.Error(), "corrupt") || called || fileText(t, state) != "{broken" {
 		t.Fatalf("corruption was not safely reported: called=%v err=%v", called, err)
 	}
 }
 
-func TestDeadOperationRecoversIntoExplicitHold(t *testing.T) {
+func TestADeadOperationLeavesNoWriterRunning(t *testing.T) {
 	f := newFixture(t)
-	f.launch(f.plan("-m implement"))
+	f.model = func(kind string, _ map[string]any, call provider.Call) (string, error) {
+		if kind == "writer" && call.Resume == "" {
+			return `{"status":"BLOCKED","summary":"need a decision","blockers":["Choose the behavior"],"handoff":"","deviations":[],"disputes":[]}`, nil
+		}
+		return "", nil
+	}
+	f.start(f.plan("-m implement"))
 	gate := Current()
-	gate.Phase = "implementing"
-	gate.Writers[0].Status = "RUNNING"
+	gate.Writers[0].Status = "RUNNING" // as the process that owned it left it when it died
 	must(t, gate.save())
 	must(t, ops.WriteJSON(filepath.Join(home(), "operation.json"), ops.Record{State: "running", PID: 99999999, Identity: "dead"}))
-	f.do("status", func() (any, error) { return Current().Summary(f.cfg), nil })
+	status := f.do("status", func() (any, error) { return Status(f.cfg, Current(), "") })
 	gate = Current()
-	if gate.Phase != "held" || gate.ResumePhase != "implementing" || gate.Writers[0].Status != "FAILED" {
-		t.Fatal("interrupted operation was not recovered into a resumable hold")
+	if gate.Writers[0].Status != "FAILED" || gate.Step != StepWrite || gate.Pause != nil ||
+		!slices.Equal(needs(status), []string{"failed"}) || offered(status)[0] != "run" {
+		t.Fatalf("an interrupted operation must leave a writer that `run` retries: %v", status)
+	}
+	if done := f.proceed(); done["step"] != StepDone || f.count("writer") != 2 {
+		t.Fatalf("the retry continues the task: %v", done)
 	}
 }
 
@@ -277,32 +292,25 @@ func TestCorrectionContinuesInTheActualFallbackDirectory(t *testing.T) {
 		if kind == "writer" && call.Route.Alias == "opus" {
 			return "", provider.ErrLimit
 		}
-		if kind == "review" && packet["axes"].([]any)[0] == "correctness" && len(packet["accepted_findings"].([]any)) == 0 {
-			return `{"reports":[{"axis":"correctness","status":"NEEDS_FIX","findings":[` + finding("P1") + `],"checked":["read"],"resolutions":[]}]}`, nil
-		}
 		if kind == "writer" && packet["correction"] != nil {
 			write(t, "a.txt", "corrected by fallback\n")
-			return `{"status":"COMPLETED","summary":"corrected","blockers":[],"handoff":"","deviations":[]}`, nil
+			return `{"status":"COMPLETED","summary":"corrected","blockers":[],"handoff":"","deviations":[],"disputes":[]}`, nil
 		}
 		return "", nil
 	}
-	f.launch(f.plan("-m implement"))
-	first := *Current().latest()["core"]
+	f.reviewOnce(finding("P1"))
+	done := f.start(f.plan("-m implement"))
+	writers := Current().Writers
+	if done["step"] != StepDone || len(writers) != 2 {
+		t.Fatalf("the finding goes back to its author once: %v", done)
+	}
+	first, last := writers[0], writers[1]
 	if first.Route.Alias != "fable" || !strings.Contains(first.Dir, "-alt") {
 		t.Fatalf("the winning fallback did not own its actual lane: %+v", first)
 	}
-	f.review()
-	id := Current().Findings()[0].ID
-	f.do("triage", func() (any, error) {
-		return Triage(f.cfg, Current(), TriageInput{Dispositions: []Disposition{{ID: id, Decision: "accepted", Evidence: "confirmed"}}})
-	})
-	f.do("fix", func() (any, error) { return Fix(f.cfg, Current(), FixInput{}) })
-	last := Current().latest()["core"]
 	if last.Dir != first.Dir || last.Session != first.Session || last.Route.Model != first.Route.Model {
 		t.Fatalf("fallback continuation lost its original session: before=%+v after=%+v", first, last)
 	}
-	f.review()
-	f.finish()
 }
 
 func TestFailedToolRefreshIsReportedAndServerIsOmitted(t *testing.T) {
@@ -316,17 +324,22 @@ func TestFailedToolRefreshIsReportedAndServerIsOmitted(t *testing.T) {
 	}
 }
 
-func TestDeadStageAndMissingCompletionReceiptsAreRejected(t *testing.T) {
+func TestImpossiblePositionsAreRejectedWhenStateIsLoaded(t *testing.T) {
 	f := newFixture(t)
-	f.launch(f.plan("-m implement"))
-	gate := Current()
-	gate.Phase = "staged"
-	if err := validateGateState(gate); err == nil {
-		t.Fatal("staged phase without a staged plan was accepted")
-	}
-	gate.Phase = "complete"
-	if err := validateGateState(gate); err == nil {
-		t.Fatal("completed phase without a final receipt was accepted")
+	f.waiting("implement")
+	for name, damage := range map[string]func(*Gate){
+		"an unknown step":                     func(gate *Gate) { gate.Step = "staged" },
+		"done without a completion receipt":   func(gate *Gate) { gate.Step, gate.Final = StepDone, nil },
+		"every stage accepted but not closed": func(gate *Gate) { gate.Stage = len(gate.Plan.Stages) },
+		"an unknown kind of pause":            func(gate *Gate) { gate.Pause = &Paused{Kind: "held", Reason: "old"} },
+		"no recorded origin":                  func(gate *Gate) { gate.BaseTree = "" },
+	} {
+		gate := Current()
+		must(t, validateGateState(gate))
+		damage(gate)
+		if err := validateGateState(gate); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
 	}
 }
 
@@ -334,25 +347,26 @@ func TestAnsweringOneStreamDoesNotRestartAnotherBlockedWriter(t *testing.T) {
 	f := newFixture(t)
 	f.model = func(kind string, _ map[string]any, call provider.Call) (string, error) {
 		if kind == "writer" && call.Resume == "" {
-			return `{"status":"BLOCKED","summary":"need a decision","blockers":["Choose the behavior"],"handoff":"","deviations":[]}`, nil
+			return `{"status":"BLOCKED","summary":"need a decision","blockers":["Choose the behavior"],"handoff":"","deviations":[],"disputes":[]}`, nil
 		}
 		return "", nil
 	}
-	f.launch(f.plan("-m implement", Stream{Name: "first", Domain: "backend", Files: []string{"a.txt"}},
+	f.start(f.plan("-m implement", Stream{Name: "first", Domain: "backend", Files: []string{"a.txt"}},
 		Stream{Name: "second", Domain: "backend", Files: []string{"b.txt"}}))
 	before := f.count("writer")
-	f.do("answer", func() (any, error) {
+	one := f.do("answer", func() (any, error) {
 		return Answer(f.cfg, Current(), AnswerInput{Stream: "first", Answer: "use the first behavior"})
 	})
 	gate := Current()
-	if f.count("writer") != before+1 || gate.Phase != "held" || gate.latest()["first"].Status != "COMPLETED" || gate.latest()["second"].Status != "BLOCKED" {
-		t.Fatal("answering one stream restarted a different unanswered writer")
+	if f.count("writer") != before+1 || gate.Step != StepWrite || gate.latest()["first"].Status != "COMPLETED" || gate.latest()["second"].Status != "BLOCKED" ||
+		!slices.Equal(needs(one), []string{"answer"}) || slices.Contains(offered(one), "run") {
+		t.Fatalf("answering one stream restarted a different unanswered writer: %v", one)
 	}
-	f.do("answer", func() (any, error) {
+	two := f.do("answer", func() (any, error) {
 		return Answer(f.cfg, Current(), AnswerInput{Stream: "second", Answer: "use the second behavior"})
 	})
-	if Current().Phase != "awaiting-review" || f.count("writer") != before+2 {
-		t.Fatal("the round did not finish after both decisions were answered")
+	if two["step"] != StepDone || f.count("writer") != before+2 {
+		t.Fatalf("the task did not run on after both decisions were answered: %v", two)
 	}
 }
 
@@ -365,13 +379,11 @@ func TestCommitLandingDoesNotIncludeCompatibleUserHunks(t *testing.T) {
 	f.model = func(kind string, _ map[string]any, _ provider.Call) (string, error) {
 		if kind == "writer" {
 			write(t, "a.txt", "task\none\ntwo\nthree\nfour\nfive\nlast\n")
-			return `{"status":"COMPLETED","summary":"first end","blockers":[],"handoff":"","deviations":[]}`, nil
+			return `{"status":"COMPLETED","summary":"first end","blockers":[],"handoff":"","deviations":[],"disputes":[]}`, nil
 		}
 		return "", nil
 	}
-	f.launch(f.plan("-w -m change first end"))
-	f.review()
-	f.finish()
+	f.start(f.plan("-w -m change first end"))
 	userContent := "first\none\ntwo\nthree\nfour\nfive\nuser\n"
 	write(t, "a.txt", userContent)
 	head := gitOut(t, "rev-parse", "HEAD")
@@ -388,7 +400,7 @@ func TestCommitLandingDoesNotIncludeCompatibleUserHunks(t *testing.T) {
 func TestWorktreeCleanupRefusesStatePathOutsideManagedDirectory(t *testing.T) {
 	f := newFixture(t)
 	identity(t)
-	f.launch(f.plan("-w -m implement"))
+	f.start(f.plan("-w -m implement"))
 	gate := Current()
 	outside := t.TempDir()
 	marker := filepath.Join(outside, "keep.txt")
@@ -406,9 +418,7 @@ func TestWorktreeCleanupRefusesStatePathOutsideManagedDirectory(t *testing.T) {
 func TestCommitHookFailureReportsAppliedOutcome(t *testing.T) {
 	f := newFixture(t)
 	identity(t)
-	f.launch(f.plan("-w -m implement"))
-	f.review()
-	f.finish()
+	f.start(f.plan("-w -m implement"))
 	head := gitOut(t, "rev-parse", "HEAD")
 	hook := filepath.Join(".git", "hooks", "pre-commit")
 	must(t, os.WriteFile(hook, []byte("#!/bin/sh\necho 'fixture hook refused' >&2\nexit 1\n"), 0o755))

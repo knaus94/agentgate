@@ -5,19 +5,15 @@ import (
 	"github.com/knaus94/agentgate/internal/provider"
 )
 
-// FileState is the content and mode of one file; a nil entry in a Snapshot means the file is absent.
-type FileState struct {
-	Bytes string `json:"bytes"`
-	Mode  uint32 `json:"mode"`
-}
+// stateVersion is the format of state.json. Older tasks are migrated when they are read.
+const stateVersion = 2
 
-type Snapshot map[string]*FileState
-
-// Round is the set of streams being written now: the first implementation or one correction.
+// Round is the set of streams being written now: the first implementation of a stage or one correction.
 type Round struct {
 	Batch      string         `json:"batch"`
 	Streams    []Stream       `json:"streams"`
 	Correction bool           `json:"correction,omitempty"`
+	Auto       bool           `json:"auto,omitempty"`           // opened by the tool from a verification, not by the lead
 	Boost      int            `json:"boost,omitempty"`          // effort steps above the mode's base, earned by stalled corrections
 	Failures   []CheckFailure `json:"check_failures,omitempty"` // declared checks this correction must make pass
 	Findings   []Finding      `json:"findings,omitempty"`       // accepted findings this correction must resolve
@@ -34,6 +30,15 @@ type CheckFailure struct {
 	Setup      bool     `json:"setup,omitempty"` // the measuring tool could not observe the page, not a measured code defect
 }
 
+// Dispute is a writer's evidence that a finding it was sent is wrong. The reviewer that raised the finding
+// answers it; only a dispute the reviewer upholds reaches the lead.
+type Dispute struct {
+	ID       string `json:"id"`
+	Evidence string `json:"evidence"`
+	Stream   string `json:"stream,omitempty"`
+	Upheld   bool   `json:"upheld,omitempty"` // the reviewer reported the finding again after reading the dispute
+}
+
 type Writer struct {
 	Stream     string       `json:"stream"`
 	Route      config.Route `json:"route"`
@@ -44,8 +49,10 @@ type Writer struct {
 	Blockers   []string     `json:"blockers"`
 	Handoff    string       `json:"handoff,omitempty"`    // the contract dependent streams build on
 	Deviations []string     `json:"deviations,omitempty"` // where the work departs from the brief, for reviewers
+	Disputes   []Dispute    `json:"disputes,omitempty"`   // findings of this correction the writer shows to be wrong
 	Error      string       `json:"error,omitempty"`
 	Batch      string       `json:"batch"`
+	Stale      bool         `json:"stale,omitempty"` // an amendment changed this stream's contract after it reported
 }
 
 type Finding struct {
@@ -79,7 +86,7 @@ type Report struct {
 	ScopeFiles  []string     `json:"scope_files,omitempty"`
 }
 
-// LaneRun is one reviewer process: which axes it judged, over which files, on which model.
+// LaneRun is one reviewer process: which axes it judged, over which scope, on which model.
 type LaneRun struct {
 	Axes    []string       `json:"axes"`
 	Scope   string         `json:"scope"`
@@ -91,10 +98,13 @@ type LaneRun struct {
 	Quality *QualityReport `json:"quality,omitempty"`
 }
 
+// Review is one independent reading of a change. It is bound to what it read (Key), to what was to be built
+// (Contract) and to what it judged with which receipts (QualityDigest): each can go stale on its own.
 type Review struct {
 	Iteration     int       `json:"iteration"`
-	Digest        string    `json:"digest"`
-	Contract      string    `json:"contract"`
+	Tree          string    `json:"tree"`     // the working tree it read
+	Key           string    `json:"key"`      // the scoped change and the cited context
+	Contract      string    `json:"contract"` // the code contract
 	Lanes         []LaneRun `json:"lanes"`
 	Dir           string    `json:"dir"`
 	Rechecked     []string  `json:"rechecked"`
@@ -109,14 +119,14 @@ type Disposition struct {
 	Files       []string `json:"files,omitempty"`
 	Basis       string   `json:"basis,omitempty"`
 	DuplicateOf string   `json:"duplicate_of,omitempty"`
+	Auto        bool     `json:"auto,omitempty"` // sent to its author by the blocking rule, not judged by the lead
 }
 
 type CheckReceipt struct {
 	Argv        []string `json:"argv"`
 	ReturnCode  int      `json:"returncode"`
-	Digest      string   `json:"digest"`
-	InputKey    string   `json:"input_key,omitempty"`
-	Repository  string   `json:"repository_digest,omitempty"` // implicit inputs when no explicit globs were declared
+	Tree        string   `json:"tree,omitempty"`      // the working tree it ran against, when it declared no inputs
+	InputKey    string   `json:"input_key,omitempty"` // the content of its declared inputs
 	Error       string   `json:"error,omitempty"`
 	Log         string   `json:"log"`
 	Preexisting bool     `json:"preexisting,omitempty"`
@@ -131,7 +141,7 @@ type Reassessment struct {
 type Correction struct {
 	Iteration    int           `json:"iteration"`
 	FindingIDs   []string      `json:"finding_ids"`
-	StartDigest  string        `json:"start_digest"`
+	StartKey     string        `json:"start_key"`           // the reviewed change this correction started from
 	CheckIDs     []string      `json:"check_ids,omitempty"` // failing checks this correction was sent to repair
 	Brief        string        `json:"brief"`
 	Reassessment *Reassessment `json:"reassessment,omitempty"`
@@ -139,7 +149,7 @@ type Correction struct {
 
 type VisualRun struct {
 	Iteration int        `json:"iteration"`
-	Digest    string     `json:"digest"`
+	Key       string     `json:"key"`
 	Contract  string     `json:"contract"`
 	Status    string     `json:"status"`
 	Summary   string     `json:"summary"`
@@ -150,56 +160,101 @@ type VisualRun struct {
 	Dir       string     `json:"dir"`
 }
 
-// Gate is the whole state of one task: what was agreed, what changed, what was verified.
+// Revision is one plan the task ran under: why it replaced the one before and what it changed.
+type Revision struct {
+	Number  int      `json:"number"`
+	At      int64    `json:"at"`
+	Reason  string   `json:"reason,omitempty"`
+	Digest  string   `json:"digest"`
+	Changes []string `json:"changes,omitempty"`
+}
+
+// WriterRef is enough of a finished writer to continue its session later.
+type WriterRef struct {
+	Route   config.Route `json:"route"`
+	Dir     string       `json:"dir"`
+	Session string       `json:"session"`
+}
+
+// StageRecord is what is kept of an accepted stage.
+type StageRecord struct {
+	Name       string               `json:"name"`
+	Mode       string               `json:"mode"`
+	Summary    string               `json:"summary"`
+	AcceptedAt int64                `json:"accepted_at"`
+	Rounds     int                  `json:"correction_rounds"`
+	Findings   int                  `json:"findings"`
+	Commit     string               `json:"commit,omitempty"`
+	Tree       string               `json:"tree,omitempty"`     // the working tree the stage was accepted at
+	Handoffs   map[string]string    `json:"handoffs,omitempty"` // stream -> the contract later stages build on
+	Writers    map[string]WriterRef `json:"writers,omitempty"`  // stream -> the session a later correction continues
+	Archive    string               `json:"archive"`            // the stage's reviews, findings and receipts
+}
+
+// Final is the completion receipt.
+type Final struct {
+	Summary string `json:"summary"`
+	Tree    string `json:"tree,omitempty"` // the working tree the task was completed at
+	Key     string `json:"key,omitempty"`  // the task's own change at completion: what a later edit of its files alters
+	At      int64  `json:"at"`
+}
+
+// Gate is the whole state of one task: what was agreed, where the work is, what was verified.
 type Gate struct {
+	Version       int                     `json:"version"`
 	ID            string                  `json:"id"`
 	Session       string                  `json:"session"`
 	Cwd           string                  `json:"cwd"`
 	Request       Request                 `json:"request"`
-	Mode          string                  `json:"mode"`
-	Plan          *Plan                   `json:"plan"`
-	PlanVersion   int                     `json:"plan_version"`
-	Files         []string                `json:"files"`
-	Context       []string                `json:"context"`
-	Baseline      Snapshot                `json:"baseline"`
-	HeadBefore    string                  `json:"head_before"`
-	Manifest      map[string]string       `json:"manifest"`
-	WriteFiles    []string                `json:"write_files"`
-	Phase         string                  `json:"phase"`
-	ResumePhase   string                  `json:"resume_phase,omitempty"`
-	HoldReason    string                  `json:"hold_reason,omitempty"`
-	Iteration     int                     `json:"iteration"`
+	Plan          *Plan                   `json:"plan"`                   // in its one shape: stages only
+	PlanName      string                  `json:"plan_name"`              // the saved plan it was started from, when there is one
+	Revisions     []Revision              `json:"revisions"`              // every plan the task ran under
+	Modes         []string                `json:"modes"`                  // the mode of every stage of the present plan
+	Stage         int                     `json:"stage"`                  // index of the present stage; len(stages) once all are accepted
+	Whole         bool                    `json:"whole,omitempty"`        // the pass over the whole change is on
+	Step          string                  `json:"step"`                   // write, verify, decide, done or cancelled
+	Pause         *Paused                 `json:"pause,omitempty"`        // waiting for a person; the position is unchanged
+	Mode          string                  `json:"mode"`                   // the mode of the present stage
+	BaseTree      string                  `json:"base_tree"`              // the working tree as the task found it
+	StageTree     string                  `json:"stage_tree"`             // the working tree as the present stage found it
+	StartCommit   string                  `json:"start_commit,omitempty"` // an isolated task: the commit its worktree was made from
+	Accepted      []StageRecord           `json:"accepted,omitempty"`
+	Round         *Round                  `json:"round,omitempty"`
+	Rounds        int                     `json:"rounds,omitempty"`      // writer rounds opened in the present stage
+	AutoRounds    int                     `json:"auto_rounds,omitempty"` // corrections opened by the tool since the lead last acted
+	Iteration     int                     `json:"iteration"`             // corrections of the present stage
 	Writers       []*Writer               `json:"writers"`
 	AuthorModels  []string                `json:"author_models,omitempty"` // retained across stages and correction routes
 	Reviews       []Review                `json:"reviews"`
-	ReviewDigest  string                  `json:"review_digest,omitempty"`
 	ReviewError   string                  `json:"review_error,omitempty"`
 	VisualRuns    []VisualRun             `json:"visual_runs,omitempty"`
 	VisualSkip    string                  `json:"visual_skip,omitempty"`
 	Dispositions  map[string]Disposition  `json:"dispositions"`
 	Resolutions   map[string]string       `json:"resolutions"`
+	Disputes      map[string]Dispute      `json:"disputes,omitempty"`
+	Demands       []Finding               `json:"demands,omitempty"` // work the lead sent to writers from an unmet criterion
 	Checks        []CheckReceipt          `json:"checks"`
 	Baselines     map[string]int          `json:"baselines,omitempty"` // check key -> exit code before any writing
 	Corrections   []Correction            `json:"corrections,omitempty"`
-	Round         *Round                  `json:"round,omitempty"`
+	Reassessed    *Reassessment           `json:"reassessed,omitempty"`  // the lead's new diagnosis, spent by the next correction
+	Escalate      bool                    `json:"escalate,omitempty"`    // the lead asked for one more effort step on the next correction
+	Ruled         bool                    `json:"ruled,omitempty"`       // the lead ruled on a finding since the last correction: the next one is not a repetition
+	Remedy        string                  `json:"remedy,omitempty"`      // the lead's note for the next correction
+	FixStreams    []string                `json:"fix_streams,omitempty"` // which streams repair a failing check; default: all
+	Reading       *Reading                `json:"reading,omitempty"`     // a review the lead owes (a mode without reviewer processes)
 	ContextPack   string                  `json:"context_pack,omitempty"`
-	ScoutNote     string                  `json:"scout_note,omitempty"`
+	Preparation   string                  `json:"preparation,omitempty"` // the preparation whose worker can revise this plan
 	Boost         int                     `json:"boost,omitempty"`
 	Foreign       []string                `json:"foreign_changes,omitempty"`
 	Substitutions []provider.Substitution `json:"substitutions,omitempty"`
 	Final         *Final                  `json:"final,omitempty"`
-	Worktree      string                  `json:"worktree,omitempty"`         // an isolated task works here, not in Cwd
-	Branch        string                  `json:"branch,omitempty"`           // the branch of that worktree
-	Landed        string                  `json:"landed,omitempty"`           // how an isolated task was closed: apply, commit, branch, drop
-	Conflicts     []string                `json:"conflicts,omitempty"`        // files left with merge markers by catching up with the checkout
-	Epic          *Plan                   `json:"epic,omitempty"`             // staged tasks: the whole plan; Plan is the present stage
-	StageIndex    int                     `json:"stage_index,omitempty"`      // staged tasks: which stage is the present one
-	StageRecords  []StageRecord           `json:"stage_records,omitempty"`    // staged tasks: the accepted stages
-	EpicBaseline  Snapshot                `json:"epic_baseline,omitempty"`    // staged tasks: every file as the task found it
-	EpicHead      string                  `json:"epic_head_before,omitempty"` // origin for files admitted after the first stage
-	EpicManifest  map[string]string       `json:"epic_manifest,omitempty"`
-	Integration   bool                    `json:"integration,omitempty"`  // staged tasks: the pass over the whole change is on
-	Signals       []Signal                `json:"slop_signals,omitempty"` // mechanical hits on the lines the task added, as of the last review
+	Worktree      string                  `json:"worktree,omitempty"`  // an isolated task works here, not in Cwd
+	Branch        string                  `json:"branch,omitempty"`    // the branch of that worktree
+	Landed        string                  `json:"landed,omitempty"`    // how an isolated task was closed: apply, commit, branch, drop
+	Conflicts     []string                `json:"conflicts,omitempty"` // files left with merge markers by catching up with the checkout
+	Signals       []Signal                `json:"slop_signals,omitempty"`
 	Reported      bool                    `json:"completion_reported,omitempty"`
 	CreatedAt     int64                   `json:"created_at"`
+
+	legacy *legacyState // a task of an earlier format whose origin trees are not built yet
 }

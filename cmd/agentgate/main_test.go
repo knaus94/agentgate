@@ -34,9 +34,7 @@ func TestMain(m *testing.M) {
 const fakeBody = `
 prompt=$(cat)
 axes=$(printf '%s' "$prompt" | sed -n 's/.*your axes: \([a-z, ]*\)\..*/\1/p' | head -1)
-if printf '%s' "$prompt" | grep -q 'context pack'; then
-  answer='{"summary":"one text file","files":[{"path":"a.txt","role":"owned","symbols":[]}],"callers":[],"invariants":[],"conventions":[],"unknowns":[]}'
-elif [ -n "$axes" ]; then
+if [ -n "$axes" ]; then
   reports=""
   for axis in $(printf '%s' "$axes" | tr ',' ' '); do
     reports="$reports${reports:+,}{\"axis\":\"$axis\",\"status\":\"PASS\",\"findings\":[],\"checked\":[\"read the diff\"],\"resolutions\":[]}"
@@ -44,7 +42,7 @@ elif [ -n "$axes" ]; then
   answer="{\"reports\":[$reports]}"
 else
   echo fixed > a.txt
-  answer='{"status":"COMPLETED","summary":"edited a.txt","blockers":[],"handoff":"","deviations":[]}'
+  answer='{"status":"COMPLETED","summary":"edited a.txt","blockers":[],"handoff":"","deviations":[],"disputes":[]}'
 fi
 `
 
@@ -182,11 +180,23 @@ func TestCommandLineBasics(t *testing.T) {
 	if _, stderr, code := s.run("--bogus task", "parse"); code != 1 || !strings.Contains(stderr, "invalid") {
 		t.Fatalf("a bad request is rejected: %s", stderr)
 	}
-	if _, stderr, code := s.run(`{"reason":"x","reasn":"typo"}`, "hold", "--file", "-"); code != 1 || !strings.Contains(stderr, "reasn") {
+	if _, stderr, code := s.run(`{"reason":"x","reasn":"typo"}`, "pause", "--file", "-"); code != 1 || !strings.Contains(stderr, "reasn") {
 		t.Fatalf("a misspelled input field is an error: %s", stderr)
 	}
-	if _, stderr, code := s.run("", "finish"); code != 1 || !strings.Contains(stderr, "--file") {
+	if _, stderr, code := s.run("", "decide"); code != 1 || !strings.Contains(stderr, "--file") {
 		t.Fatalf("a missing input is explained: %s", stderr)
+	}
+	// The request goes to `prepare` as it was typed; one that opens no task names its own command.
+	for request, want := range map[string]string{"--preview fix the totals": "agentgate preview", "status": "agentgate status",
+		"research how totals are rounded": "agentgate consult", `{"request": "stop"}`: "agentgate stop"} {
+		if _, stderr, code := s.run(request, "prepare", "--file", "-"); code != 1 || !strings.Contains(stderr, want) {
+			t.Fatalf("prepare %q must point at %q: %s", request, want, stderr)
+		}
+	}
+	for _, old := range []string{"launch", "review", "triage", "fix", "finish", "replan", "hold"} {
+		if _, stderr, code := s.run("", old); code != 1 || !strings.Contains(stderr, "replaced in 0.16") || !strings.Contains(stderr, "agentgate guide") {
+			t.Fatalf("a command of the earlier protocol names its replacement: %s: %s", old, stderr)
+		}
 	}
 	if hook, _, code := s.run(`{"cwd":"`+s.repo+`","session_id":"cli-session"}`, "hook"); code != 0 || strings.TrimSpace(hook) != "{}" {
 		t.Fatalf("without a task the Stop hook allows the stop: %s", hook)
@@ -200,20 +210,36 @@ func TestCommandLineBasics(t *testing.T) {
 }
 
 func TestReferenceDocumentsEveryCommand(t *testing.T) {
-	for _, command := range []string{"parse", "preview", "route", "architecture", "design", "consult", "launch", "answer", "tell", "check",
-		"review", "visual", "triage", "fix", "finish", "hold", "resume", "stop", "status", "watch", "doctor", "install", "update", "modes",
+	reference := ""
+	for _, topic := range append([]string{""}, assets.ReferenceTopics()...) {
+		text, known := assets.Reference(topic)
+		if !known || strings.TrimSpace(text) == "" {
+			t.Fatalf("the reference topic %q is listed but empty", topic)
+		}
+		reference += text
+	}
+	if _, known := assets.Reference("no-such-topic"); known {
+		t.Fatal("an unknown topic must not print something else")
+	}
+	for _, command := range []string{"parse", "preview", "prepare", "route", "architecture", "design", "consult", "start", "run", "answer", "decide",
+		"amend", "show", "tell", "check", "visual", "land", "pause", "resume", "stop", "status", "watch", "doctor", "install", "update", "modes",
 		"config", "prune", "version"} {
-		if !strings.Contains(assets.Reference, "`"+command) {
+		if !strings.Contains(reference, "`"+command) {
 			t.Errorf("the reference does not document %q", command)
 		}
 		if !strings.Contains(usage, command) {
 			t.Errorf("the usage text does not list %q", command)
 		}
 	}
-	for _, field := range []string{"assessment", "streams", "checks", "baseline", "lead_review", "dispositions", "reassessment",
-		"architecture_evidence", "revise_blockers", "usage_context", "skip_reason"} {
-		if !strings.Contains(assets.Reference, field) {
+	for _, field := range []string{"assessment", "streams", "stages", "covers", "requirements", "checks", "checks_waiver", "baseline", "update", "authorized",
+		"rework", "answers", "notes", "findings", "reassessment", "escalate", "recheck", "revise_blockers", "usage_context", "skip_reason"} {
+		if !strings.Contains(reference, field) {
 			t.Errorf("the reference does not document the %q field", field)
+		}
+	}
+	for _, action := range []string{"run", "answer", "decide", "amend", "pause", "resume", "stop", "land", "check", "visual"} {
+		if !strings.Contains(assets.Guide+reference, "`"+action) {
+			t.Errorf("an action the tool offers is explained nowhere: %q", action)
 		}
 	}
 }
@@ -262,49 +288,72 @@ func TestWholeTaskThroughTheCommandLine(t *testing.T) {
 	if routed["decision"].(map[string]any)["mode"] != "medium" {
 		t.Fatalf("route: %v", routed)
 	}
-	launched := s.ok(plan, "launch", "--file", "-")
-	if launched["phase"] != "awaiting-review" || launched["writers"].([]any)[0].(map[string]any)["status"] != "COMPLETED" {
-		t.Fatalf("launch: %v", launched)
+	hookInput := `{"cwd":"` + s.repo + `","session_id":"cli-session"}`
+	// One command writes, runs the checks and sends the failing one back to its author once. The check can
+	// never pass, so the task stops there and asks for a new diagnosis; nobody reviewed code that fails a check.
+	started := s.ok(plan, "start", "--file", "-")
+	if started["step"] != "decide" || started["writers"].([]any)[0].(map[string]any)["status"] != "COMPLETED" ||
+		started["needs"].([]any)[0].(map[string]any)["kind"] != "stall" || len(started["checks"].(map[string]any)["failing"].([]any)) != 1 {
+		t.Fatalf("start: %v", started)
 	}
 	if raw, _ := os.ReadFile(filepath.Join(s.repo, "a.txt")); string(raw) != "fixed\n" {
 		t.Fatal("the writer edits the checkout")
 	}
-	if _, stderr, code := s.run(plan, "launch", "--file", "-"); code != 1 || !strings.Contains(stderr, "awaiting-review") {
-		t.Fatalf("a second launch of a written task is refused: %s", stderr)
+	if _, stderr, code := s.run(plan, "start", "--file", "-"); code != 1 || !strings.Contains(stderr, "unfinished task already exists") {
+		t.Fatalf("a second start beside an unfinished task is refused: %s", stderr)
 	}
-	hook, _, _ := s.run(`{"cwd":"`+s.repo+`","session_id":"cli-session"}`, "hook")
-	if !strings.Contains(hook, `"decision": "block"`) {
-		t.Fatalf("the Stop hook blocks an unreviewed task: %s", hook)
+	if hook, _, _ := s.run(hookInput, "hook"); !strings.Contains(hook, `"decision": "block"`) {
+		t.Fatalf("the Stop hook blocks an unfinished task: %s", hook)
 	}
 	stdout, _, code := s.run("", "check", "--all")
 	if code != 2 || !strings.Contains(stdout, `"failed": true`) || !strings.Contains(stdout, `"returncode": 7`) {
 		t.Fatalf("a failing check exits with 2 and reports its code: %d %s", code, stdout)
 	}
-	reviewed := s.ok(`{"skip_checks": true}`, "review", "--file", "-")
-	if reviewed["phase"] != "reviewed" || len(reviewed["blocking"].([]any)) != 0 {
-		t.Fatalf("review: %v", reviewed)
-	}
-	if _, stderr, code := s.run(`{"summary":"done"}`, "finish", "--file", "-"); code != 1 || !strings.Contains(stderr, "exit 7") {
-		t.Fatalf("finish refuses while a check fails: %s", stderr)
+	if again := s.ok("", "run"); again["step"] != "decide" || again["needs"].([]any)[0].(map[string]any)["kind"] != "stall" {
+		t.Fatalf("running again with nothing settled changes nothing: %v", again)
 	}
 	if _, stderr, code := s.run(`{"request":"-m x","brief":"b","streams":[],"modee":"light"}`, "route", "--file", "-"); code != 1 || !strings.Contains(stderr, "modee") {
 		t.Fatalf("a misspelled plan field must be an error, got %q", stderr)
 	}
 	panel, _, _ := s.run("", "watch", "--once")
-	for _, want := range []string{"TASKS 1", "medium", "reviewed", "writer  core", "opus:medium", "review  architecture", "fable:medium", "passed", "failed (7)", "steps"} {
+	for _, want := range []string{"TASKS 1", "medium", "decide", "writer  core", "opus:medium", "passed", "failed (7)", "steps"} {
 		if !strings.Contains(panel, want) {
 			t.Errorf("watch lacks %q:\n%s", want, panel)
 		}
 	}
-	held := s.ok(`{"reason":"the failing check needs the user's decision"}`, "hold", "--file", "-")
-	if held["phase"] != "held" {
-		t.Fatalf("hold: %v", held)
+	paused := s.ok(`{"reason":"the failing check needs the user's decision"}`, "pause", "--file", "-")
+	if paused["paused"].(map[string]any)["kind"] != "decision" || paused["actions"].([]any)[0] != "resume" {
+		t.Fatalf("pause: %v", paused)
 	}
-	if hook, _, _ := s.run(`{"cwd":"`+s.repo+`","session_id":"cli-session"}`, "hook"); strings.TrimSpace(hook) != "{}" {
-		t.Fatalf("an honest hold lets the session stop: %s", hook)
+	if hook, _, _ := s.run(hookInput, "hook"); strings.TrimSpace(hook) != "{}" {
+		t.Fatalf("an honest pause lets the session stop: %s", hook)
 	}
-	s.ok("", "resume")
-	s.ok(`{"reason":"dropped by the user","cancelled":true}`, "hold", "--file", "-")
+	if resumed := s.ok("", "resume"); resumed["paused"] != nil {
+		t.Fatalf("resume: %v", resumed)
+	}
+	// The plan was wrong, not the code: it is amended in place, and the same task goes on to its review.
+	amended := s.ok(strings.Replace(plan, `,["sh","-c","exit 7"]]`, `],"update":"the second check was a placeholder that cannot pass"`, 1), "amend", "--file", "-")
+	if amended["step"] != "verify" || amended["needs"] != nil {
+		t.Fatalf("amend: %v", amended)
+	}
+	done := s.ok("", "run")
+	if done["step"] != "done" || len(done["actions"].([]any)) != 0 || !strings.Contains(fmt.Sprint(done["did"]), "review by") {
+		t.Fatalf("run: %v", done)
+	}
+	if hook, _, _ := s.run(hookInput, "hook"); strings.TrimSpace(hook) != "{}" {
+		t.Fatalf("a finished task lets the session stop: %s", hook)
+	}
+	// A command that is not legal now answers with the task as it is and what is possible, and exits with 1.
+	refused, _, code := s.run("", "run")
+	if code != 1 || !strings.Contains(refused, `"refused"`) || !strings.Contains(refused, `"step": "done"`) {
+		t.Fatalf("a refused command says why and what is possible: %d %s", code, refused)
+	}
+	panel, _, _ = s.run("", "watch", "--once")
+	for _, want := range []string{"done", "review  correctness", "astra:medium", "revision 2"} {
+		if !strings.Contains(panel, want) {
+			t.Errorf("watch lacks %q:\n%s", want, panel)
+		}
+	}
 	if pruned := s.ok("", "prune"); pruned["removed"] != float64(0) {
 		t.Fatalf("a fresh task is not pruned: %v", pruned)
 	}
@@ -343,7 +392,7 @@ func TestCodexLeadFromTheCommandLine(t *testing.T) {
 		t.Fatal("the sandbox variable alone must not stop a command that a rule let out")
 	}
 	boxed := &sandbox{t: t, repo: s.repo, env: append(append([]string{}, codex.env...), "XDG_STATE_HOME="+filepath.Join(locked, "state"))}
-	if _, stderr, code := boxed.run("{}", "launch", "--file", "-"); code != 1 || !strings.Contains(stderr, "one plain command") {
+	if _, stderr, code := boxed.run("{}", "start", "--file", "-"); code != 1 || !strings.Contains(stderr, "one plain command") {
 		t.Fatalf("a sandboxed call is refused with the way out: %s", stderr)
 	}
 	if out, _, code := boxed.run("", "version"); code != 0 || out == "" {

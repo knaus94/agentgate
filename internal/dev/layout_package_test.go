@@ -8,13 +8,13 @@ import (
 	"testing"
 )
 
-func TestDesignPackageBytesInvalidateReviewedContract(t *testing.T) {
+func TestDesignPackageBytesInvalidateTheEvidenceThatWasRead(t *testing.T) {
 	f := newFixture(t)
 	layoutFixture(t)
-	plan := f.plan("-m implement the page")
+	plan := f.plan("-l implement the page")
 	plan.Design = []DesignRef{screenFixture(t)}
-	f.launch(plan)
-	f.review()
+	handed := f.start(plan) // light: written and measured, the lead's reading is owed
+	quality := leadQuality(t, handed)
 	design := Current().Plan.Design[0]
 	original := design.digest()
 	write(t, filepath.Join(design.Package, "data", "spec.json"), `{"modified":true}`)
@@ -24,7 +24,10 @@ func TestDesignPackageBytesInvalidateReviewedContract(t *testing.T) {
 	if err := verifyDesignPackage(design.Package); err == nil || !strings.Contains(err.Error(), "import it again") {
 		t.Fatal(err)
 	}
-	f.fails("finish", "task contract changed", func() (any, error) { return Finish(f.cfg, Current(), FinishInput{Summary: "stale design"}) })
+	f.fails("decide", "changed since the evidence was prepared", func() (any, error) {
+		return Decide(f.cfg, Current(), DecideInput{Review: &LeadReview{Summary: "stale design", Quality: quality}})
+	})
+	f.fails("run", "import it again", func() (any, error) { return Run(f.cfg, Current(), RunInput{}) })
 }
 
 func TestDesignPackageCannotDropInventoryOrEscapeDirectory(t *testing.T) {

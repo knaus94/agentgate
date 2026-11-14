@@ -25,7 +25,7 @@ func (m *panel) mark(status string, live bool) string {
 	case status == "COMPLETED" || status == "PASS" || status == "done" || status == "passed" || status == "complete" ||
 		status == "reviewed" || status == "ready to land" || (strings.HasPrefix(status, "landed: ") && status != "landed: drop"):
 		return p.green("✔")
-	case status == "BLOCKED" || status == "NEEDS_FIX" || status == "held" || status == "stale" || strings.HasPrefix(status, "failed before"):
+	case status == "BLOCKED" || status == "NEEDS_FIX" || status == "paused" || status == "decide" || status == "stale" || strings.HasPrefix(status, "failed before"):
 		return p.yellow("!")
 	case status == "FAILED" || status == "CANCELLED" || status == "stopped" || status == "cancelled" || strings.HasPrefix(status, "failed"):
 		return p.red("✖")
@@ -151,29 +151,29 @@ func (m *panel) frame() []string {
 			lines = append(lines, " "+p.red(line))
 		}
 	}
-	if gate != nil && gate.Phase == "held" {
-		for _, line := range wrap("on hold: "+gate.HoldReason, width-2) {
+	if gate != nil && gate.Pause != nil {
+		for _, line := range wrap("paused ("+gate.Pause.Kind+"): "+gate.Pause.Reason, width-2) {
 			lines = append(lines, " "+p.yellow(line))
 		}
 	}
-	if gate != nil && gate.Epic != nil {
+	if gate != nil && len(gate.Plan.Stages) > 1 {
 		// The parts of a staged task: accepted, the present one, still ahead.
-		lines = append(lines, "", p.bold(" STAGES")+p.dim(fmt.Sprintf("  %d of %d accepted", len(gate.StageRecords), len(gate.Epic.Stages))))
-		for index, stage := range gate.Epic.Stages {
-			mark, mode, note := p.dim("○"), "", oneLine(stage.Goal)
+		lines = append(lines, "", p.bold(" STAGES")+p.dim(fmt.Sprintf("  %d of %d accepted", len(gate.Accepted), len(gate.Plan.Stages))))
+		for index, stage := range gate.Plan.Stages {
+			mark, mode, note := p.dim("○"), gate.Modes[index], oneLine(stage.Goal)
 			switch {
-			case index < len(gate.StageRecords):
-				record := gate.StageRecords[index]
+			case index < len(gate.Accepted):
+				record := gate.Accepted[index]
 				mark, mode, note = p.green("✔"), record.Mode, oneLine(record.Summary)
 				if record.Commit != "" {
 					note = record.Commit + " " + note
 				}
-			case index == gate.StageIndex && !gate.Integration:
-				mark, mode = p.cyan("▶"), gate.Mode
+			case index == gate.Stage && !gate.Whole:
+				mark = p.cyan("▶")
 			}
 			lines = append(lines, "   "+mark+" "+fit(fmt.Sprintf("%d. %s", index+1, stage.Name), 28)+p.dim(fit(mode, 8))+fit(note, max(10, width-42)))
 		}
-		if gate.Integration {
+		if gate.Whole {
 			lines = append(lines, "   "+p.cyan("▶")+" "+fit("the whole change", 28)+p.dim(fit(gate.Mode, 8))+"review of the seams between the stages")
 		}
 	}
@@ -252,7 +252,8 @@ func (m *panel) frame() []string {
 		lines = append(lines, cursor("signals", 0)+p.bold("SIGNALS")+p.dim(fmt.Sprintf("  %d leftovers found mechanically on added lines", len(gate.Signals))))
 	}
 	if gate != nil {
-		lines = append(lines, cursor("plan", 0)+p.bold("PLAN")+p.dim(fmt.Sprintf("  %d streams · %d files · %d checks", len(gate.Plan.Streams), len(gate.Files), len(gate.Plan.Checks))))
+		lines = append(lines, cursor("plan", 0)+p.bold("PLAN")+p.dim(fmt.Sprintf("  %d stages · %d streams · %d scope entries · %d checks · revision %d",
+			len(gate.Plan.Stages), len(gate.Plan.allStreams()), len(gate.Plan.Files()), len(gate.Plan.checksFor(-1)), len(gate.Revisions))))
 	}
 	if task.Next != "" {
 		lines = append(lines, "")
@@ -399,8 +400,13 @@ func (m *panel) detail(width, room int) []string {
 		head = []string{" " + p.bold("FINDINGS") + p.dim(fmt.Sprintf("  %d open · %d notes", len(task.Open), task.Notes))}
 		for _, finding := range task.Open {
 			decision := task.Gate.Dispositions[finding.ID].Decision
-			if decision == "" {
-				decision = "not triaged"
+			switch {
+			case decision == "" && task.Gate.Disputes[finding.ID].Upheld:
+				decision = "disputed by its author, upheld by the reviewer: the lead decides"
+			case decision == "":
+				decision = "note"
+			case task.Gate.Dispositions[finding.ID].Auto:
+				decision = "sent to its author"
 			}
 			where := finding.Path
 			if finding.Line > 0 {
@@ -426,13 +432,28 @@ func (m *panel) detail(width, room int) []string {
 		plan := task.Gate.Plan
 		head = []string{" " + p.bold("PLAN") + p.dim("  "+task.Gate.Mode+" · "+oneLine(plan.Request))}
 		text("brief", plan.Brief)
-		for _, stream := range plan.Streams {
-			body = append(body, "", " "+p.bold(stream.Name)+p.dim("  "+stream.Domain))
-			if stream.Brief != "" {
-				text("", stream.Brief)
+		for index, stage := range plan.Stages {
+			if len(plan.Stages) > 1 {
+				body = append(body, "", " "+p.bold(fmt.Sprintf("%d. %s", index+1, stage.Name))+p.dim("  "+task.Gate.Modes[index]))
+				text("goal", stage.Goal)
 			}
-			for _, file := range stream.Files {
-				body = append(body, p.dim("          ")+terminalText(file))
+			for _, stream := range stage.Streams {
+				body = append(body, "", " "+p.bold(stream.Name)+p.dim("  "+stream.Domain))
+				if stream.Brief != "" {
+					text("", stream.Brief)
+				}
+				for _, file := range stream.Files {
+					body = append(body, p.dim("          ")+terminalText(file))
+				}
+			}
+		}
+		for _, revision := range task.Gate.Revisions {
+			if revision.Number > 1 {
+				body = append(body, "", " "+p.bold(fmt.Sprintf("revision %d", revision.Number)))
+				text("why", revision.Reason)
+				for _, change := range revision.Changes {
+					text("", change)
+				}
 			}
 		}
 		if accepted := plan.Architecture; accepted != nil {

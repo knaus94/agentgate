@@ -1,6 +1,8 @@
 package dev
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -11,6 +13,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/knaus94/agentgate/internal/ops"
@@ -20,12 +23,35 @@ import (
 func checkID(argv []string) string { return digest(argv)[:16] }
 
 func (g *Gate) findCheck(argv []string) *Check {
-	for index := range g.Plan.Checks {
-		if slices.Equal(g.Plan.Checks[index].Argv, argv) {
-			return &g.Plan.Checks[index]
+	checks := g.checks()
+	for index := range checks {
+		if slices.Equal(checks[index].Argv, argv) {
+			return &checks[index]
 		}
 	}
 	return nil
+}
+
+// fingerprint is the content and mode of one file on disk.
+func fingerprint(name string) (string, error) {
+	info, err := os.Lstat(name)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return "deleted", nil
+	case err != nil:
+		return "", fmt.Errorf("inspect %s: %w", name, err)
+	case info.Mode()&os.ModeSymlink != 0:
+		target, err := os.Readlink(name)
+		return "link:" + target, err
+	case !info.Mode().IsRegular():
+		return "", fmt.Errorf("%s is not a regular file", name)
+	}
+	raw, err := os.ReadFile(name)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", name, err)
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]) + ":" + strconv.FormatUint(uint64(info.Mode().Perm()), 8), nil
 }
 
 var globMeta = regexp.MustCompile(`[*?\[]`)
@@ -200,8 +226,9 @@ func (g *Gate) execCheck(check *Check, label string) (int, string, error) {
 // baselineChecks records failures observed before writing. An exit code alone
 // cannot prove that a later failure has the same cause, so it never waives it.
 func (g *Gate) baselineChecks() error {
-	for index := range g.Plan.Checks {
-		check := &g.Plan.Checks[index]
+	checks := g.checks()
+	for index := range checks {
+		check := &checks[index]
 		if !check.Baseline {
 			continue
 		}
@@ -214,7 +241,8 @@ func (g *Gate) baselineChecks() error {
 	return g.save()
 }
 
-// runCheck executes one declared check, or reuses its receipt when its inputs did not change.
+// runCheck executes one declared check, or reuses its receipt when its inputs did not change. A check that
+// declared no inputs is bound to the whole working tree it ran against.
 func (g *Gate) runCheck(check *Check) (CheckReceipt, error) {
 	if len(check.Inputs) > 0 && !check.NoReuse {
 		if receipt := g.currentReceipt(check); passed(receipt) {
@@ -223,20 +251,13 @@ func (g *Gate) runCheck(check *Check) (CheckReceipt, error) {
 			return reused, nil
 		}
 	}
-	before, _, err := g.contentDigest()
+	before, err := g.snapshot()
 	if err != nil {
 		return CheckReceipt{}, err
 	}
 	key, err := inputKey(check)
 	if err != nil {
 		return CheckReceipt{}, err
-	}
-	repository := ""
-	if len(check.Inputs) == 0 {
-		repository, err = repositoryDigest()
-		if err != nil {
-			return CheckReceipt{}, err
-		}
 	}
 	code, log, err := g.execCheck(check, "run")
 	if err != nil {
@@ -249,35 +270,38 @@ func (g *Gate) runCheck(check *Check) (CheckReceipt, error) {
 	if afterKey != key {
 		return CheckReceipt{}, errors.New("check changed its declared inputs; its result is stale, run a non-mutating verification command")
 	}
-	if after, _, err := g.contentDigest(); err != nil {
+	after, err := g.snapshot()
+	if err != nil {
 		return CheckReceipt{}, err
-	} else if after != before {
-		return CheckReceipt{}, errors.New("task files changed during the check; its result is stale, run verification again")
 	}
-	if len(check.Inputs) == 0 {
-		afterRepository, err := repositoryDigest()
+	if after != before {
+		owned, _, err := g.changesBetween(before, after)
 		if err != nil {
 			return CheckReceipt{}, err
 		}
-		if afterRepository != repository {
+		if len(owned) > 0 {
+			return CheckReceipt{}, errors.New("task files changed during the check; its result is stale, run verification again")
+		}
+		if len(check.Inputs) == 0 {
 			return CheckReceipt{}, errors.New("repository changed during the check; its result is stale, declare stable inputs or run verification again")
 		}
 	}
-	receipt := CheckReceipt{Argv: check.Argv, ReturnCode: code, Digest: before, InputKey: key, Repository: repository, Log: log}
+	receipt := CheckReceipt{Argv: check.Argv, ReturnCode: code, InputKey: key, Log: log}
+	if len(check.Inputs) == 0 {
+		receipt.Tree = before
+	}
 	if previous, ran := g.Baselines[checkID(check.Argv)]; ran && previous != 0 && code != 0 {
 		receipt.Preexisting = true
 	}
 	return receipt, nil
 }
 
-// A failed attempt invalidates older successful receipts even when no child
-// process could start. A repaired tool must be run again before finish.
+// A failed attempt invalidates older successful receipts even when no child process could start. A repaired
+// tool must be run again before the task can go on.
 func (g *Gate) invalidateCheck(check *Check, failure error) error {
-	content, _, _ := g.contentDigest()
 	key, _ := inputKey(check)
-	repository, _ := repositoryDigest()
-	g.Checks = append(g.Checks, CheckReceipt{Argv: slices.Clone(check.Argv), ReturnCode: 125, Digest: content,
-		InputKey: key, Repository: repository, Error: failure.Error()})
+	tree, _ := g.snapshot()
+	g.Checks = append(g.Checks, CheckReceipt{Argv: slices.Clone(check.Argv), ReturnCode: 125, Tree: tree, InputKey: key, Error: failure.Error()})
 	return g.save()
 }
 
@@ -295,18 +319,19 @@ type CheckResult struct {
 
 // RunChecks executes declared checks. Commands outside the approved list are refused.
 func RunChecks(gate *Gate, input CheckInput) (*CheckResult, error) {
-	if !gate.active() || gate.Phase == "held" {
-		return nil, errors.New("the gate is not active")
+	if err := gate.can(ActCheck); err != nil {
+		return nil, err
 	}
+	checks := gate.checks()
 	var selected []*Check
 	if input.All {
-		for index := range gate.Plan.Checks {
-			selected = append(selected, &gate.Plan.Checks[index])
+		for index := range checks {
+			selected = append(selected, &checks[index])
 		}
 	} else if check := gate.findCheck(input.Argv); check != nil {
 		selected = append(selected, check)
 	} else {
-		return nil, errors.New("that command is not in the approved checks of the plan")
+		return nil, errors.New("that command is not in the approved checks of the plan; `amend` the plan to add a check")
 	}
 	result := &CheckResult{}
 	for _, check := range selected {
@@ -330,8 +355,9 @@ func (g *Gate) failing() []CheckFailure {
 
 func (g *Gate) failingReceipts(receipts map[string]*CheckReceipt) []CheckFailure {
 	var out []CheckFailure
-	for index := range g.Plan.Checks {
-		receipt := receipts[checkID(g.Plan.Checks[index].Argv)]
+	checks := g.checks()
+	for index := range checks {
+		receipt := receipts[checkID(checks[index].Argv)]
 		if receipt == nil || passed(receipt) {
 			continue
 		}
@@ -343,28 +369,31 @@ func (g *Gate) failingReceipts(receipts map[string]*CheckReceipt) []CheckFailure
 			raw = raw[len(raw)-4000:]
 		}
 		out = append(out, CheckFailure{Argv: receipt.Argv, ReturnCode: receipt.ReturnCode, Log: receipt.Log, Tail: string(raw),
-			Setup: generatedDesignCheck(g.Plan.Checks[index]) && receipt.ReturnCode != 1})
+			Setup: generatedDesignCheck(checks[index]) && receipt.ReturnCode != 1})
 	}
 	return out
 }
 
-// runOutstanding runs every declared check that has no current passing result.
-func (g *Gate) runOutstanding() error {
+// runOutstanding runs every declared check that has no current passing result, and reports how many it ran.
+func (g *Gate) runOutstanding() (int, error) {
 	current := g.currentReceipts()
-	for index := range g.Plan.Checks {
-		check := &g.Plan.Checks[index]
+	checks := g.checks()
+	ran := 0
+	for index := range checks {
+		check := &checks[index]
 		if !check.NoReuse && passed(current[checkID(check.Argv)]) {
 			continue
 		}
 		receipt, err := g.runCheck(check)
 		if err != nil {
-			return errors.Join(err, g.invalidateCheck(check, err))
+			return ran, errors.Join(err, g.invalidateCheck(check, err))
 		}
 		if !receipt.Reused {
 			g.Checks = append(g.Checks, receipt)
+			ran++
 		}
 	}
-	return g.save()
+	return ran, g.save()
 }
 
 // outstanding lists the declared checks without a current passing receipt.
@@ -374,8 +403,9 @@ func (g *Gate) outstanding() []*Check {
 
 func (g *Gate) outstandingReceipts(receipts map[string]*CheckReceipt) []*Check {
 	var out []*Check
-	for index := range g.Plan.Checks {
-		if check := &g.Plan.Checks[index]; !passed(receipts[checkID(check.Argv)]) {
+	checks := g.checks()
+	for index := range checks {
+		if check := &checks[index]; !passed(receipts[checkID(check.Argv)]) {
 			out = append(out, check)
 		}
 	}

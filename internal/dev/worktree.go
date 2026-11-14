@@ -1,7 +1,6 @@
 package dev
 
 import (
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -84,19 +83,6 @@ func nulList(raw string) []string {
 	return out
 }
 
-// committed is a file as a commit has it, or nil when the commit has no such file.
-func committed(commit, file string) *FileState {
-	raw, err := exec.Command("git", "show", commit+":"+file).Output()
-	if err != nil {
-		return nil
-	}
-	mode := uint32(0o644)
-	if tree, _ := git("ls-tree", commit, "--", file); strings.HasPrefix(tree, "100755") {
-		mode = 0o755
-	}
-	return &FileState{Bytes: base64.StdEncoding.EncodeToString(raw), Mode: mode}
-}
-
 // isolate creates the worktree of a new task from the checkout's HEAD, prepares it and moves the process in.
 func (g *Gate) isolate(cfg *config.Config) error {
 	main := base()
@@ -106,6 +92,7 @@ func (g *Gate) isolate(cfg *config.Config) error {
 	}
 	words := regexp.MustCompile(`[a-z0-9]+`).FindAllString(strings.ToLower(g.Request.Task), 4)
 	g.Branch = "dev/" + strings.Join(append(words, g.ID[:6]), "-")
+	g.StartCommit = strings.TrimSpace(head)
 	g.Worktree = filepath.Join(checkoutDir(""), "worktrees", g.ID[:12])
 	if err := os.MkdirAll(filepath.Dir(g.Worktree), 0o700); err != nil {
 		return err
@@ -206,66 +193,47 @@ func (g *Gate) validateWorktreePath() error {
 	return errors.New("worktree path is outside this task's managed directory; refusing cleanup")
 }
 
-// commitTask records the task's files on its branch. The branch is private to the tool, so no hook runs.
+// commitTask records what the present position changed on the task's branch. The branch is private to the
+// tool, so no hook runs.
 func (g *Gate) commitTask(message string) error {
-	if err := g.auditScope(); err != nil {
-		return err
-	}
-	if len(g.Foreign) > 0 {
-		return fmt.Errorf("the isolated task changed files outside its reviewed scope: %s; add them through replan and review before finishing", strings.Join(g.Foreign, ", "))
-	}
-	beforeRepository, err := repositoryDigest()
+	now, err := g.snapshot()
 	if err != nil {
 		return err
+	}
+	owned, foreign, err := g.changes(now)
+	if err != nil {
+		return err
+	}
+	if g.Foreign = foreign; len(foreign) > 0 {
+		return fmt.Errorf("the isolated task changed files outside its reviewed scope: %s; `amend` the plan to give them to a stream and `run` again", strings.Join(foreign, ", "))
 	}
 	staged, err := git("diff", "--cached", "--name-only", "-z")
 	if err != nil {
 		return err
 	}
+	scope := compilePatterns(g.Plan.Files())
 	for _, file := range nulList(staged) {
-		if !slices.Contains(g.Files, file) {
+		if !matchAny(scope, file) {
 			return fmt.Errorf("the private worktree has an unreviewed staged file: %s", file)
 		}
 	}
-	for _, file := range g.Files {
-		if _, err := os.Lstat(file); err == nil {
-			if _, err := gitIn(".", "add", "-f", "--", file); err != nil {
+	for _, change := range owned {
+		if change.Status == "D" {
+			if _, err := gitIn(".", "rm", "-q", "--cached", "--ignore-unmatch", "--", change.Path); err != nil {
 				return err
 			}
-		} else if _, err := gitIn(".", "ls-files", "--error-unmatch", "--", file); err == nil {
-			if _, err := gitIn(".", "rm", "-q", "--cached", "--", file); err != nil {
-				return err
-			}
+			continue
+		}
+		if _, err := gitIn(".", "add", "-f", "--", change.Path); err != nil {
+			return err
 		}
 	}
 	if exec.Command("git", "diff", "--cached", "--quiet").Run() == nil {
 		return nil
 	}
-	if _, err := gitIn(".", "-c", "core.hooksPath=/dev/null", "commit", "-q", "--no-verify", "-m", message); err != nil {
-		return err
-	}
-	if err := g.remeasure(); err != nil {
-		return err
-	}
-	afterRepository, err := repositoryDigest()
-	if err != nil {
-		return err
-	}
-	// Recording the already verified bytes as a private commit changes HEAD,
-	// but not the checked content. Preserve only receipts bound to that state.
-	for index := range g.Checks {
-		if g.Checks[index].Repository == beforeRepository {
-			g.Checks[index].Repository = afterRepository
-		}
-	}
-	return nil
-}
-
-// remeasure makes the worktree's present HEAD the point later changes are measured from.
-func (g *Gate) remeasure() (err error) {
-	head, _ := git("rev-parse", "HEAD")
-	g.HeadBefore = strings.TrimSpace(head)
-	g.Manifest, err = manifest()
+	// A commit records bytes that are already verified: the working tree, and with it every receipt bound to
+	// it, stays what it was.
+	_, err = gitIn(".", "-c", "core.hooksPath=/dev/null", "commit", "-q", "--no-verify", "-m", message)
 	return err
 }
 
@@ -329,16 +297,19 @@ func Land(cfg *config.Config, gate *Gate, input LandInput) (any, error) {
 		}
 		gate.Landed = how
 		if gate.active() {
-			gate.Phase, gate.HoldReason = "cancelled", "the isolated task was dropped"
+			if err := gate.setStep(StepCancelled); err != nil {
+				return nil, err
+			}
+			gate.Pause = nil
 		}
-		result["landed"], result["phase"] = how, gate.Phase
+		result["landed"], result["step"] = how, gate.Step
 		return result, gate.save()
 	}
 	if how == "drop" {
 		return close(map[string]any{"next": "The worktree and its branch are removed. Nothing changed in the checkout."})
 	}
-	if gate.Phase != "complete" {
-		return nil, fmt.Errorf("only a finished task lands; this one is %s", gate.Phase)
+	if gate.Step != StepDone {
+		return nil, fmt.Errorf("only a finished task lands; this one is at %s", gate.Step)
 	}
 	if origin == "" {
 		return nil, fmt.Errorf("the task's worktree is gone (%s); only `land` {how: drop} is left", gate.Worktree)
@@ -352,27 +323,27 @@ func Land(cfg *config.Config, gate *Gate, input LandInput) (any, error) {
 			return nil, errors.New("the checkout has staged changes; commit or unstage them before land {how: commit}, or use how: apply to preserve the index")
 		}
 	}
-	// Only committed, reviewed contents may be landed. In particular, never
-	// discard work someone added to the private worktree after completion.
-	if changed, err := manifest(); err != nil {
-		return nil, err
-	} else if digest(changed) != digest(gate.Manifest) {
-		return nil, errors.New("the completed worktree has new uncommitted changes; review and finish them before landing, or explicitly drop the task")
-	}
-	if err := gate.auditScope(); err != nil {
+	// Only committed, reviewed contents may be landed. In particular, never discard work someone added to the
+	// private worktree after completion.
+	now, err := gate.snapshot()
+	if err != nil {
 		return nil, err
 	}
-	if len(gate.Foreign) > 0 {
-		return nil, fmt.Errorf("the completed worktree has unreviewed changes outside its scope: %s", strings.Join(gate.Foreign, ", "))
-	}
-	if current, _, err := gate.contentDigest(); err != nil {
-		return nil, err
-	} else if current != gate.ReviewDigest || len(gate.Reviews) == 0 || gate.Reviews[len(gate.Reviews)-1].Contract != gate.contract() {
-		gate.Phase, gate.Final, gate.Reported = "awaiting-review", nil, false
+	if gate.Final.Tree != "" && now != gate.Final.Tree {
+		key, err := gate.taskKey(now)
+		if err != nil {
+			return nil, err
+		}
+		if key == gate.Final.Key {
+			return nil, errors.New("the completed worktree has new uncommitted changes outside the task's files; remove them, or explicitly drop the task")
+		}
+		if err := gate.reopen(); err != nil {
+			return nil, err
+		}
 		if err := gate.save(); err != nil {
 			return nil, err
 		}
-		return nil, errors.New("the finished task changed since review; review and finish it again before landing")
+		return nil, errors.New("the finished task changed since it was completed; `run` verifies it again before it lands")
 	}
 	target, err := gitIn(main, "rev-parse", "HEAD")
 	if err != nil {
@@ -454,16 +425,36 @@ func Land(cfg *config.Config, gate *Gate, input LandInput) (any, error) {
 	return close(result)
 }
 
-// catchUp merges the checkout's present HEAD into the task. A clean merge that leaves the reviewed content
+// catchUp merges the checkout's present HEAD into the task. A clean merge that leaves the task's own files
 // and the checks intact lets the landing go on; anything else reopens the task and returns its summary.
 func (g *Gate) catchUp(cfg *config.Config, target string) (any, error) {
-	reviewed := g.ReviewDigest
+	before, err := g.snapshot()
+	if err != nil {
+		return nil, err
+	}
+	all, err := diffTrees(g.objects(), g.BaseTree, before)
+	if err != nil {
+		return nil, err
+	}
+	scope := compilePatterns(g.Plan.Files())
+	watched := slices.Clone(g.Plan.Context)
+	for _, change := range all {
+		if matchAny(scope, change.Path) {
+			watched = append(watched, change.Path)
+		}
+	}
+	reviewed, err := treeEntries(g.objects(), before, watched)
+	if err != nil {
+		return nil, err
+	}
 	reopen := func(reason string) (any, error) {
-		g.Phase, g.Final, g.Reported = "awaiting-review", nil, false
+		if err := g.reopen(); err != nil {
+			return nil, err
+		}
 		if err := g.save(); err != nil {
 			return nil, err
 		}
-		summary := g.Summary(cfg)
+		summary := g.report(cfg, []string{"catching up with the checkout reopened the task: " + reason})
 		summary["landed"], summary["reopened"] = false, reason
 		return summary, nil
 	}
@@ -485,33 +476,48 @@ func (g *Gate) catchUp(cfg *config.Config, target string) (any, error) {
 		}
 	}
 	// The task is now measured against the new base: what the checkout brought in is not the task's change.
-	for _, file := range append(slices.Clone(g.Files), g.Context...) {
-		g.Baseline[file] = committed(target, file)
-	}
-	for _, file := range g.Conflicts {
-		if !slices.Contains(g.Files, file) {
-			g.Files = append(g.Files, file)
-			g.Plan.Streams[0].Files = append(g.Plan.Streams[0].Files, file)
-			g.Baseline[file] = committed(target, file)
+	// Files the worktree was given outside git when it was prepared stay part of that base.
+	started := commitTree(g.objects(), g.StartCommit)
+	var carried []string
+	if started != "" {
+		prepared, err := diffTrees(g.objects(), started, g.BaseTree)
+		if err != nil {
+			return nil, err
+		}
+		for _, change := range prepared {
+			if change.Status != "D" {
+				carried = append(carried, change.Path)
+			}
 		}
 	}
-	g.Context = subtract(g.Context, g.Files)
-	g.WriteFiles = g.Files
-	if err := g.remeasure(); err != nil {
+	base, err := graftTree(g.objects(), commitTree(g.objects(), target), g.BaseTree, carried)
+	if err != nil {
 		return nil, err
+	}
+	g.BaseTree, g.StageTree, g.StartCommit = base, base, target
+	// A conflicted file the plan did not own is now something the task has to finish.
+	last := &g.Plan.Stages[len(g.Plan.Stages)-1]
+	for _, file := range g.Conflicts {
+		if !matchAny(compilePatterns(g.Plan.Files()), file) {
+			last.Streams[0].Files = append(last.Streams[0].Files, file)
+		}
 	}
 	if len(g.Conflicts) > 0 {
 		return reopen("the checkout changed the same lines: conflict markers are in " + strings.Join(g.Conflicts, ", "))
 	}
-	// Other code changed under the task: every declared check runs again, whatever its receipt says.
-	failed := false
-	content, _, err := g.contentDigest()
+	after, err := g.snapshot()
 	if err != nil {
 		return nil, err
 	}
-	for index := range g.Plan.Checks {
-		check := &g.Plan.Checks[index]
-		force := *check
+	merged, err := treeEntries(g.objects(), after, watched)
+	if err != nil {
+		return nil, err
+	}
+	// Other code changed under the task: every declared check runs again, whatever its receipt says.
+	failed := false
+	checks := g.Plan.checksFor(-1)
+	for index := range checks {
+		force := checks[index]
 		force.NoReuse = true
 		receipt, err := g.runCheck(&force)
 		if err != nil {
@@ -523,16 +529,16 @@ func (g *Gate) catchUp(cfg *config.Config, target string) (any, error) {
 	switch {
 	case failed:
 		return reopen("a declared check fails after merging the checkout's new commits")
-	case content != reviewed:
+	case merged != reviewed:
 		return reopen("the checkout's new commits changed files this task also changes; the merged result needs a review")
+	case len(g.Plan.Requirements) > 0 || len(g.Plan.Design) > 0:
+		return reopen("the criteria were judged with receipts from before the merge; they are reassessed with the fresh ones")
 	}
-	quality, err := g.qualityInputs(cfg)
+	key, err := g.taskKey(after)
 	if err != nil {
 		return nil, err
 	}
-	if len(g.Reviews) == 0 || g.Reviews[len(g.Reviews)-1].QualityDigest != quality.fingerprint() {
-		return reopen("fresh verification receipts after merging need acceptance review")
-	}
+	g.Final.Tree, g.Final.Key = after, key
 	return nil, g.save()
 }
 
@@ -542,7 +548,7 @@ func (g *Gate) landing() map[string]any {
 	switch {
 	case g.Landed != "":
 		out["landed"] = g.Landed
-	case g.Phase == "complete":
+	case g.Step == StepDone:
 		out["ready_since"] = time.Unix(g.Final.At, 0).Format("2006-01-02 15:04")
 	}
 	if len(g.Conflicts) > 0 {

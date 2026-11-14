@@ -13,35 +13,57 @@ import (
 	"github.com/knaus94/agentgate/internal/provider"
 )
 
+// leadQuality answers the criteria of the evidence the lead was handed the way the fixture's reviewer would.
+func leadQuality(t *testing.T, summary map[string]any) *QualityReport {
+	t.Helper()
+	list, _ := summary["needs"].([]any)
+	if len(list) != 1 || list[0].(map[string]any)["kind"] != "review" {
+		t.Fatalf("the lead's own review is not what the task waits for: %v", summary)
+	}
+	packet := map[string]any{}
+	must(t, json.Unmarshal([]byte(fileText(t, list[0].(map[string]any)["detail"].(map[string]any)["packet"].(string))), &packet))
+	return fixtureQuality(packet)
+}
+
+func lineCount(t *testing.T, path string) int {
+	t.Helper()
+	return strings.Count(fileText(t, path), "\n")
+}
+
 func TestDesignAcceptanceRequiresEvidenceBeyondMeasurements(t *testing.T) {
 	f := newFixture(t)
 	layoutFixture(t)
 	plan := f.plan("-m implement the page")
 	plan.Design = []DesignRef{screenFixture(t)}
-	f.launch(plan)
-	f.review()
+	verdict := "cropped"
+	changeQuality(f, func(report *QualityReport) {
+		for i := range report.Rules {
+			switch {
+			case verdict == "cropped" && strings.HasSuffix(report.Rules[i].ID, ".appearance"):
+				report.Rules[i].Status = "block"
+				report.Rules[i].Evidence = "The frame dimensions match, but the artwork is cropped differently"
+			case verdict == "skipped" && i == 0:
+				report.Rules[i].Status = "not_applicable"
+			}
+		}
+	})
+	blocked := f.start(plan)
 	input, err := Current().qualityInputs(f.cfg)
 	must(t, err)
 	if input == nil || len(input.Rules) == 0 {
 		t.Fatal("passing measurements were accepted without independent design criteria")
 	}
-	changeQuality(f, func(report *QualityReport) {
-		for i := range report.Rules {
-			if strings.HasSuffix(report.Rules[i].ID, ".appearance") {
-				report.Rules[i].Status = "block"
-				report.Rules[i].Evidence = "The frame dimensions match, but the artwork is cropped differently"
-			}
-		}
-	})
-	f.do("review", func() (any, error) { return ReviewTask(f.cfg, Current(), ReviewInput{Recheck: true}) })
-	f.fails("finish", "artwork is cropped", func() (any, error) { return Finish(f.cfg, Current(), FinishInput{Summary: "measurement PASS"}) })
-	changeQuality(f, func(report *QualityReport) { report.Rules[0].Status = "not_applicable" })
-	f.fails("review", "must be assessed", func() (any, error) { return ReviewTask(f.cfg, Current(), ReviewInput{Recheck: true}) })
-	f.model = nil
-	f.review()
+	if !slices.Equal(needs(blocked), []string{"rule"}) || !strings.Contains(blocked["needs"].([]any)[0].(map[string]any)["what"].(string), "artwork is cropped") {
+		t.Fatalf("a measurement PASS completed a design whose picture was judged different: %v", blocked)
+	}
+	verdict = "skipped"
+	f.fails("run", "must be assessed", func() (any, error) { return Run(f.cfg, Current(), RunInput{Recheck: true}) })
 	gate := Current()
+	reviewed := gate.Reviews[len(gate.Reviews)-1].Contract
 	must(t, os.Remove(gate.Plan.Design[0].reviewFiles()["page_context_picture"]))
-	f.fails("finish", "task contract changed", func() (any, error) { return Finish(f.cfg, Current(), FinishInput{Summary: "old context"}) })
+	if gate.codeContract() == reviewed {
+		t.Fatal("a review stayed current after a picture it read was removed")
+	}
 	input, err = gate.qualityInputs(f.cfg)
 	must(t, err)
 	if !slices.ContainsFunc(input.Rules, func(rule reviewRule) bool {
@@ -49,16 +71,18 @@ func TestDesignAcceptanceRequiresEvidenceBeyondMeasurements(t *testing.T) {
 	}) {
 		t.Fatal("a cropped screenshot was allowed to prove placement in the shell")
 	}
-	f.review()
-	f.finish()
+	verdict = "passes"
+	if done := f.do("run", func() (any, error) { return Run(f.cfg, Current(), RunInput{Recheck: true}) }); done["step"] != StepDone {
+		t.Fatalf("the page is measured again and the reviewer's fresh reading completes the task: %v", done)
+	}
 }
 
 func TestLegacyDesignContextRefreshDoesNotRebaselineImplementedCode(t *testing.T) {
 	f := newFixture(t)
 	dir := layoutFixture(t)
-	plan := f.plan("-m implement the page")
+	plan := f.plan("-l implement the page")
 	plan.Design = []DesignRef{screenFixture(t)}
-	f.launch(plan)
+	f.start(plan)
 	gate := Current()
 	design := &gate.Plan.Design[0]
 	design.Figma = "https://www.figma.com/design/fixture/example?node-id=1-1"
@@ -150,19 +174,18 @@ func sealDesignFixture(t *testing.T, dir string, metadata map[string]any) {
 	write(t, filepath.Join(dir, "manifest.json"), string(raw))
 }
 
-func TestLayoutPreparationRecoversAndReplanReplacesManagedChecks(t *testing.T) {
+func TestLayoutPreparationRecoversAndAnAmendmentReplacesManagedChecks(t *testing.T) {
 	f := newFixture(t)
 	dir := layoutFixture(t)
-	plan := f.plan("-m implement the page")
+	plan := f.plan("-l implement the page")
 	plan.Design = []DesignRef{screenFixture(t)}
 	write(t, filepath.Join(dir, "fail"), "fail")
-	f.fails("launch", "stand unavailable", func() (any, error) { return Launch(f.cfg, plan) })
+	f.fails("start", "stand unavailable", func() (any, error) { return Start(f.cfg, plan, "", false, RunInput{}) })
 	original := Current()
-	if len(original.Writers) != 0 {
+	if original == nil || len(original.Writers) != 0 {
 		t.Fatal("writing started before the stand was ready")
 	}
 	must(t, os.Remove(filepath.Join(dir, "fail")))
-	plan.Update = "The stand is available again"
 	f.model = func(kind string, packet map[string]any, call provider.Call) (string, error) {
 		if kind == "writer" {
 			for _, raw := range packet["checks"].([]any) {
@@ -178,47 +201,61 @@ func TestLayoutPreparationRecoversAndReplanReplacesManagedChecks(t *testing.T) {
 		}
 		return "", nil
 	}
-	f.launch(plan)
+	f.proceed()
 	if Current().ID != original.ID || strings.Count(fileText(t, filepath.Join(dir, "baselines")), "baseline") != 1 {
-		t.Fatal("failed preparation did not resume on the same gate")
+		t.Fatal("failed preparation did not resume on the same task")
 	}
-	legacy := plan.Design[0].check()
+	revised := clonePlan(t, plan)
+	legacy := Current().Plan.Design[0].check()
 	legacy.Generated = ""
-	plan.Checks = append(plan.Checks, legacy, Check{Argv: []string{layoutCommand(), "layout", "independent", "--url", "file:///tmp/reference"}})
-	plan.Design[0].Root = "#content"
-	plan.Design[0].Device = "mobile"
-	plan.Design[0].Viewport = "390x844"
-	plan.Update = "Pair the content export with the content root"
-	f.do("replan", func() (any, error) { return Replan(f.cfg, Current(), plan) })
+	revised.Checks = append(revised.Checks, legacy, Check{Argv: []string{layoutCommand(), "layout", "independent", "--url", "file:///tmp/reference"}})
+	revised.Design[0].Root = "#content"
+	revised.Design[0].Device = "mobile"
+	revised.Design[0].Viewport = "390x844"
+	revised.Update = "Pair the content export with the content root"
+	f.amend(revised)
 	gate := Current()
-	if len(gate.Plan.Checks) != 3 || gate.Baseline["a.txt"].text() != "before\n" {
-		t.Fatalf("stale generated checks survived replan: %+v", gate.Plan.Checks)
+	before, _, _ := treeFile(gate.objects(), gate.BaseTree, "a.txt")
+	checks := gate.checks()
+	if len(checks) != 3 || string(before) != "before\n" || gate.BaseTree != original.BaseTree {
+		t.Fatalf("stale generated checks survived the amendment, or the task lost its origin: %+v", checks)
 	}
-	for _, check := range gate.Plan.Checks {
-		if generatedDesignCheck(check) && (!slices.Contains(check.Argv, "#content") || !slices.Contains(check.Argv, "mobile") || !slices.Contains(check.Argv, "390x844")) {
+	managed := 0
+	for _, check := range checks {
+		if !generatedDesignCheck(check) {
+			continue
+		}
+		if managed++; !slices.Contains(check.Argv, "#content") || !slices.Contains(check.Argv, "mobile") || !slices.Contains(check.Argv, "390x844") {
 			t.Fatal("screen overrides were lost")
 		}
+	}
+	if managed != 1 {
+		t.Fatalf("a design has one layout check, built from its present description: %+v", checks)
 	}
 	facts := gate.designContext()
 	if len(facts) != 1 || facts[0]["baseline_exists_on_host"] != false ||
 		facts[0]["effective"].(map[string]string)["device"] != "mobile" || !strings.Contains(facts[0]["baseline_policy"].(string), "not a prerequisite") {
 		t.Fatalf("preparation lacks the host's measurement facts: %+v", facts)
 	}
+	handed := f.proceed()
 	if strings.Count(fileText(t, filepath.Join(dir, "baselines")), "baseline") != 1 {
-		t.Fatal("replan rebaselined the implemented page")
+		t.Fatal("the amendment rebaselined the implemented page")
 	}
-	f.review()
-	callsBefore := strings.Count(fileText(t, filepath.Join(dir, "calls")), "\n")
-	f.review()
-	if strings.Count(fileText(t, filepath.Join(dir, "calls")), "\n") <= callsBefore {
-		t.Fatal("a rendered no_reuse check must run on review even when source is unchanged")
+	callsBefore := lineCount(t, filepath.Join(dir, "calls"))
+	handed = f.do("run", func() (any, error) { return Run(f.cfg, Current(), RunInput{Recheck: true}) })
+	if lineCount(t, filepath.Join(dir, "calls")) <= callsBefore {
+		t.Fatal("a rendered no_reuse check must run when verification is asked again, even when the source is unchanged")
 	}
+	quality := leadQuality(t, handed)
 	image := filepath.Join(Current().Plan.Design[0].dir(), "last", "actual.png")
-	must(t, os.MkdirAll(filepath.Dir(image), 0o755))
 	write(t, image, "new rendered evidence")
-	f.fails("finish", "task contract changed", func() (any, error) { return Finish(f.cfg, Current(), FinishInput{Summary: "old screenshot review"}) })
-	f.review()
-	f.finish()
+	f.fails("decide", "changed since the evidence was prepared", func() (any, error) {
+		return Decide(f.cfg, Current(), DecideInput{Review: &LeadReview{Summary: "old screenshot review", Quality: quality}})
+	})
+	handed = f.proceed()
+	if done := f.decide(DecideInput{Review: &LeadReview{Summary: "read the page next to its design", Quality: leadQuality(t, handed)}}); done["step"] != StepDone {
+		t.Fatalf("a reading of the present evidence completes the task: %v", done)
+	}
 }
 
 func TestLayoutSetupFailureIsNotSentToAWriter(t *testing.T) {
@@ -226,38 +263,43 @@ func TestLayoutSetupFailureIsNotSentToAWriter(t *testing.T) {
 	dir := layoutFixture(t)
 	plan := f.plan("-m implement the page")
 	plan.Design = []DesignRef{screenFixture(t)}
-	f.launch(plan)
-	write(t, filepath.Join(dir, "setup"), "failure")
-	result := f.review()
-	if f.count("review") != 0 || !strings.Contains(result["next"].(string), "could not observe") {
-		t.Fatal("tool failure went to a code reviewer")
+	f.model = func(kind string, _ map[string]any, _ provider.Call) (string, error) {
+		if kind == "writer" {
+			write(t, filepath.Join(dir, "setup"), "failure") // the stand breaks once the page is written
+		}
+		return "", nil
+	}
+	stopped := f.start(plan)
+	if f.count("review") != 0 || !slices.Equal(needs(stopped), []string{"setup"}) ||
+		!strings.Contains(stopped["needs"].([]any)[0].(map[string]any)["what"].(string), "could not observe") {
+		t.Fatalf("tool failure went to a code reviewer: %v", stopped)
 	}
 	count := f.count("writer")
-	f.fails("fix", "verification could not run", func() (any, error) { return Fix(f.cfg, Current(), FixInput{}) })
-	if f.count("writer") != count {
-		t.Fatal("tool failure was sent to a CSS writer")
+	if again := f.proceed(); f.count("writer") != count || f.count("review") != 0 || !slices.Equal(needs(again), []string{"setup"}) {
+		t.Fatalf("tool failure was sent to a CSS writer: %v", again)
 	}
 	must(t, os.Remove(filepath.Join(dir, "setup")))
-	f.review()
-	f.finish()
+	if done := f.proceed(); done["step"] != StepDone || f.count("writer") != count {
+		t.Fatalf("once the stand is repaired, running again measures the page and goes on: %v", done)
+	}
 }
 
 func TestPreparationOfAnActiveDesignReusesItsHostContext(t *testing.T) {
 	f := newFixture(t)
 	dir := layoutFixture(t)
-	plan := f.plan("-m implement https://www.figma.com/design/abc/example?node-id=1-2")
+	plan := f.plan("-l implement https://www.figma.com/design/abc/example?node-id=1-2")
 	plan.Design = []DesignRef{screenFixture(t)}
-	f.launch(plan)
+	f.start(plan)
 	f.model = func(kind string, packet map[string]any, _ provider.Call) (string, error) {
 		if kind == "prepare" {
 			if packet["design_context"] == nil || packet["design_source"] == nil {
 				t.Fatal("no reusable host context")
 			}
-			return `{"status":"BLOCKED","summary":"one explicit mapping is needed","questions":[],"setup":["Select the existing artwork element"],"plan_json":"","context_pack":{}}`, nil
+			return `{"status":"BLOCKED","summary":"one explicit mapping is needed","questions":[],"setup":["Select the existing artwork element"],"plan":null,"context_pack":null}`, nil
 		}
 		return "", nil
 	}
-	f.do("prepare", func() (any, error) { return Prepare(f.cfg, PrepareInput{Notes: "repair measurement"}) })
+	f.prepare(PrepareInput{Notes: "repair measurement"})
 	if strings.Contains(fileText(t, filepath.Join(dir, "calls")), "figma") {
 		t.Fatal("an active measurement repair reopened Figma")
 	}

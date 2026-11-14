@@ -1,7 +1,6 @@
 package dev
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"os"
 	"strings"
@@ -11,8 +10,15 @@ import (
 	"github.com/knaus94/agentgate/internal/provider"
 )
 
-func state(text string) *FileState {
-	return &FileState{Bytes: base64.StdEncoding.EncodeToString([]byte(text)), Mode: 0o644}
+// scanFiles scans what a change added to each file, as verification does for the files a reviewer reads.
+func scanFiles(files map[string][2]string) []Signal {
+	var out []Signal
+	for path, versions := range files {
+		if scannable(path) {
+			out = append(out, scanText(path, versions[0], versions[1])...)
+		}
+	}
+	return out
 }
 
 func TestOnlyAddedLinesRaiseSignals(t *testing.T) {
@@ -34,10 +40,9 @@ export function total(items: Item[]) {
 it.only('totals', () => {})
 // eslint-disable-next-line no-console
 `
-	signals := scanSignals(Snapshot{"src/total.ts": state(before), "docs/notes.md": state("")},
-		Snapshot{"src/total.ts": state(after), "docs/notes.md": state("TODO: write this\nconsole.log(1)\n"),
-			"generated/client.ts": state("console.log(1)\n"), "src/new.py": state("try:\n    load()\nexcept Exception:\n    pass\n# in a real implementation this would retry\n")},
-		[]string{"src/total.ts", "docs/notes.md", "generated/client.ts", "src/new.py"})
+	signals := scanFiles(map[string][2]string{"src/total.ts": {before, after}, "docs/notes.md": {"", "TODO: write this\nconsole.log(1)\n"},
+		"generated/client.ts": {"", "console.log(1)\n"},
+		"src/new.py":          {"", "try:\n    load()\nexcept Exception:\n    pass\n# in a real implementation this would retry\n"}})
 	got := map[string]int{}
 	for _, signal := range signals {
 		got[signal.Kind]++
@@ -59,7 +64,7 @@ it.only('totals', () => {})
 			t.Fatalf("the signal names the added line, not the old one: %+v", signal)
 		}
 	}
-	if len(scanSignals(Snapshot{"a.go": state("x := 1\n")}, Snapshot{"a.go": state("// the limit comes from the provider's quota\nx := 1\n")}, []string{"a.go"})) != 0 {
+	if len(scanText("a.go", "x := 1\n", "// the limit comes from the provider's quota\nx := 1\n")) != 0 {
 		t.Fatal("an ordinary comment raises nothing")
 	}
 }
@@ -73,7 +78,7 @@ func TestSignalsReachTheReviewersAndTheLead(t *testing.T) {
 		switch kind {
 		case "writer":
 			_ = os.WriteFile("app.ts", []byte("export const limit = 5\nconsole.log('limit', limit)\n"), 0o644)
-			return `{"status":"COMPLETED","summary":"implemented","blockers":[],"handoff":"","deviations":[]}`, nil
+			return `{"status":"COMPLETED","summary":"implemented","blockers":[],"handoff":"","deviations":[],"disputes":[]}`, nil
 		case "review":
 			mu.Lock()
 			packetSignals = packet["slop_signals"]
@@ -81,30 +86,29 @@ func TestSignalsReachTheReviewersAndTheLead(t *testing.T) {
 		}
 		return "", nil
 	}
-	f.launch(f.plan("-m add the limit", stream))
-	summary := f.review()
+	summary := f.start(f.plan("-m add the limit", stream))
 	raw, _ := json.Marshal(packetSignals)
 	if !strings.Contains(string(raw), `"kind":"debug-output"`) || !strings.Contains(string(raw), `"line":2`) {
 		t.Fatalf("reviewers receive the signals in their packet: %s", raw)
 	}
-	if listed := summary["slop_signals"].([]any); len(listed) != 1 {
-		t.Fatalf("the lead sees them in the summary: %v", summary["slop_signals"])
+	if summary["step"] != StepDone || len(Current().Signals) != 1 {
+		t.Fatalf("a signal is a lead for the reviewer, not a verdict: %v", summary)
 	}
 	lanes := Current().Reviews[0].Lanes
-	if strings.Join(lanes[0].Axes, "+") != "architecture+simplicity" || len(lanes[0].Reports) != 2 {
-		t.Fatalf("simplicity is judged in the design lane, with its own report: %+v", lanes[0])
+	if strings.Join(lanes[0].Axes, "+") != "correctness+architecture+simplicity" || len(lanes[0].Reports) != 3 {
+		t.Fatalf("simplicity is judged by the same reviewer, with its own report: %+v", lanes[0])
 	}
 	if text := PanelText(f.cfg, false, false, 120, 0); !strings.Contains(text, "SIGNALS  1 leftovers") {
 		t.Fatalf("the panel shows the signals:\n%s", text)
 	}
-	f.finish()
 
-	// Light mode has no reviewer process: the signals come back with the diffs for the lead to judge.
+	// Light mode has no reviewer process: the signals come with the patch for the lead to judge.
 	g := newFixture(t)
 	g.model = f.model
-	g.launch(g.plan("-l add the limit", stream))
-	handed := g.do("review", func() (any, error) { return ReviewTask(g.cfg, Current(), ReviewInput{}) })
-	if listed, _ := handed["slop_signals"].([]any); len(listed) != 1 || !strings.Contains(handed["next"].(string), "slop_signal") {
-		t.Fatalf("in light mode the lead gets the signals with the diffs: %v", handed)
+	handed := g.start(g.plan("-l add the limit", stream))
+	need := handed["needs"].([]any)[0].(map[string]any)
+	packet := fileText(t, need["detail"].(map[string]any)["packet"].(string))
+	if !strings.Contains(packet, `"kind": "debug-output"`) || !strings.Contains(need["resolve"].(string), "slop_signal") {
+		t.Fatalf("in light mode the lead gets the signals with the patch: %v", need)
 	}
 }

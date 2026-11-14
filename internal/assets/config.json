@@ -93,14 +93,9 @@
       "review": [
         {
           "axes": [
+            "correctness",
             "architecture",
             "simplicity"
-          ],
-          "route": "fable:medium"
-        },
-        {
-          "axes": [
-            "correctness"
           ],
           "route": "astra:medium"
         }
