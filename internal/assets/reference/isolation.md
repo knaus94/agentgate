@@ -16,7 +16,7 @@ created from the checkout's `HEAD` when the task starts. The flow is the same, w
   | `how` | Result |
   |---|---|
   | `apply` (default) | the change appears in the checkout, uncommitted |
-  | `commit` | the same, committed on the current branch |
+  | `commit` | the same, committed on the current branch with your `message`, in the repository's convention |
   | `branch` | the checkout is not touched; the task's branch is kept for a pull request |
   | `drop` | the work is thrown away; possible at any step |
 

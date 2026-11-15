@@ -26,6 +26,9 @@ type Request struct {
 
 var actions = []string{"plan", "research", "fix", "review", "clean", "verify", "status", "stop", "help"}
 
+// flagActions are the action words also accepted as flags. `--fix` keeps its meaning: review and fix.
+var flagActions = []string{"plan", "research", "review", "clean", "verify"}
+
 var modeFlags = map[string]string{
 	"-l": "light", "--light": "light", "-m": "medium", "--medium": "medium",
 	"-h": "heavy", "--heavy": "heavy", "--deep": "heavy",
@@ -34,10 +37,15 @@ var modeFlags = map[string]string{
 
 var countFlag = regexp.MustCompile(`^-[1-9][0-9]*$`)
 
+// invocation is the command a user typed to start the workflow. A lead that passes the request with it must
+// not lose the flags behind it.
+var invocation = regexp.MustCompile(`^(/dev|\$dev|!dev|/\$dev)(\s+|$)`)
+
 // ParseRequest reads the flags that precede the task. "--" ends flag parsing.
 func ParseRequest(raw string) (Request, error) {
 	request := Request{Grill: "auto"}
 	rest := strings.TrimSpace(raw)
+	rest = strings.TrimSpace(invocation.ReplaceAllString(rest, ""))
 	for rest != "" {
 		token, tail := rest, ""
 		if cut := strings.IndexAny(rest, " \t\n"); cut >= 0 {
@@ -65,6 +73,8 @@ func ParseRequest(raw string) (Request, error) {
 			request.Grill = map[string]string{"--grill": "force", "--no-grill": "skip"}[token]
 		case isMode && request.Mode == "":
 			request.Mode = mode
+		case request.Action == "" && slices.Contains(flagActions, strings.TrimPrefix(token, "--")) && strings.HasPrefix(token, "--"):
+			request.Action = strings.TrimPrefix(token, "--") // `--plan` is the action word `plan`
 		case countFlag.MatchString(token) && request.Parallel == 0:
 			request.Parallel, _ = strconv.Atoi(token[1:])
 			if request.Parallel > 20 {

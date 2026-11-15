@@ -47,13 +47,15 @@ hidden transport fallback occurs. Tokens never enter exported packages or image 
 | `browser.mjs` | Playwright discovery, Chromium and private Figma profile |
 
 A package contains `brief.md`, `frame.png`, `data/nodes.json`, `data/spec.json` and `manifest.json`; optional
-context images and assets join the same SHA-256 inventory. Missing files or changed bytes are errors.
+context images and assets join the same SHA-256 inventory. Missing files or changed bytes are errors. An
+asset Figma does not render is listed under `missing_assets` and does not stop the export.
 Exports preserve the previous package when generation fails. Failed and concurrent exports cannot publish
 a partial package over it.
 
 Measurement output includes cropped/whole-page screenshots, pixel difference and structured findings.
-Exit 0 means measured properties passed, exit 1 means differences, and exit 2 means verification could not
-run. Independent visual and behavioral review remain necessary. Baselines waive only identical initial
+Exit 0 means measured properties passed, exit 1 means differences, exit 2 means verification could not run
+(the page did not open, or it ended at another path), and exit 3 means the page opened where it was asked to
+and does not show the root: a defect of the code. Independent visual and behavioral review remain necessary. Baselines waive only identical initial
 discrepancies under the exact same measurement contract.
 
 Fixtures are keyed by operation and canonical variables. Only a deliberately supplied plain operation file

@@ -211,7 +211,9 @@ func TestCommitLandingPreservesTheUsersIndex(t *testing.T) {
 	write(t, "b.txt", "user's staged change\n")
 	gitOut(t, "add", "b.txt")
 	staged := gitOut(t, "diff", "--cached", "--binary")
-	f.fails("land", "staged changes", func() (any, error) { return Land(f.cfg, Current(), LandInput{How: "commit"}) })
+	f.fails("land", "staged changes", func() (any, error) {
+		return Land(f.cfg, Current(), LandInput{How: "commit", Message: "feat: land the fixture"})
+	})
 	if fileText(t, "a.txt") != "before\n" || gitOut(t, "diff", "--cached", "--binary") != staged || Current().Landed != "" {
 		t.Fatal("refused landing changed the checkout or staged user work")
 	}
@@ -387,7 +389,9 @@ func TestCommitLandingDoesNotIncludeCompatibleUserHunks(t *testing.T) {
 	userContent := "first\none\ntwo\nthree\nfour\nfive\nuser\n"
 	write(t, "a.txt", userContent)
 	head := gitOut(t, "rev-parse", "HEAD")
-	f.fails("land", "uncommitted changes", func() (any, error) { return Land(f.cfg, Current(), LandInput{How: "commit"}) })
+	f.fails("land", "uncommitted changes", func() (any, error) {
+		return Land(f.cfg, Current(), LandInput{How: "commit", Message: "feat: land the fixture"})
+	})
 	if fileText(t, "a.txt") != userContent || gitOut(t, "rev-parse", "HEAD") != head {
 		t.Fatal("commit landing swept the user's compatible unstaged hunk into a commit")
 	}
@@ -422,7 +426,9 @@ func TestCommitHookFailureReportsAppliedOutcome(t *testing.T) {
 	head := gitOut(t, "rev-parse", "HEAD")
 	hook := filepath.Join(".git", "hooks", "pre-commit")
 	must(t, os.WriteFile(hook, []byte("#!/bin/sh\necho 'fixture hook refused' >&2\nexit 1\n"), 0o755))
-	f.fails("land", "change applied, but commit failed", func() (any, error) { return Land(f.cfg, Current(), LandInput{How: "commit"}) })
+	f.fails("land", "change applied, but commit failed", func() (any, error) {
+		return Land(f.cfg, Current(), LandInput{How: "commit", Message: "feat: land the fixture"})
+	})
 	if gate := Current(); gate.Landed != "apply" || gitOut(t, "rev-parse", "HEAD") != head || fileText(t, "a.txt") != "after\n" {
 		t.Fatal("failed commit was misreported as committed or discarded the applied change")
 	}

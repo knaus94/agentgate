@@ -200,16 +200,13 @@ func (r *Resolved) validateDesign() []string {
 				add("a design given by its figma link needs the link to a frame (node-id), `url` — the page that will show it — and `root`")
 				continue
 			}
-			screens := r.Config.Design.Screens
-			if screens == "" {
-				screens = filepath.Join(".agentgate", "design")
+			design.Screen = filepath.Join(r.screens(), screenName(name))
+		} else if design.Figma != "" && design.Screen != "" && !fileExists(filepath.Join(design.Screen, "screen.json")) {
+			// A screen the tool still has to make is made where the repository keeps its screens: anywhere else its
+			// package would land among the task's files.
+			if relative, err := filepath.Rel(r.screens(), design.Screen); err != nil || relative == "." || strings.HasPrefix(relative, "..") {
+				design.Screen = filepath.Join(r.screens(), screenName(filepath.Base(design.Screen)))
 			}
-			design.Screen = filepath.Join(screens, strings.Trim(strings.Map(func(char rune) rune {
-				if char == '-' || char == '_' || (char >= '0' && char <= '9') || (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') {
-					return char
-				}
-				return '-'
-			}, name), "-"))
 		}
 		// A screen is made when it has both its description and its design; a link fills in what is missing.
 		made := design.Screen != "" && fileExists(filepath.Join(design.Screen, "screen.json")) &&
@@ -259,6 +256,23 @@ func (r *Resolved) validateDesign() []string {
 	return problems
 }
 
+// screens is the directory where the repository keeps its design screens.
+func (r *Resolved) screens() string {
+	if r.Config.Design.Screens != "" {
+		return filepath.Clean(r.Config.Design.Screens)
+	}
+	return filepath.Join(".agentgate", "design")
+}
+
+func screenName(name string) string {
+	return strings.Trim(strings.Map(func(char rune) rune {
+		if char == '-' || char == '_' || (char >= '0' && char <= '9') || (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') {
+			return char
+		}
+		return '-'
+	}, name), "-")
+}
+
 // stageStream is the name a stream of a design has in the pass over the whole change, where streams carry
 // the name of their stage.
 func (g *Gate) stageStream(name string) string {
@@ -275,7 +289,38 @@ func (g *Gate) stageStream(name string) string {
 	return name
 }
 
+// designError is a design that could not be imported or measured: a need of the lead, not a failure of the
+// command.
+type designError struct{ message string }
+
+func (e *designError) Error() string { return e.message }
+
 func (g *Gate) prepareDesigns(measureBefore bool) error {
+	if err := g.importDesigns(measureBefore); err != nil {
+		var failure *designError
+		if errors.As(err, &failure) {
+			g.DesignFailure = failure.message
+		}
+		return err
+	}
+	g.DesignFailure = ""
+	return nil
+}
+
+// toolMessage is the line of a design tool's output that says what went wrong: its own error, not the
+// line that points at it.
+func toolMessage(output string) string {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	for index := len(lines) - 1; index >= 0; index-- {
+		line := strings.TrimSpace(lines[index])
+		if strings.HasPrefix(line, "check:") || strings.HasPrefix(line, "figma:") || strings.HasPrefix(line, "layout:") && strings.Contains(line, "error") {
+			return line
+		}
+	}
+	return lastLine(strings.TrimSpace(output))
+}
+
+func (g *Gate) importDesigns(measureBefore bool) error {
 	for _, design := range g.designs() {
 		if err := os.MkdirAll(design.dir(), 0o700); err != nil {
 			return err
@@ -296,7 +341,7 @@ func (g *Gate) prepareDesigns(measureBefore bool) error {
 			cmd := exec.Command(argv[0], argv[1:]...)
 			cmd.Stdout, cmd.Stderr = &out, &out
 			if err := ops.Run(cmd, seconds(layoutTimeout)); err != nil {
-				return fmt.Errorf("the design %s could not be pulled: %s", design.Figma, lastLine(strings.TrimSpace(out.String())))
+				return &designError{fmt.Sprintf("the design %s could not be imported: %s", design.Figma, toolMessage(out.String()))}
 			}
 		}
 		if err := verifyDesignPackage(design.Package); err != nil {
@@ -310,7 +355,7 @@ func (g *Gate) prepareDesigns(measureBefore bool) error {
 		cmd := exec.Command(argv[0], argv[1:]...)
 		cmd.Stdout, cmd.Stderr = &out, &out
 		if err := ops.Run(cmd, seconds(layoutTimeout)); err != nil {
-			return fmt.Errorf("the page of design %q could not be measured before the work: %s", design.Package, lastLine(strings.TrimSpace(out.String())))
+			return &designError{fmt.Sprintf("the page of design %q could not be measured before the work: %s", design.Package, toolMessage(out.String()))}
 		}
 	}
 	return nil
@@ -476,4 +521,12 @@ func designSkill() (string, error) {
 		return "", errNoDesignSkill
 	}
 	return text, nil
+}
+
+// layoutScreen names the screen a layout check measures.
+func layoutScreen(argv []string) string {
+	if len(argv) > 2 && argv[1] == "layout" {
+		return filepath.Base(argv[2])
+	}
+	return checkLabel(argv)
 }

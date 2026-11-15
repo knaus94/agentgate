@@ -29,7 +29,7 @@ same file. With `-w` a task works somewhere else, and your checkout changes only
    | `land` | Result |
    |---|---|
    | `apply` (default) | the change appears in your checkout **uncommitted**; you read it and commit it yourself |
-   | `commit` | the same, committed on your current branch with the task's summary (your hooks run) |
+   | `commit` | the same, committed on your current branch with a message the lead writes in your repository's convention (your hooks run) |
    | `branch` | your checkout is not touched; the branch `dev/…` is kept for a pull request |
    | `drop` | the work is thrown away |
 

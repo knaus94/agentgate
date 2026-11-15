@@ -2,6 +2,7 @@ package dev
 
 import (
 	"fmt"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -73,13 +74,22 @@ func (g *Gate) changesBetween(from, to string) (owned []FileChange, foreign []st
 	}
 	scope := compilePatterns(g.scope())
 	for _, change := range all {
-		if matchAny(scope, change.Path) {
+		switch {
+		case matchAny(scope, change.Path):
 			owned = append(owned, change)
-		} else {
+		case !g.designFile(change.Path):
 			foreign = append(foreign, change.Path)
 		}
 	}
 	return owned, foreign, nil
+}
+
+// designFile reports whether a path belongs to a design screen the tool made for this task: its package and
+// its measurements are the tool's, not a change of the task.
+func (g *Gate) designFile(path string) bool {
+	return slices.ContainsFunc(g.Plan.Design, func(design DesignRef) bool {
+		return design.Screen != "" && strings.HasPrefix(path, filepath.ToSlash(filepath.Clean(design.Screen))+"/")
+	})
 }
 
 // reviewKey is what a review of the present position is bound to: every owned change, byte for byte, and
@@ -246,4 +256,12 @@ func (g *Gate) codeContract() string {
 		parts["design"] = designs
 	}
 	return digest(parts)
+}
+
+// amendment is what the last amendment of the plan changed and why, or "".
+func (g *Gate) amendment() string {
+	if len(g.Revisions) == 0 {
+		return ""
+	}
+	return g.Revisions[len(g.Revisions)-1].Reason
 }

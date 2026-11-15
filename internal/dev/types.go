@@ -28,6 +28,9 @@ type CheckFailure struct {
 	Log        string   `json:"log"`
 	Tail       string   `json:"output_tail"`
 	Setup      bool     `json:"setup,omitempty"` // the measuring tool could not observe the page, not a measured code defect
+	// Environment: the check passed before on the same files of the task. Its failure lies outside the code: a
+	// service, a stand, the machine.
+	Environment bool `json:"environment,omitempty"`
 }
 
 // Dispute is a writer's evidence that a finding it was sent is wrong. The reviewer that raised the finding
@@ -131,6 +134,7 @@ type CheckReceipt struct {
 	Log         string   `json:"log"`
 	Preexisting bool     `json:"preexisting,omitempty"`
 	Reused      bool     `json:"reused,omitempty"`
+	Iteration   int      `json:"iteration,omitempty"` // the correction it ran after: a failure from before the last one is stale
 }
 
 type Reassessment struct {
@@ -162,11 +166,13 @@ type VisualRun struct {
 
 // Revision is one plan the task ran under: why it replaced the one before and what it changed.
 type Revision struct {
-	Number  int      `json:"number"`
-	At      int64    `json:"at"`
-	Reason  string   `json:"reason,omitempty"`
-	Digest  string   `json:"digest"`
-	Changes []string `json:"changes,omitempty"`
+	Number     int      `json:"number"`
+	At         int64    `json:"at"`
+	Reason     string   `json:"reason,omitempty"`
+	Authorized string   `json:"authorized,omitempty"` // who allowed a changed requirement, in what words
+	Rework     []string `json:"rework,omitempty"`     // the streams the amendment went to as new work
+	Digest     string   `json:"digest"`
+	Changes    []string `json:"changes,omitempty"`
 }
 
 // WriterRef is enough of a finished writer to continue its session later.
@@ -201,44 +207,47 @@ type Final struct {
 
 // Gate is the whole state of one task: what was agreed, where the work is, what was verified.
 type Gate struct {
-	Version       int                     `json:"version"`
-	ID            string                  `json:"id"`
-	Session       string                  `json:"session"`
-	Cwd           string                  `json:"cwd"`
-	Request       Request                 `json:"request"`
-	Plan          *Plan                   `json:"plan"`                   // in its one shape: stages only
-	PlanName      string                  `json:"plan_name"`              // the saved plan it was started from, when there is one
-	Revisions     []Revision              `json:"revisions"`              // every plan the task ran under
-	Modes         []string                `json:"modes"`                  // the mode of every stage of the present plan
-	Stage         int                     `json:"stage"`                  // index of the present stage; len(stages) once all are accepted
-	Whole         bool                    `json:"whole,omitempty"`        // the pass over the whole change is on
-	Step          string                  `json:"step"`                   // write, verify, decide, done or cancelled
-	Pause         *Paused                 `json:"pause,omitempty"`        // waiting for a person; the position is unchanged
-	Mode          string                  `json:"mode"`                   // the mode of the present stage
-	BaseTree      string                  `json:"base_tree"`              // the working tree as the task found it
-	StageTree     string                  `json:"stage_tree"`             // the working tree as the present stage found it
-	StartCommit   string                  `json:"start_commit,omitempty"` // an isolated task: the commit its worktree was made from
-	Accepted      []StageRecord           `json:"accepted,omitempty"`
-	Round         *Round                  `json:"round,omitempty"`
-	Rounds        int                     `json:"rounds,omitempty"`      // writer rounds opened in the present stage
-	AutoRounds    int                     `json:"auto_rounds,omitempty"` // corrections opened by the tool since the lead last acted
-	Iteration     int                     `json:"iteration"`             // corrections of the present stage
-	Writers       []*Writer               `json:"writers"`
-	AuthorModels  []string                `json:"author_models,omitempty"` // retained across stages and correction routes
-	Reviews       []Review                `json:"reviews"`
-	ReviewError   string                  `json:"review_error,omitempty"`
-	VisualRuns    []VisualRun             `json:"visual_runs,omitempty"`
-	VisualSkip    string                  `json:"visual_skip,omitempty"`
-	Dispositions  map[string]Disposition  `json:"dispositions"`
-	Resolutions   map[string]string       `json:"resolutions"`
-	Disputes      map[string]Dispute      `json:"disputes,omitempty"`
-	Demands       []Finding               `json:"demands,omitempty"` // work the lead sent to writers from an unmet criterion
-	Checks        []CheckReceipt          `json:"checks"`
-	Baselines     map[string]int          `json:"baselines,omitempty"` // check key -> exit code before any writing
-	Corrections   []Correction            `json:"corrections,omitempty"`
-	Reassessed    *Reassessment           `json:"reassessed,omitempty"`  // the lead's new diagnosis, spent by the next correction
-	Escalate      bool                    `json:"escalate,omitempty"`    // the lead asked for one more effort step on the next correction
-	Ruled         bool                    `json:"ruled,omitempty"`       // the lead ruled on a finding since the last correction: the next one is not a repetition
+	Version      int                    `json:"version"`
+	ID           string                 `json:"id"`
+	Session      string                 `json:"session"`
+	Cwd          string                 `json:"cwd"`
+	Request      Request                `json:"request"`
+	Plan         *Plan                  `json:"plan"`                   // in its one shape: stages only
+	PlanName     string                 `json:"plan_name"`              // the saved plan it was started from, when there is one
+	Revisions    []Revision             `json:"revisions"`              // every plan the task ran under
+	Modes        []string               `json:"modes"`                  // the mode of every stage of the present plan
+	Stage        int                    `json:"stage"`                  // index of the present stage; len(stages) once all are accepted
+	Whole        bool                   `json:"whole,omitempty"`        // the pass over the whole change is on
+	Step         string                 `json:"step"`                   // write, verify, decide, done or cancelled
+	Pause        *Paused                `json:"pause,omitempty"`        // waiting for a person; the position is unchanged
+	Mode         string                 `json:"mode"`                   // the mode of the present stage
+	BaseTree     string                 `json:"base_tree"`              // the working tree as the task found it
+	StageTree    string                 `json:"stage_tree"`             // the working tree as the present stage found it
+	StartCommit  string                 `json:"start_commit,omitempty"` // an isolated task: the commit its worktree was made from
+	Accepted     []StageRecord          `json:"accepted,omitempty"`
+	Round        *Round                 `json:"round,omitempty"`
+	Rounds       int                    `json:"rounds,omitempty"`      // writer rounds opened in the present stage
+	AutoRounds   int                    `json:"auto_rounds,omitempty"` // corrections opened by the tool since the lead last acted
+	Iteration    int                    `json:"iteration"`             // corrections of the present stage
+	Writers      []*Writer              `json:"writers"`
+	AuthorModels []string               `json:"author_models,omitempty"` // retained across stages and correction routes
+	Reviews      []Review               `json:"reviews"`
+	ReviewError  string                 `json:"review_error,omitempty"`
+	VisualRuns   []VisualRun            `json:"visual_runs,omitempty"`
+	VisualSkip   string                 `json:"visual_skip,omitempty"`
+	Dispositions map[string]Disposition `json:"dispositions"`
+	Resolutions  map[string]string      `json:"resolutions"`
+	Disputes     map[string]Dispute     `json:"disputes,omitempty"`
+	Demands      []Finding              `json:"demands,omitempty"` // work the lead sent to writers from an unmet criterion
+	Checks       []CheckReceipt         `json:"checks"`
+	Baselines    map[string]int         `json:"baselines,omitempty"` // check key -> exit code before any writing
+	Corrections  []Correction           `json:"corrections,omitempty"`
+	Reassessed   *Reassessment          `json:"reassessed,omitempty"` // the lead's new diagnosis, spent by the next correction
+	Escalate     bool                   `json:"escalate,omitempty"`   // the lead asked for one more effort step on the next correction
+	Ruled        bool                   `json:"ruled,omitempty"`      // the lead ruled on a finding since the last correction: the next one is not a repetition
+	// DesignFailure is why a design of the present stage could not be imported or measured. It is the lead's to
+	// repair; the next run tries again.
+	DesignFailure string                  `json:"design_failure,omitempty"`
 	Remedy        string                  `json:"remedy,omitempty"`      // the lead's note for the next correction
 	FixStreams    []string                `json:"fix_streams,omitempty"` // which streams repair a failing check; default: all
 	Reading       *Reading                `json:"reading,omitempty"`     // a review the lead owes (a mode without reviewer processes)

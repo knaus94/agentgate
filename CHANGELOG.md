@@ -2,6 +2,41 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.16.2
+
+Defects real lead sessions of 0.16 ran into; the lead protocol is unchanged. The analysis and the plan for the
+next releases are in [docs/briefs/0.17-lead-experience.md](docs/briefs/0.17-lead-experience.md).
+
+- A request that repeats the command (`/dev -m …`, `$dev -h …`) keeps its flags; before, the mode fell back to
+  the assessment, which chose ultra for a `-m` request. `--plan`, `--review`, `--research`, `--clean` and
+  `--verify` are accepted as the action words.
+- Stream scopes overlap only when one path can belong to both: `pages/x/api/**` and `pages/x/*` are disjoint.
+  An entry that names a directory owns what is inside it (`migrations/*_orders` owns the `migration.sql` a
+  generator writes there), and a pattern written with a trailing slash owns everything below it. `dir/**`
+  names the contents of `dir`, not `dir` itself.
+- Work the lead sends to a writer (`decide {requirements}`) is never read as a stalled correction.
+- A failing check is run again after the correction that was sent to repair it, also when no file changed.
+  A check that passed on the same files of the task and fails now goes to the lead as `setup`, not to the
+  writers; `run` runs it again once the cause is repaired.
+- A stream that waits for an answer holds back only the streams that wait for it: the others run and `run`
+  stays available. `answer` runs the streams the answered one depends on first.
+- A design screen the tool makes is placed under the screens directory even when the plan gave a bare name;
+  its package is not reported as a change outside the plan.
+- A design that cannot be imported or measured is a `setup` need that names the exporter's own error, instead
+  of a failed command that pointed at an error nobody saw. An icon Figma does not render is listed as missing
+  in the package and does not stop the import.
+- A layout check whose page opened where it was asked to and does not show the design's element exits 3 and
+  goes to the writer with the `data-*` attributes the page carries. A page that did not open or ended at
+  another path (a redirect to a login) is the lead's `setup`, named by the tool's message.
+- The last stage of a staged plan runs every declared check, so a requirement due there is proven without
+  copying checks into it.
+- `land {how: "commit"}` needs `message`: the lead writes it in the repository's convention.
+- Check evidence may name the check by a part of its command (`client:test`); a refusal lists the checks that
+  can be named. A finding marked `duplicate_of` is closed as a rejected duplicate whatever its decision says.
+- `show plan` no longer returns the last amendment's `update`, `authorized` and `rework`; they are kept in its
+  revision, so a plan read back and amended again does not repeat that rework.
+- The Stop hook says when the lead's last command was refused, and what the task needs.
+
 ## 0.16.1
 
 - `prepare` refuses a new request while the session holds an unfinished task and says what to do instead:

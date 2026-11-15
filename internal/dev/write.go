@@ -177,57 +177,81 @@ func requireTools(plan *Plan) error {
 	return nil
 }
 
-// write runs the pending streams of the present round wave by wave. It reports whether every stream of the
-// round has completed; a blocked or failed stream leaves the round open, and later waves never start on top
-// of one.
-func (g *Gate) write(cfg *config.Config) (bool, error) {
+// write runs the streams of the present round that are ready: not yet completed, not waiting for an answer,
+// and every stream they wait for completed. A blocked or failed stream holds back only the streams that wait
+// for it. Each stream runs at most once per call; it reports whether every stream of the round completed and
+// how many writers ran.
+func (g *Gate) write(cfg *config.Config) (bool, int, int, error) {
 	if _, err := g.admit(cfg); err != nil {
-		return false, err
+		return false, 0, 0, err
 	}
 	limit, err := parallelism(cfg, g.Request)
 	if err != nil {
-		return false, err
+		return false, 0, 0, err
 	}
 	for _, dir := range []string{g.board(), filepath.Join(g.dir(), "checks")} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return false, err
+			return false, 0, 0, err
 		}
 	}
-	order, err := waves(g.Round.Streams)
-	if err != nil {
-		return false, err
+	if _, err := waves(g.Round.Streams); err != nil {
+		return false, 0, 0, err
 	}
 	subs := &substitutions{}
 	var mu sync.Mutex
-	for _, wave := range order {
-		waiting := g.pending()
-		var todo []Stream
-		for _, stream := range wave {
-			if slices.ContainsFunc(waiting, func(other Stream) bool { return other.Name == stream.Name }) {
-				todo = append(todo, stream)
-			}
-		}
+	tried := map[string]bool{}
+	ran, completed := 0, 0
+	for {
+		todo := g.ready(tried)
 		if len(todo) == 0 {
-			continue
+			break
 		}
 		records := make([]*Writer, len(todo))
 		for index, stream := range todo {
 			records[index] = g.prepare(cfg, stream)
+			tried[stream.Name] = true
 		}
 		g.Writers = append(g.Writers, records...)
 		if err := g.save(); err != nil {
-			return false, err
+			return false, ran, completed, err
 		}
 		errs := parallel(len(todo), limit, func(index int) error {
 			return g.runWriter(cfg, todo[index], records[index], "", subs, &mu)
 		})
 		g.Substitutions = append(g.Substitutions, subs.list...)
 		subs.list = nil
-		if stopped, err := g.settle(records, firstError(errs)); stopped {
-			return false, err
+		ran += len(records)
+		if stopped, err := g.settle(records, firstError(errs)); stopped && err != nil {
+			return false, ran, completed, err
+		}
+		for _, record := range records {
+			if record.Status == "COMPLETED" {
+				completed++
+			}
 		}
 	}
-	return true, g.save()
+	return len(g.pending()) == 0, ran, completed, g.save()
+}
+
+// ready lists the pending streams of the present round that can run now.
+func (g *Gate) ready(tried map[string]bool) []Stream {
+	if g.Round == nil {
+		return nil
+	}
+	pending := g.pending()
+	waiting := func(name string) bool {
+		return slices.ContainsFunc(pending, func(stream Stream) bool { return stream.Name == name })
+	}
+	blocked := g.blocked()
+	var out []Stream
+	for _, stream := range pending {
+		if tried[stream.Name] || slices.ContainsFunc(blocked, func(writer *Writer) bool { return writer.Stream == stream.Name }) ||
+			slices.ContainsFunc(stream.After, waiting) {
+			continue
+		}
+		out = append(out, stream)
+	}
+	return out
 }
 
 // settle records how a wave ended. It reports whether the round has to stop here.
@@ -248,7 +272,7 @@ func (g *Gate) settle(records []*Writer, failure error) (bool, error) {
 	if ops.IsCancelled(failure) {
 		return true, failure
 	}
-	return stopped || failure != nil, nil
+	return stopped || failure != nil, nil // a stream that did not complete holds back only those that wait for it
 }
 
 // prepare creates the record of a new writer process, or reuses the session of the stream's previous writer:
@@ -309,8 +333,8 @@ func (g *Gate) assignment(stream Stream) map[string]any {
 		"context_pack": g.ContextPack, "design": g.designFor(stream.Name),
 		"checks_note":  "You may run these exact commands to verify your stream. The lead's run is the one that counts.",
 		"requirements": g.requirementsFor()}
-	if g.Plan.Update != "" {
-		packet["update"] = g.Plan.Update
+	if g.amendment() != "" {
+		packet["update"] = g.amendment()
 	}
 	if previous := g.lastReport(stream.Name); previous != nil {
 		packet["your_previous_report"] = map[string]any{"status": previous.Status, "summary": previous.Summary,
@@ -523,12 +547,30 @@ func Answer(cfg *config.Config, gate *Gate, input AnswerInput) (any, error) {
 		return nil, err
 	}
 	gate.proceed()
+	// The streams this one waits for run first: the answer may depend on what they produce.
+	var did []string
+	if index := slices.IndexFunc(gate.Round.Streams, func(stream Stream) bool { return stream.Name == input.Stream }); index >= 0 && len(gate.Round.Streams[index].After) > 0 {
+		_, ran, completed, err := gate.write(cfg)
+		if err != nil {
+			return nil, err
+		}
+		if ran > 0 {
+			did = append(did, fmt.Sprintf("writers: %d of %d streams completed (%s)", completed, ran, gate.Round.Batch))
+		}
+		pending := gate.pending()
+		for _, dependency := range gate.Round.Streams[index].After {
+			if slices.ContainsFunc(pending, func(stream Stream) bool { return stream.Name == dependency }) {
+				did = append(did, fmt.Sprintf("the answer to %s was not delivered: it waits for %s, which has not completed; settle that stream, then answer again", input.Stream, dependency))
+				return gate.report(cfg, did), gate.save()
+			}
+		}
+	}
 	if err := gate.answer(cfg, input); err != nil {
 		return nil, err
 	}
 	if last := gate.latest()[input.Stream]; last == nil || last.Status != "COMPLETED" {
 		// Blocked again, or the writer did not finish: that is for the lead to see before anything runs on.
-		return gate.report(cfg, []string{"answered " + input.Stream}), gate.save()
+		return gate.report(cfg, append(did, "answered "+input.Stream)), gate.save()
 	}
 	return Run(cfg, gate, RunInput{})
 }

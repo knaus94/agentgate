@@ -265,7 +265,8 @@ func (g *Gate) validateQuality(report *QualityReport, input *qualityInputs) erro
 		seen[result.ID] = true
 		requirement := input.Requirements[index]
 		method := requirement.Method == ""
-		for _, proof := range result.Evidence {
+		for index := range result.Evidence {
+			proof := &result.Evidence[index]
 			if err := g.validateProof(proof, input, result.Status == "verified"); err != nil {
 				add("requirement %q: %v", result.ID, err)
 			}
@@ -307,7 +308,9 @@ func (g *Gate) validateQuality(report *QualityReport, input *qualityInputs) erro
 	return nil
 }
 
-func (g *Gate) validateProof(proof Proof, input *qualityInputs, verified bool) error {
+// validateProof checks one piece of evidence. A check may be named by its id or by a unique part of its
+// command; the reference is then rewritten to the id.
+func (g *Gate) validateProof(proof *Proof, input *qualityInputs, verified bool) error {
 	if strings.TrimSpace(proof.Detail) == "" {
 		return errors.New("evidence needs a detail explaining what it proves")
 	}
@@ -329,9 +332,14 @@ func (g *Gate) validateProof(proof Proof, input *qualityInputs, verified bool) e
 			return fmt.Errorf("code evidence %q cannot be read: the file is missing or shorter", proof.Ref)
 		}
 	case "check":
-		check, ok := input.Checks[proof.Ref]
-		if !ok || (verified && check.Receipt.ReturnCode != 0) {
-			return fmt.Errorf("check evidence %q needs a current successful receipt to verify a requirement", proof.Ref)
+		id, err := checkRef(proof.Ref, input)
+		if err != nil {
+			return err
+		}
+		proof.Ref = id
+		check := input.Checks[id]
+		if verified && check.Receipt.ReturnCode != 0 {
+			return fmt.Errorf("check evidence %q failed (exit %d): a failing check cannot verify a requirement", checkLabel(check.Receipt.Argv), check.Receipt.ReturnCode)
 		}
 		if info, err := os.Stat(check.Receipt.Log); err != nil || !info.Mode().IsRegular() {
 			return fmt.Errorf("check evidence %q has no readable log", proof.Ref)
@@ -416,4 +424,28 @@ func (g *Gate) qualityReport() *QualityReport {
 		}
 	}
 	return nil
+}
+
+// checkRef finds the check a piece of evidence names: its id, or a part of its command that only one check
+// contains. The refusal lists what can be named.
+func checkRef(ref string, input *qualityInputs) (string, error) {
+	if _, ok := input.Checks[ref]; ok {
+		return ref, nil
+	}
+	var matches, valid []string
+	for id, check := range input.Checks {
+		label := strings.Join(check.Receipt.Argv, " ")
+		if strings.TrimSpace(ref) != "" && strings.Contains(label, ref) {
+			matches = append(matches, id)
+		}
+		valid = append(valid, fmt.Sprintf("%s (%s)", id, checkLabel(check.Receipt.Argv)))
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	sort.Strings(valid)
+	if len(valid) == 0 {
+		return "", fmt.Errorf("check evidence %q: no declared check of this position has run yet", ref)
+	}
+	return "", fmt.Errorf("check evidence %q must name one check that ran, by its id or a part of its command only it contains: %s", ref, strings.Join(valid, ", "))
 }

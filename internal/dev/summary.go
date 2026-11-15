@@ -19,6 +19,11 @@ func (g *Gate) needs(cfg *config.Config) []Need {
 	if !g.active() {
 		return out
 	}
+	if g.DesignFailure != "" {
+		return append(out, Need{Kind: "setup", What: g.DesignFailure,
+			Resolve: "Repair what it names — a Figma sign-in (`agentgate figma status`), a link to a frame, the stand — then `run` tries again. " +
+				"A design that cannot be had is taken out of the plan with `amend`, with the user's word in `authorized`."})
+	}
 	if g.Step == StepWrite {
 		if g.Round == nil {
 			return out

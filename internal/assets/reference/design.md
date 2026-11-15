@@ -46,7 +46,13 @@ not establish responsive behaviour between them.
 
 ## When something is wrong
 
-- A tool could not observe the page (`needs: setup`): repair the stand. It is not a CSS defect for a writer.
+- A tool could not observe the page (`needs: setup`): the page did not open, or it ended at another path (a
+  redirect to a login: the stand needs a session or data). Repair the stand; it is not a CSS defect for a
+  writer. A page that opened where it was asked to and does not show the design's element is a defect of the
+  code: it goes to the writer with the `data-*` attributes the page does carry.
+- A design that cannot be imported (`needs: setup`) names the exporter's own error. An icon Figma does not
+  render is listed in the package as missing and does not stop the import. A screen the tool makes is kept
+  under `design.screens` (default `.agentgate/design`), never among the task's files.
 - The measurement contract is wrong: `agentgate prepare` with `notes` revises the plan with the task's
   observations; apply it with `amend`. Code already written is never taken as the page's before-image.
 - Layout differences go back to the writers by themselves. A product exception needs the user's decision and

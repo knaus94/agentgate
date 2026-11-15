@@ -164,6 +164,20 @@ test('exported inventories detect tampering instead of accepting stale design ev
   assert.throws(() => verifyPackage(dir, manifest), /modified/);
 });
 
+test('an asset Figma does not render is recorded and skipped, not fatal', async (t) => {
+  const dir = path.join(temp(t), 'package');
+  const data = { rest: { document: { id: '1:2', name: 'Frame', type: 'FRAME', absoluteBoundingBox: { x: 0, y: 0, width: 100, height: 100 }, children: [
+    { id: '1:3', name: 'Copy', type: 'RECTANGLE', absoluteBoundingBox: { x: 0, y: 0, width: 14, height: 14 }, fills: [{ type: 'IMAGE', imageRef: 'copy' }] },
+  ] } }, png: { 1: Buffer.from('png fixture').toString('base64') } };
+  const warn = t.mock.method(console, 'error', () => {});
+  const result = await exportPackage({ destination: dir, where: { id: '1:2', key: 'example' }, state: { file: 'Example', version: 'v1' }, data, renderAssets: async () => ({}) });
+  const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json')));
+  verifyPackage(dir, manifest);
+  assert.deepEqual(manifest.missing_assets, [{ id: '1:3', name: 'Copy' }]);
+  assert.equal(result.missing_assets, 1);
+  assert.match(String(warn.mock.calls[0].arguments[0]), /did not render asset Copy/);
+});
+
 test('Figma URLs and transport selection are explicit', () => {
   assert.equal(figmaTarget('https://www.figma.com/design/abc/Test?node-id=1-2').id, '1:2');
   for (const value of ['https://evilfigma.com/design/abc/?node-id=1-2', 'http://figma.com/design/abc/?node-id=1-2', 'https://figma.com/design/abc']) assert.throws(() => figmaTarget(value));

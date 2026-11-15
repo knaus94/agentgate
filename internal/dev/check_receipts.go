@@ -27,7 +27,9 @@ func (g *Gate) receiptsFor(checks []*Check) map[string]*CheckReceipt {
 	for _, check := range checks {
 		id := checkID(check.Argv)
 		receipt := latest[id]
-		if receipt == nil {
+		// A failure recorded before the last correction is what the correction was sent to repair: it says
+		// nothing about the code as it is now, and the check runs again.
+		if receipt == nil || !passed(receipt) && receipt.Iteration < g.Iteration {
 			continue
 		}
 		if len(check.Inputs) > 0 {

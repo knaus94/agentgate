@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -128,11 +129,51 @@ func StopHook(cwd, sessionID string) map[string]any {
 		}
 	}
 	// A live operation reports its own completion; the lead may end the turn and wait for it.
-	if record := ops.Status(sessionDir(cwd, sessionID)); record != nil && record.Live {
+	record := ops.Status(sessionDir(cwd, sessionID))
+	if record != nil && record.Live {
 		return map[string]any{}
 	}
-	return map[string]any{"decision": "block", "reason": "/dev task is at " + gate.Step + ". Run `agentgate status` and take one of its `actions`. " +
+	reason := "/dev task is at " + gate.Step + "."
+	// The lead often believes a command is still running when it was refused within a second.
+	if record != nil && record.State == "failed" && record.Error != "" {
+		reason += " Your last command, `" + record.Action + "`, was refused: " + clipText(oneLine(record.Error), 400) + "."
+	}
+	if kinds := gate.needKinds(cwd); len(kinds) > 0 {
+		reason += " It needs: " + strings.Join(kinds, ", ") + "."
+	}
+	return map[string]any{"decision": "block", "reason": reason + " Settle it with one of the `actions` that `agentgate status` lists. " +
 		"If you are waiting for the user's decision, `agentgate pause` with the true reason and report INCOMPLETE. Do not claim it is done."}
+}
+
+// needKinds lists the kinds of what the task needs, read in its own checkout; nothing when they cannot be read.
+func (g *Gate) needKinds(cwd string) []string {
+	previous, _ := os.Getwd()
+	where := cwd
+	if g.Worktree != "" {
+		where = g.Worktree
+	}
+	if where != "" && os.Chdir(where) != nil {
+		return nil
+	}
+	defer os.Chdir(previous)
+	cfg, err := config.Load()
+	if err != nil {
+		return nil
+	}
+	var kinds []string
+	for _, need := range g.needs(cfg) {
+		if !slices.Contains(kinds, need.Kind) {
+			kinds = append(kinds, need.Kind)
+		}
+	}
+	return kinds
+}
+
+func clipText(text string, limit int) string {
+	if runes := []rune(text); len(runes) > limit {
+		return string(runes[:limit]) + "…"
+	}
+	return text
 }
 
 // reopen returns a finished task to verification: its content changed after it was completed, or a landing

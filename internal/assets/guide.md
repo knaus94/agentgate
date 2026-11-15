@@ -58,14 +58,14 @@ beside it. A task the user stopped (`paused.kind` is `user`) continues only on t
 
 | `kind` | What happened | What you do |
 |---|---|---|
-| `answer` | a writer stopped with questions | decide — ask the user when the decision is theirs — then `answer {stream, answer}` |
+| `answer` | a writer stopped with questions; the streams that do not wait for it go on | decide — ask the user when the decision is theirs — then `answer {stream, answer}` |
 | `failed` | a writer or a provider failed | `run` retries the unfinished streams; when every account is out, `agentgate accounts` says when, and you `pause` |
 | `review` | light mode: you are the reviewer | read `patch` and `packet`, then `decide {review: {summary, findings, quality?}}` |
 | `finding` | the author disputed a finding and the reviewer upheld it, or it waits for an approval | read both arguments, then `decide {findings: [{id, decision, evidence}]}` |
 | `requirement`, `rule` | a criterion that is due is not verified | code is missing → `decide {requirements: [{id, action: "fix"}]}`; proof is missing → provide it and `run`; it belongs to a later stage → `amend` |
 | `stall` | a correction made no verified progress | have `consult` diagnose, then `decide {reassessment: {evidence, changed_approach}}` |
 | `limit` | three corrections ran in a row | `show findings`; then `run`, or `amend` / `pause` when the plan or a decision is what is wrong |
-| `setup` | a verification tool could not run | repair what it names, then `run` |
+| `setup` | a design could not be imported, a page could not be observed, or a check that passed on these files fails now: the cause is outside the code | repair what it names, then `run` |
 | `scenarios` | opted-in browser scenarios were not observed | `run {visual: {url, origins}}`, or `visual {skip_reason}` |
 | `scope` | an isolated task changed a file that no stream owns | `amend` the plan to give it to a stream, or remove it from the worktree; then `run` |
 | `conflict` | a review without `--fix` found conflict markers | report them: a read-only review cannot change code |
@@ -124,8 +124,8 @@ more stages, the whole change is reviewed once more for the seams.
 
 - Models, modes and extra reasoning never authorize new tests, heavy checks, servers, browsers, infrastructure
   or production operations. Checks are the exact commands in the plan.
-- Commits, pushes and destructive Git need the user's word. An isolated task (`-w`) lands only on it:
-  `agentgate reference isolation`.
+- Commits, pushes and destructive Git need the user's word. An isolated task (`-w`) lands only on it, and a
+  commit takes your `message` in the repository's convention: `agentgate reference isolation`.
 - A model that hit its limit is replaced by a configured alternate and reported in `substitutions`; the author
   of the code never reviews it. You never set `CLAUDE_CONFIG_DIR` or `CODEX_HOME`.
 - Do not edit state files or recreate a task to get past a refusal: fix the cause, `amend` the plan, or

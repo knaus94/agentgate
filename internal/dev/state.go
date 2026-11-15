@@ -168,6 +168,10 @@ func loadGateFile(path string) (*Gate, error) {
 	if err := validateGateState(gate); err != nil {
 		return nil, fmt.Errorf("task state is invalid; preserve state.json and restore its last good copy: %w", err)
 	}
+	if gate.Plan != nil {
+		// An earlier version kept the last amendment's own fields in the plan; they live in its revision.
+		gate.Plan.Update, gate.Plan.Authorized, gate.Plan.Rework = "", "", nil
+	}
 	if gate.Dispositions == nil {
 		gate.Dispositions = map[string]Disposition{}
 	}

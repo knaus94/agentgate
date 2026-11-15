@@ -34,7 +34,12 @@ func PlanFile(name string) (string, error) {
 
 // slug derives a plan name from the request when the lead gave none.
 func slug(plan *Plan) string {
-	words := regexp.MustCompile(`[a-z0-9]+`).FindAllString(strings.ToLower(plan.Request+" "+plan.Brief), -1)
+	// The name comes from the task, not from the command and the flags that precede it.
+	task := plan.Request
+	if request, err := ParseRequest(plan.Request); err == nil {
+		task = request.Task
+	}
+	words := regexp.MustCompile(`[a-z0-9]+`).FindAllString(strings.ToLower(task+" "+plan.Brief), -1)
 	var kept []string
 	for _, word := range words {
 		if len(word) > 2 && len(kept) < 5 {

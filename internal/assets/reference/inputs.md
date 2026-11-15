@@ -70,4 +70,5 @@ task lifts the pause, except after a user stop.
 
 ## land
 
-`{"how": "apply"}` — see `agentgate reference isolation`.
+`{"how": "apply"}`, or `{"how": "commit", "message": "fix(orders): keep totals in cents"}` — the message
+follows the repository's convention (read its recent `git log`). See `agentgate reference isolation`.

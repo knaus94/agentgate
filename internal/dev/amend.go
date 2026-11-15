@@ -140,13 +140,18 @@ func Amend(cfg *config.Config, gate *Gate, source *Plan) (any, error) {
 		quality = inputs.fingerprint()
 	}
 	changes := planChanges(old, next)
+	// What the amendment says about itself belongs to its revision, not to the plan: a plan read back and
+	// amended again must not carry the last amendment's rework with it.
+	authorized := strings.TrimSpace(source.Authorized)
+	next.Update, next.Authorized, next.Rework = "", "", nil
 	gate.Plan, gate.Modes = next, resolved.Modes
 	if gate.Whole {
 		gate.Mode = gate.overallMode()
 	} else {
 		gate.Mode = gate.Modes[gate.Stage]
 	}
-	gate.Revisions = append(gate.Revisions, Revision{Number: len(gate.Revisions) + 1, At: time.Now().Unix(), Reason: reason, Digest: digest(next), Changes: changes})
+	gate.Revisions = append(gate.Revisions, Revision{Number: len(gate.Revisions) + 1, At: time.Now().Unix(), Reason: reason, Authorized: authorized,
+		Rework: rework, Digest: digest(next), Changes: changes})
 	gate.Reading = nil
 	did := []string{fmt.Sprintf("plan amended (revision %d): %s", len(gate.Revisions), reason)}
 	did = append(did, changes...)

@@ -228,21 +228,25 @@ func TestTheLeadRulesOnlyOnWhatTheAuthorAndTheReviewerDisagreeAbout(t *testing.T
 		return err
 	}
 	for name, item := range map[string]Disposition{
-		"unknown id":             {ID: "nope", Decision: "accepted", Evidence: "e"},
-		"no evidence":            {ID: by["first"], Decision: "accepted"},
-		"bad decision":           {ID: by["first"], Decision: "maybe", Evidence: "e"},
-		"polish without basis":   {ID: by["polish"], Decision: "accepted", Evidence: "e"},
-		"duplicate not rejected": {ID: by["third"], Decision: "accepted", Evidence: "e", DuplicateOf: by["first"]},
-		"duplicate of itself":    {ID: by["third"], Decision: "rejected", Evidence: "e", DuplicateOf: by["third"]},
-		"a file outside scope":   {ID: by["first"], Decision: "accepted", Evidence: "e", Files: []string{"b.txt"}},
+		"unknown id":           {ID: "nope", Decision: "accepted", Evidence: "e"},
+		"no evidence":          {ID: by["first"], Decision: "accepted"},
+		"bad decision":         {ID: by["first"], Decision: "maybe", Evidence: "e"},
+		"polish without basis": {ID: by["polish"], Decision: "accepted", Evidence: "e"},
+		"duplicate of itself":  {ID: by["third"], Decision: "rejected", Evidence: "e", DuplicateOf: by["third"]},
+		"duplicate of nothing": {ID: by["third"], Decision: "rejected", Evidence: "e", DuplicateOf: "nope"},
+		"a file outside scope": {ID: by["first"], Decision: "accepted", Evidence: "e", Files: []string{"b.txt"}},
 	} {
 		if err := rule(item); err == nil {
 			t.Errorf("%s must be rejected", name)
 		}
 	}
-	// Deferring a finding that blocks does not make it stop blocking.
+	// Deferring a finding that blocks does not make it stop blocking. A duplicate is closed as a duplicate,
+	// whatever decision the lead wrote for it.
 	must(t, rule(Disposition{ID: by["first"], Decision: "deferred", Evidence: "later"},
-		Disposition{ID: by["third"], Decision: "rejected", Evidence: "same root cause", DuplicateOf: by["first"]}))
+		Disposition{ID: by["third"], Decision: "accepted", DuplicateOf: by["first"]}))
+	if duplicate := Current().Dispositions[by["third"]]; duplicate.Decision != "rejected" || duplicate.DuplicateOf != by["first"] || duplicate.Evidence == "" {
+		t.Fatalf("a duplicate is recorded as a rejected duplicate of its canonical finding: %+v", duplicate)
+	}
 	if still := asMap(Current().report(f.cfg, nil)); !slices.Equal(needs(still), []string{"finding"}) || Current().Step != StepDecide {
 		t.Fatalf("a deferred P1 still blocks in medium: %v", still)
 	}

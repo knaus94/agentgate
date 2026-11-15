@@ -302,7 +302,7 @@ func (g *Gate) verify(cfg *config.Config, input RunInput, did *[]string) error {
 		}
 		packet["since_last_review"], packet["delta_patch"] = since, filepath.Join(delta, "change.patch")
 		if last.Contract != contract {
-			packet["contract_changed"] = "The plan was amended since your review: " + g.Plan.Update
+			packet["contract_changed"] = "The plan was amended since your review: " + g.amendment()
 		}
 	}
 	if len(g.Corrections) > 0 {
@@ -500,7 +500,7 @@ func (g *Gate) reassess(cfg *config.Config, quality *qualityInputs, input RunInp
 	dir := filepath.Join(g.dir(), fmt.Sprintf("review-%d-%s", g.Iteration, newID()[:8]))
 	path := filepath.Join(dir, "criteria.json")
 	if err := writePacket(path, map[string]any{"quality": quality, "checks": g.checkEvidence(), "brief": g.brief(),
-		"why": "The criteria or their evidence changed since your review; the code did not. " + g.Plan.Update}); err != nil {
+		"why": "The criteria or their evidence changed since your review; the code did not. " + g.amendment()}); err != nil {
 		return false, err
 	}
 	timeout, err := timeoutSeconds(input.ReviewerTimeoutS, g.Plan.ReviewerTimeoutS, cfg.Modes[g.Mode].ReviewerTimeoutS)

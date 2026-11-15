@@ -32,7 +32,8 @@ const usage = `usage:
         [--write-baseline <f>]  record the differences the page has now, and exit 0
         [--baseline <f>]        fail only for differences that are not in that record
 
-exit: 0 measurements pass (visual acceptance is separate), 1 measured differences, 2 verification could not run`;
+exit: 0 measurements pass (visual acceptance is separate), 1 measured differences, 2 verification could not run,
+      3 the page opened where it was asked to and does not show the root: a defect of the code`;
 
 const fail = (message, code = 2) => {
   throw Object.assign(new Error(message), { exitCode: code });
@@ -58,9 +59,12 @@ async function main() {
     fs.mkdirSync(target, { recursive: true });
     const { execFileSync } = await import('node:child_process');
     try {
-      execFileSync(process.execPath, [fileURLToPath(new URL('./figma.mjs', import.meta.url)), 'pull', figma, '--out', path.join(target, 'package')], { stdio: ['ignore', 'ignore', 'inherit'] });
-    } catch {
-      fail("could not import the design; see the exporter error above");
+      execFileSync(process.execPath, [fileURLToPath(new URL('./figma.mjs', import.meta.url)), 'pull', figma, '--out', path.join(target, 'package')],
+        { stdio: ['ignore', 'ignore', 'pipe'], encoding: 'utf8' });
+    } catch (error) {
+      const said = String(error.stderr || '').trim();
+      if (said) process.stderr.write(said + '\n');
+      fail(`could not import the design: ${said.split('\n').filter(Boolean).pop() || error.message}`);
     }
     // A screen somebody described already keeps its description: only the design was missing.
     if (!fs.existsSync(path.join(target, 'screen.json'))) {
@@ -147,7 +151,20 @@ async function main() {
       console.log(`design baseline: ${page.url()} does not show “${spec.frame.name}” yet`);
       return;
     }
-    if (seen.error) fail(`${seen.error} at ${page.url()}`);
+    if (seen.error) {
+      const asked = new URL(flags.url).pathname;
+      const landed = new URL(page.url()).pathname;
+      if (asked !== landed) {
+        fail(`the page ended at ${landed} instead of ${asked}: a redirect, usually to a login; the stand needs a session or data`);
+      }
+      if (seen.missingRoot) {
+        // The page is there and the element is not: the writer named it differently or did not build it.
+        const carried = await page.evaluate(() => [...new Set([...document.querySelectorAll('*')].flatMap((element) =>
+          [...element.attributes].filter((attribute) => attribute.name.startsWith('data-')).map((attribute) => `${attribute.name}="${attribute.value.slice(0, 40)}"`)))].slice(0, 30));
+        fail(`${seen.error} at ${page.url()}; the page carries ${carried.join(' ') || 'no data-* attributes'}`, 3);
+      }
+      fail(`${seen.error} at ${page.url()}`);
+    }
     const measurement = { device, viewport: { width, height }, referenceScreen: manifest.screen, documentWidth: seen.documentWidth,
       horizontalOverflow: seen.horizontalOverflow, root: { selector: flags.root || 'html', ...seen.root } };
     const measurementLine = `measurement: ${device} ${width}x${height}; document width ${measurement.documentWidth}; root ${measurement.root.selector} ${seen.root.width}x${seen.root.height} at ${seen.root.x},${seen.root.y}; padding ${seen.root.padding.join('/')}; horizontal overflow ${measurement.horizontalOverflow}`;

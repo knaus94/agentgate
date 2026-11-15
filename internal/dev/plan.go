@@ -256,8 +256,11 @@ func (p *Plan) designsFor(index int) []DesignRef {
 // every design the stage builds. The pass over the whole change runs all of them.
 func (p *Plan) checksFor(index int) []Check {
 	out := slices.DeleteFunc(slices.Clone(p.Checks), generatedDesignCheck)
+	// The last stage leaves every requirement verified, also those earlier stages started: it runs every
+	// declared check. A receipt whose inputs did not change is reused, so this costs what changed.
+	last := index == len(p.Stages)-1
 	for position, stage := range p.Stages {
-		if index == position || index < 0 || index >= len(p.Stages) {
+		if index == position || last || index < 0 || index >= len(p.Stages) {
 			out = mergeChecks(out, stage.Checks)
 		}
 	}

@@ -251,13 +251,14 @@ func (g *Gate) unresolved() []string {
 }
 
 type LandInput struct {
-	How string `json:"how,omitempty"` // apply (default), commit, branch or drop
+	How     string `json:"how,omitempty"`     // apply (default), commit, branch or drop
+	Message string `json:"message,omitempty"` // with commit: the commit message, in the repository's convention
 }
 
 // Land brings a finished isolated task into the user's checkout, on the user's word.
 //
 //	apply   the change appears in the checkout uncommitted; the user reviews and commits it
-//	commit  the same, committed on the current branch with the task's summary
+//	commit  the same, committed on the current branch with the lead's message
 //	branch  the checkout is not touched; the task's branch is kept for a pull request
 //	drop    the work is thrown away
 //
@@ -276,6 +277,10 @@ func Land(cfg *config.Config, gate *Gate, input LandInput) (any, error) {
 	}
 	if !slices.Contains([]string{"apply", "commit", "branch", "drop"}, how) {
 		return nil, errors.New("how is apply, commit, branch or drop")
+	}
+	message := strings.TrimSpace(input.Message)
+	if how == "commit" && message == "" {
+		return nil, errors.New("land {how: commit} needs message: the commit message, written in the repository's convention (read its recent `git log`)")
 	}
 	main := gate.Cwd
 	unlockLanding, err := flock(filepath.Join(checkoutDir(main), "land.lock"), syscall.LOCK_EX|syscall.LOCK_NB, "another task is landing in this checkout; retry after it finishes")
@@ -403,7 +408,6 @@ func Land(cfg *config.Config, gate *Gate, input LandInput) (any, error) {
 	}
 	result := map[string]any{"files": files, "next": "The change is in the checkout, uncommitted. Tell the user; committing is theirs."}
 	if how == "commit" && len(files) > 0 {
-		message := "dev: " + firstLine(gate.Final.Summary)
 		args := append([]string{"-C", main, "add", "--"}, files...)
 		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
 			result["commit_error"] = strings.TrimSpace(string(out))

@@ -141,7 +141,7 @@ func TestQualityRejectsMissingDuplicateAndInventedProof(t *testing.T) {
 	}{
 		{"omitted", "exactly once", func(r *QualityReport) { r.Requirements = nil }},
 		{"duplicate", "unique id", func(r *QualityReport) { r.Requirements[1] = r.Requirements[0] }},
-		{"invented receipt", "current successful receipt", func(r *QualityReport) { r.Requirements[0].Evidence[0].Ref = "not-a-check" }},
+		{"invented receipt", "must name one check that ran", func(r *QualityReport) { r.Requirements[0].Evidence[0].Ref = "not-a-check" }},
 		{"wrong method", "declared method", func(r *QualityReport) {
 			r.Requirements[0].Evidence = []Proof{{Kind: "code", Ref: "a.txt:1", Detail: "this is not an executed check"}}
 		}},
@@ -210,7 +210,7 @@ func TestQualityRejectsMissingDuplicateAndInventedProof(t *testing.T) {
 		must(t, err)
 		claimed := &QualityReport{Rules: []RuleResult{}, Requirements: []RequirementResult{{ID: "R1", Status: "verified", Reason: "claimed success",
 			Evidence: []Proof{{Kind: "check", Ref: checkID([]string{"false"}), Detail: "claimed success"}}}}}
-		if err := gate.validateQuality(claimed, input); err == nil || !strings.Contains(err.Error(), "current successful receipt") {
+		if err := gate.validateQuality(claimed, input); err == nil || !strings.Contains(err.Error(), "a failing check cannot verify a requirement") {
 			t.Fatalf("a failing check cannot verify a requirement: %v", err)
 		}
 	})

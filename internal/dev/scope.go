@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -41,42 +42,242 @@ func compilePatterns(values []string) []pattern {
 	return out
 }
 
-func (p pattern) match(path string) bool {
+// direct reports whether the entry names the path itself.
+func (p pattern) direct(path string) bool {
 	if p.glob == nil {
 		return p.raw == path
 	}
 	return p.glob.MatchString(path)
 }
 
+// match reports whether the entry owns the path: it names the path, or a directory above it. A generator
+// that names its output directory, `migrations/*_orders` for one, owns the files it writes inside.
+func (p pattern) match(path string) bool {
+	if p.direct(path) {
+		return true
+	}
+	if !p.namesDirectory() {
+		return false
+	}
+	for cut := strings.LastIndex(path, "/"); cut > 0; cut = strings.LastIndex(path[:cut], "/") {
+		if p.direct(path[:cut]) {
+			return true
+		}
+	}
+	return false
+}
+
+// namesDirectory reports whether the last segment of an entry can name a directory. `*`, `**` and a name with
+// an extension (`*.ts`, `schema.sql`) name files.
+func (p pattern) namesDirectory() bool {
+	last := p.raw[strings.LastIndex(p.raw, "/")+1:]
+	if last == "*" || last == "**" {
+		return false
+	}
+	dot := strings.LastIndex(last, ".")
+	return dot <= 0 || dot == len(last)-1 || globMeta.MatchString(last[dot+1:])
+}
+
 func matchAny(patterns []pattern, path string) bool {
 	return slices.ContainsFunc(patterns, func(p pattern) bool { return p.match(path) })
 }
 
-// extension is the fixed suffix of a pattern whose last segment is "*.ext", or "".
-func (p pattern) extension() string {
-	last := p.raw[strings.LastIndex(p.raw, "/")+1:]
-	if rest, ok := strings.CutPrefix(last, "*."); ok && !globMeta.MatchString(rest) {
-		return "." + rest
+// overlap reports whether two scope entries could own the same path. It is exact: two entries overlap when one
+// path exists that both own, directly or through a directory one of them names.
+func overlap(a, b pattern) bool {
+	for _, left := range a.forms() {
+		for _, right := range b.forms() {
+			if intersect(left, right, 0, 0, map[[2]int]bool{}) {
+				return true
+			}
+		}
 	}
-	return ""
+	return false
 }
 
-// overlap reports whether two scope entries could name the same path. It is conservative: two patterns under
-// nested directories are taken to overlap unless their fixed extensions differ.
-func overlap(a, b pattern) bool {
-	switch {
-	case a.glob == nil && b.glob == nil:
-		return a.raw == b.raw
-	case a.glob == nil:
-		return b.match(a.raw)
-	case b.glob == nil:
-		return a.match(b.raw)
+// segment is one path segment of an entry: a literal name, a single-segment pattern, or `**`.
+type segment struct {
+	text    string
+	literal bool
+}
+
+func (s segment) any() bool { return !s.literal && s.text == "**" }
+
+// forms are the segment lists of the paths an entry owns: the entry itself, and what is below it when it
+// can name a directory.
+func (p pattern) forms() [][]segment {
+	var parts []string
+	if p.glob == nil {
+		parts = strings.Split(p.raw, "/")
+	} else {
+		parts = globParts(p.raw)
 	}
-	if !strings.HasPrefix(a.prefix, b.prefix) && !strings.HasPrefix(b.prefix, a.prefix) {
+	base := make([]segment, len(parts))
+	for index, part := range parts {
+		base[index] = segment{text: part, literal: p.glob == nil}
+	}
+	out := [][]segment{base}
+	if p.namesDirectory() {
+		out = append(out, append(slices.Clone(base), segment{text: "*"}, segment{text: "**"}))
+	}
+	return out
+}
+
+// intersect reports whether one sequence of segments matches both lists from positions i and j.
+func intersect(a, b []segment, i, j int, seen map[[2]int]bool) bool {
+	if seen[[2]int{i, j}] {
 		return false
 	}
-	left, right := a.extension(), b.extension()
-	return left == "" || right == "" || left == right
+	seen[[2]int{i, j}] = true
+	if i == len(a) && j == len(b) {
+		return true
+	}
+	// `**` may stand for no segment.
+	if i < len(a) && a[i].any() && intersect(a, b, i+1, j, seen) {
+		return true
+	}
+	if j < len(b) && b[j].any() && intersect(a, b, i, j+1, seen) {
+		return true
+	}
+	if i == len(a) || j == len(b) {
+		return false
+	}
+	// Or both consume one segment: `**` stays where it is, any other segment moves on.
+	nextI, nextJ := i+1, j+1
+	if a[i].any() {
+		nextI = i
+	}
+	if b[j].any() {
+		nextJ = j
+	}
+	if !a[i].any() && !b[j].any() && !segmentsMeet(a[i], b[j]) {
+		return false
+	}
+	return intersect(a, b, nextI, nextJ, seen)
+}
+
+// token is one element of a single-segment pattern: `*`, or a pattern of one character.
+type token struct {
+	star    bool
+	text    string // for path.Match on one character
+	literal rune
+	exact   bool
+}
+
+func tokens(s segment) []token {
+	if s.literal {
+		var out []token
+		for _, char := range s.text {
+			out = append(out, token{literal: char, exact: true})
+		}
+		return out
+	}
+	var out []token
+	runes := []rune(s.text)
+	for index := 0; index < len(runes); index++ {
+		switch runes[index] {
+		case '*':
+			out = append(out, token{star: true})
+		case '\\':
+			if index+1 < len(runes) {
+				index++
+			}
+			out = append(out, token{literal: runes[index], exact: true})
+		case '[':
+			end := index + 1
+			if end < len(runes) && runes[end] == '^' {
+				end++
+			}
+			if end < len(runes) && runes[end] == ']' {
+				end++
+			}
+			for end < len(runes) && runes[end] != ']' {
+				if runes[end] == '\\' {
+					end++
+				}
+				end++
+			}
+			if end >= len(runes) {
+				end = len(runes) - 1
+			}
+			out = append(out, token{text: string(runes[index : end+1])})
+			index = end
+		case '?':
+			out = append(out, token{text: "?"})
+		default:
+			out = append(out, token{literal: runes[index], exact: true})
+		}
+	}
+	return out
+}
+
+func (t token) accepts(char rune) bool {
+	switch {
+	case char == '/':
+		return false
+	case t.star:
+		return true
+	case t.exact:
+		return char == t.literal
+	}
+	ok, _ := path.Match(t.text, string(char))
+	return ok
+}
+
+// candidates are characters that decide whether two one-character patterns share a character: every
+// character they name, its neighbours (the edges of a negated class), and characters neither names.
+func candidates(a, b token) []rune {
+	out := []rune{'a', 'Z', '0', '_', '-', '.', '~', 'é', '中', '\U0010FFFD'}
+	for _, t := range []token{a, b} {
+		for _, char := range []rune(t.text + string(t.literal)) {
+			out = append(out, char-1, char, char+1)
+		}
+	}
+	return out
+}
+
+// segmentsMeet reports whether a non-empty name matches both single-segment patterns.
+func segmentsMeet(a, b segment) bool {
+	left, right := tokens(a), tokens(b)
+	type state struct {
+		i, j     int
+		consumed bool
+	}
+	seen := map[state]bool{}
+	var walk func(state) bool
+	walk = func(s state) bool {
+		if seen[s] {
+			return false
+		}
+		seen[s] = true
+		if s.i == len(left) && s.j == len(right) {
+			return s.consumed
+		}
+		if s.i < len(left) && left[s.i].star && walk(state{s.i + 1, s.j, s.consumed}) {
+			return true
+		}
+		if s.j < len(right) && right[s.j].star && walk(state{s.i, s.j + 1, s.consumed}) {
+			return true
+		}
+		if s.i == len(left) || s.j == len(right) {
+			return false
+		}
+		shared := slices.ContainsFunc(candidates(left[s.i], right[s.j]), func(char rune) bool {
+			return left[s.i].accepts(char) && right[s.j].accepts(char)
+		})
+		if !shared {
+			return false
+		}
+		next := state{s.i + 1, s.j + 1, true}
+		if left[s.i].star {
+			next.i = s.i
+		}
+		if right[s.j].star {
+			next.j = s.j
+		}
+		return walk(next)
+	}
+	return walk(state{})
 }
 
 // firstOverlap names the first pair of entries from two scopes that could collide.
@@ -174,11 +375,11 @@ func normalizeEntry(value string, patterns bool) (string, error) {
 			}
 		}
 	}
-	if directory && !wild {
+	if directory && !strings.HasSuffix(clean, "/**") {
 		if !patterns {
 			return "", fmt.Errorf("an exact file path is needed here, not a directory: %q", value)
 		}
-		return clean + "/**", nil
+		return clean + "/**", nil // a directory, named exactly or by a pattern, owns everything below it
 	}
 	return clean, nil
 }

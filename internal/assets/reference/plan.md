@@ -59,10 +59,12 @@ A plan has `streams` or `stages`, not both. Validation reports every problem at 
   `public-contract` — only what the change really touches. `uncertainty`: `low` or `material`. A stage may
   carry its own; the mode is computed per stage.
 - **`streams[].files`** is what the stream owns: exact repository-relative files (existing or to be created),
-  directories written with a trailing slash, and patterns (`*` within a name, `**` across directories). Streams
-  of one stage must not be able to name the same file. What a stream actually changed is read from the
-  working tree, so a generator's output with a computed name is owned by its directory. A file git ignores is
-  tracked only when it is named exactly.
+  directories written with a trailing slash, and patterns (`*` within a name, `**` across directories). An
+  entry that names a directory owns what is inside it: `migrations/*_orders` owns
+  `migrations/2026_orders/migration.sql`. `*`, `dir/**` and a name with an extension (`*.ts`) name files.
+  Streams of one stage must not be able to own the same file; `pages/x/api/**` and `pages/x/*` can share
+  none. What a stream actually changed is read from the working tree, so a generator's output with a computed
+  name is owned by its directory. A file git ignores is tracked only when it is named exactly.
 - **`after`** orders streams of a stage into waves. `done: true` keeps ownership without starting a writer.
   `effort` raises one hard stream, up to the mode's ceiling.
 - **`requirements`**: `{id, text, method?}`; `method` requires `code`, `check` or `browser` proof.
@@ -72,7 +74,10 @@ A plan has `streams` or `stages`, not both. Validation reports every problem at 
 - **`checks`**: an argv array, or an object. `kind`: `test`, `typecheck`, `lint`, `build`, `measurement`,
   `runtime`, `command`. `inputs` are globs whose content decides whether a result is still current; without
   them a result is bound to the whole working tree. `baseline: true` records the result before any writing; a
-  failure that existed before still blocks. `no_reuse: true` for checks that depend on external state. Above
+  failure that existed before still blocks. `no_reuse: true` for checks that depend on external state. A
+  stage runs the plan's checks and its own; the last stage runs every declared check, because it leaves every
+  requirement verified (an unchanged result is reused). A check that passed on the same files of the task and
+  fails now failed outside the code: it comes to you as `setup`, not to the writers. Above
   light mode every stage needs at least one check, its own or the plan's; when no command can verify the
   change, say why in `checks_waiver`.
 - **`generated`**: patterns of generator output. A reviewer is shown such a file as one line and checks where

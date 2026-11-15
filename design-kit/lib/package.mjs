@@ -33,6 +33,7 @@ export async function exportPackage({ destination, where, state, data, scales = 
     fs.mkdirSync(path.join(out, 'assets'));
     fs.mkdirSync(path.join(out, 'data'));
     const files = {};
+    const missing = [];
     const write = (name, content) => {
       fs.writeFileSync(path.join(out, name), content);
       files[name] = sha256(content);
@@ -45,7 +46,12 @@ export async function exportPackage({ destination, where, state, data, scales = 
         const batch = wanted.slice(index, index + 25);
         const rendered = await renderAssets(batch.map((node) => ({ id: node.id, format: node.asset.format })));
         for (const node of batch) {
-          if (!rendered[node.id]) throw new Error(`Figma did not render asset ${node.name} (${node.id}); package was not replaced`);
+          if (!rendered[node.id]) {
+            // One icon Figma cannot render does not make the frame unusable: the layer stays, without its file.
+            missing.push({ id: node.id, name: node.name });
+            console.error(`figma: Figma did not render asset ${node.name} (${node.id}); the package keeps the layer without its file`);
+            continue;
+          }
           const bytes = Buffer.from(rendered[node.id], 'base64');
           const digest = sha256(bytes);
           if (!written.has(digest)) {
@@ -69,11 +75,12 @@ export async function exportPackage({ destination, where, state, data, scales = 
     write('brief.md', text);
     const manifest = { tool: 'agentgate-design 1', transport,
       source: { url: where.url, file: state.file, key: where.key, node: where.id, version: state.version },
-      frame: spec.frame, screen: data.screen, pulled_at: new Date().toISOString(), digest: contentDigest(files), files };
+      frame: spec.frame, screen: data.screen, pulled_at: new Date().toISOString(), digest: contentDigest(files), files,
+      ...(missing.length ? { missing_assets: missing } : {}) };
     writeJSON(path.join(out, 'manifest.json'), manifest);
     verifyPackage(out, manifest);
     return { package: destination, frame: spec.frame, layers: spec.nodes.length, transport,
-      assets: Object.keys(files).filter((name) => name.startsWith('assets/')).length,
+      assets: Object.keys(files).filter((name) => name.startsWith('assets/')).length, missing_assets: missing.length,
       brief: { file: path.join(destination, 'brief.md'), lines: text.split('\n').length, tokens_about: Math.round(Buffer.byteLength(text) / 3.2) }, digest: manifest.digest };
   });
 }

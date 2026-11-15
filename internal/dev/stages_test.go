@@ -31,7 +31,11 @@ func fileText(t *testing.T, path string) string {
 
 func (f *fixture) land(how string) map[string]any {
 	f.t.Helper()
-	return f.do("land", func() (any, error) { return Land(f.cfg, Current(), LandInput{How: how}) })
+	input := LandInput{How: how}
+	if how == "commit" {
+		input.Message = "feat: land the fixture"
+	}
+	return f.do("land", func() (any, error) { return Land(f.cfg, Current(), input) })
 }
 
 func (f *fixture) amend(plan *Plan) map[string]any {

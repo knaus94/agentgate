@@ -59,6 +59,13 @@ func (g *Gate) progress(key string) Progress {
 	}
 	last := g.Corrections[len(g.Corrections)-1]
 	out := Progress{}
+	// Only what the last correction carried can have stalled. An accepted finding it did not carry is new work
+	// for the writers, whatever the content looks like.
+	for _, finding := range g.accepted() {
+		if !slices.Contains(last.FindingIDs, finding.ID) {
+			return Progress{Status: "new-work"}
+		}
+	}
 	for _, id := range last.FindingIDs {
 		if _, ok := g.Resolutions[id]; ok {
 			out.Resolved = append(out.Resolved, id)
@@ -114,9 +121,21 @@ func (g *Gate) classify(cfg *config.Config) (string, []Need, error) {
 	failing := g.failingReceipts(receipts)
 	for _, failure := range failing {
 		if failure.Setup {
-			return verdictLead, []Need{{Kind: "setup", What: "a layout tool could not observe the page: " + strings.Join(failure.Argv, " "), Detail: failure.Tail, environment: true,
+			return verdictLead, []Need{{Kind: "setup", What: "layout check of " + layoutScreen(failure.Argv) + " could not observe the page: " + toolMessage(failure.Tail),
+				Detail: map[string]string{"log": failure.Log, "check": checkLabel(failure.Argv)}, environment: true,
 				Resolve: "Repair the stand, or have `prepare` correct the measurement contract and `amend` it; then `run` measures again. Do not tune CSS, baselines or tolerances to get past it."}}, nil
 		}
+	}
+	// A check that passed on these same files and fails now failed outside the code. Writers cannot repair a
+	// stopped database: the lead hears of it, unless it already sent the failure to the writers.
+	if writes && len(failing) > 0 && g.Remedy == "" && len(g.FixStreams) == 0 && !slices.ContainsFunc(failing, func(f CheckFailure) bool { return !f.Environment }) {
+		var out []Need
+		for _, failure := range failing {
+			out = append(out, Need{Kind: "setup", environment: true, Detail: lastLines(failure.Tail, 12),
+				What:    "check `" + checkLabel(failure.Argv) + "` passed on these same files before and fails now: the cause is outside the code — a service, a stand, the machine",
+				Resolve: "Repair what its log names, then `run` runs the check again. If the code is at fault after all, decide {brief} sends the failure to the writers."})
+		}
+		return verdictLead, out, nil
 	}
 	if writes && len(failing) > 0 {
 		var ids []string
@@ -367,19 +386,18 @@ func Run(cfg *config.Config, gate *Gate, input RunInput) (any, error) {
 		case StepWrite:
 			if gate.Round == nil {
 				if err := gate.openStage(cfg); err != nil {
+					if failure := (*designError)(nil); errors.As(err, &failure) {
+						return gate.report(cfg, did), gate.save()
+					}
 					return nil, err
 				}
 			}
-			if len(gate.blocked()) > 0 {
-				return gate.report(cfg, did), gate.save()
-			}
-			started := len(gate.pending())
-			complete, err := gate.write(cfg)
+			complete, ran, completed, err := gate.write(cfg)
 			if err != nil {
 				return nil, err
 			}
-			if started > 0 {
-				did = append(did, fmt.Sprintf("writers: %d of %d streams completed (%s)", started-len(gate.pending()), started, gate.Round.Batch))
+			if ran > 0 {
+				did = append(did, fmt.Sprintf("writers: %d of %d streams completed (%s)", completed, ran, gate.Round.Batch))
 			}
 			if !complete {
 				return gate.report(cfg, did), gate.save()
@@ -399,9 +417,15 @@ func Run(cfg *config.Config, gate *Gate, input RunInput) (any, error) {
 			// one thing a second look can change. It costs no model.
 			again := first && verdict == verdictLead && slices.ContainsFunc(needs, func(need Need) bool { return need.environment })
 			first = false
-			if verdict == verdictVerify || input.Recheck || input.Visual != nil || again {
+			if verdict == verdictVerify || input.Recheck || input.Visual != nil || again || gate.DesignFailure != "" {
 				// The evidence is not current: declared checks, then independent review.
 				if err := gate.verify(cfg, input, &did); err != nil {
+					if failure := (*designError)(nil); errors.As(err, &failure) {
+						if err := gate.setStep(StepDecide); err != nil {
+							return nil, err
+						}
+						return gate.report(cfg, did), gate.save()
+					}
 					return nil, err
 				}
 				input.Visual, input.Recheck = nil, false

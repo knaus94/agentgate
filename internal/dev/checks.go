@@ -64,7 +64,17 @@ func compileGlob(pattern string) (*fileGlob, error) {
 	if _, err := path.Match(pattern, ""); err != nil {
 		return nil, err
 	}
-	return &fileGlob{parts: strings.Split(pattern, "/")}, nil
+	return &fileGlob{parts: globParts(pattern)}, nil
+}
+
+// globParts splits a pattern into path segments. A trailing `**` after a directory stands for what is inside
+// it, so it needs at least one segment: `dir/**` names the files below `dir`, not `dir` itself.
+func globParts(pattern string) []string {
+	parts := strings.Split(pattern, "/")
+	if last := len(parts) - 1; last > 0 && parts[last] == "**" {
+		parts = append(parts[:last:last], "*", "**")
+	}
+	return parts
 }
 
 func (glob *fileGlob) MatchString(name string) bool {
@@ -286,7 +296,7 @@ func (g *Gate) runCheck(check *Check) (CheckReceipt, error) {
 			return CheckReceipt{}, errors.New("repository changed during the check; its result is stale, declare stable inputs or run verification again")
 		}
 	}
-	receipt := CheckReceipt{Argv: check.Argv, ReturnCode: code, InputKey: key, Log: log}
+	receipt := CheckReceipt{Argv: check.Argv, ReturnCode: code, InputKey: key, Log: log, Iteration: g.Iteration}
 	if len(check.Inputs) == 0 {
 		receipt.Tree = before
 	}
@@ -301,7 +311,7 @@ func (g *Gate) runCheck(check *Check) (CheckReceipt, error) {
 func (g *Gate) invalidateCheck(check *Check, failure error) error {
 	key, _ := inputKey(check)
 	tree, _ := g.snapshot()
-	g.Checks = append(g.Checks, CheckReceipt{Argv: slices.Clone(check.Argv), ReturnCode: 125, Tree: tree, InputKey: key, Error: failure.Error()})
+	g.Checks = append(g.Checks, CheckReceipt{Argv: slices.Clone(check.Argv), ReturnCode: 125, Tree: tree, InputKey: key, Error: failure.Error(), Iteration: g.Iteration})
 	return g.save()
 }
 
@@ -368,10 +378,36 @@ func (g *Gate) failingReceipts(receipts map[string]*CheckReceipt) []CheckFailure
 		if len(raw) > 4000 {
 			raw = raw[len(raw)-4000:]
 		}
+		setup := generatedDesignCheck(checks[index]) && receipt.ReturnCode != 1 && receipt.ReturnCode != layoutRootMissing
 		out = append(out, CheckFailure{Argv: receipt.Argv, ReturnCode: receipt.ReturnCode, Log: receipt.Log, Tail: string(raw),
-			Setup: generatedDesignCheck(checks[index]) && receipt.ReturnCode != 1})
+			Setup: setup, Environment: !setup && g.passedBefore(receipt)})
 	}
 	return out
+}
+
+// layoutRootMissing is the exit code of a layout check whose page opened where it was asked to and does not
+// show the element of the design: a defect of the code, for its writer.
+const layoutRootMissing = 3
+
+// passedBefore reports whether the check of a failing receipt passed earlier on the same files of the task: the
+// same declared inputs, or a working tree that differs from today's only outside the task's scope.
+func (g *Gate) passedBefore(failure *CheckReceipt) bool {
+	id := checkID(failure.Argv)
+	for index := len(g.Checks) - 1; index >= 0; index-- {
+		earlier := &g.Checks[index]
+		if earlier == failure || checkID(earlier.Argv) != id || !passed(earlier) {
+			continue
+		}
+		if earlier.InputKey != "" && failure.InputKey != "" {
+			return earlier.InputKey == failure.InputKey
+		}
+		if earlier.Tree == "" || failure.Tree == "" {
+			return false
+		}
+		owned, _, err := g.changesBetween(earlier.Tree, failure.Tree)
+		return err == nil && len(owned) == 0
+	}
+	return false
 }
 
 // runOutstanding runs every declared check that has no current passing result, and reports how many it ran.
@@ -410,4 +446,13 @@ func (g *Gate) outstandingReceipts(receipts map[string]*CheckReceipt) []*Check {
 		}
 	}
 	return out
+}
+
+// checkLabel names a check in one short line.
+func checkLabel(argv []string) string {
+	label := strings.Join(argv, " ")
+	if runes := []rune(label); len(runes) > 100 {
+		return string(runes[:100]) + "…"
+	}
+	return label
 }

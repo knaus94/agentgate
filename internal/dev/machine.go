@@ -161,8 +161,8 @@ func (g *Gate) actions() []Action {
 				continue
 			}
 		case ActRun:
-			if g.Step == StepWrite && len(g.blocked()) > 0 {
-				continue // a blocked writer is answered, not retried
+			if g.Step == StepWrite && len(g.blocked()) > 0 && len(g.ready(nil)) == 0 {
+				continue // a blocked writer is answered, not retried; `run` is for the streams that do not wait for it
 			}
 		case ActCheck:
 			if len(g.checks()) == 0 {

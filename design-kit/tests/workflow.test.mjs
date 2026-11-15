@@ -245,7 +245,7 @@ process.on('SIGTERM',()=>server.close(()=>process.exit(0)));
   fs.writeFileSync(path.join(pkg, 'manifest.json'), JSON.stringify({ versionTag: 'design-v2' }));
   await run(['--baseline', baseline], 1);
   await run(['--baseline', path.join(dir, 'missing.json')], 1);
-  assert.match(await run(['--root', '#missing'], 2), /no element matches #missing/);
+  assert.match(await run(['--root', '#missing'], 3), /no element matches #missing.*the page carries/);
   const blockedOut = path.join(dir, 'not-a-directory');
   fs.writeFileSync(blockedOut, 'file');
   await run(['--out', blockedOut], 2);

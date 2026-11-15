@@ -4,6 +4,52 @@ This record distinguishes live integrations from controlled provider fixtures an
 model quality, arbitrary specification size or every possible execution environment. It has two parts: what
 was run for the 0.16.0 source, and the release validation of 0.14.0, which is kept as it was written.
 
+## 0.16.2
+
+Checked on 2026-11-16 against the source based on `b1112f7` (0.16.1). The defects come from the transcripts of
+three Claude Code lead sessions and one Codex lead session of real work; the analysis is
+[docs/briefs/0.17-lead-experience.md](briefs/0.17-lead-experience.md).
+
+### Automated checks
+
+| Check | Actual result |
+|---|---|
+| `make check`: `gofmt`, `go vet ./...`, `go test -race ./...`, Node core suite | PASS |
+| `go test -count=1 -json ./...` | PASS: 217 top-level tests, zero failures |
+| Node core suite | PASS: 19 tests (one new: an asset Figma does not render) |
+| `make design-browser`: Chromium workflow | PASS: 8 tests (a missing root on an opened page now exits 3) |
+
+Each defect has one scripted regression test in `internal/dev/lead_sessions_test.go`, written from the
+session where it happened. Three existing tests changed with the behaviour they describe: a duplicate written
+as `accepted`, the wording of a refused check reference, and a stand that is not up when a design stage opens,
+which is now a `setup` need instead of a failed command.
+
+### Dry run: the real binary with recorded worker answers
+
+No model was called. The release binary ran as a lead's tool does: the real Bubblewrap sandbox, git and
+worktrees, an isolated home, configuration and state, and the user's own routes (writers through the `codex`
+CLI, reviewers through the `claude` CLI). Both CLIs were replaced on `PATH` by one stand-in that answers in each
+CLI's output format and edits files as a writer, with answers recorded from real worker sessions — a writer
+blocked on a missing dependency, a P1 review finding, a requirement judged `partial` after a correction that
+changed nothing, a preparation question — adapted to a small repository. The lead's part was scripted from the
+guide: the commands, their JSON inputs and a check of every answer. The harness and the recorded answers are
+kept outside the repository, because the answers come from private projects.
+
+| Scenario | 0.16.2 | 0.16.1, same script |
+|---|---|---|
+| A request that repeats `/dev -m --grill`: two preparation rounds, `start`, the Stop hook | 10 of 10 | 8 of 10: mode taken from the assessment, plan named `dev-grill-…` |
+| A blocked stream beside an independent one; `amend` adds the stream it waits for; `answer` | 13 of 13 | 10 of 13: the answer reached the page before its query was written; the amendment's fields stayed in the plan |
+| A P1 finding, a correction that changed nothing, a `partial` criterion, `decide {requirements}` | 6 of 6 | 4 of 6: the lead's work answered as `stall` |
+| An isolated task whose check needs a local service: a correction that prepares it, the user's commit and a stopped service at landing, a refused `decide`, the Stop hook, the repair, `land` with a message | 17 of 17 | 3 of 6, then stopped: `stall` instead of running the check again; `land` has no `message` |
+| Two streams in one directory and a generated migration directory, isolated, landed uncommitted | 6 of 6 | 0 of 1, then stopped: the plan was refused as overlapping |
+
+52 of 52 promises held on 0.16.2; the same script found the defects of the sessions in 0.16.1. A layout check
+in a real browser is covered by `make design-browser`, not by this run.
+
+One preparation call on Codex had started before the user asked not to spend model quota; it was stopped
+there and its temporary state removed. It confirmed that a request beginning with `/dev -m` is prepared in
+medium mode, and showed the plan named after the command, which this version fixes.
+
 ## 0.16.1
 
 Checked on 2026-11-14: `make check` — formatting, `go vet`, `go test -race ./...` and the 18 Node core tests —

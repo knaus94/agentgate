@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -180,7 +181,10 @@ func TestLayoutPreparationRecoversAndAnAmendmentReplacesManagedChecks(t *testing
 	plan := f.plan("-l implement the page")
 	plan.Design = []DesignRef{screenFixture(t)}
 	write(t, filepath.Join(dir, "fail"), "fail")
-	f.fails("start", "stand unavailable", func() (any, error) { return Start(f.cfg, plan, "", false, RunInput{}) })
+	// A stand that cannot be reached is the lead's to repair: the task waits with that need, it does not fail.
+	if started := f.start(plan); !slices.Equal(needs(started), []string{"setup"}) || !strings.Contains(fmt.Sprint(started["needs"]), "stand unavailable") {
+		t.Fatalf("a design that cannot be measured is a setup need naming the cause: %v", started)
+	}
 	original := Current()
 	if original == nil || len(original.Writers) != 0 {
 		t.Fatal("writing started before the stand was ready")

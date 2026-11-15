@@ -51,6 +51,18 @@ func Decide(cfg *config.Config, gate *Gate, input DecideInput) (any, error) {
 		}
 	}
 	for _, item := range input.Findings {
+		if item.DuplicateOf != "" && item.DuplicateOf != item.ID {
+			// A duplicate is closed in favour of its canonical finding, whatever decision it was given; a chain of
+			// duplicates points at the finding at its end.
+			for seen := map[string]bool{item.ID: true}; gate.Dispositions[item.DuplicateOf].DuplicateOf != "" && !seen[item.DuplicateOf]; {
+				seen[item.DuplicateOf] = true
+				item.DuplicateOf = gate.Dispositions[item.DuplicateOf].DuplicateOf
+			}
+			item.Decision = "rejected"
+			if strings.TrimSpace(item.Evidence) == "" {
+				item.Evidence = "duplicate of " + item.DuplicateOf
+			}
+		}
 		finding, ok := known[item.ID]
 		switch {
 		case !ok || !slices.Contains(decisionsAllowed, item.Decision) || strings.TrimSpace(item.Evidence) == "":
@@ -61,9 +73,8 @@ func Decide(cfg *config.Config, gate *Gate, input DecideInput) (any, error) {
 			return nil, fmt.Errorf("%s has no source location: an accepted remedy needs files, to say which stream it goes to", item.ID)
 		}
 		if item.DuplicateOf != "" {
-			if _, exists := known[item.DuplicateOf]; !exists || item.DuplicateOf == item.ID || item.Decision != "rejected" ||
-				gate.Dispositions[item.DuplicateOf].DuplicateOf != "" {
-				return nil, fmt.Errorf("%s: a duplicate is rejected and points directly at its canonical finding", item.ID)
+			if _, exists := known[item.DuplicateOf]; !exists || item.DuplicateOf == item.ID {
+				return nil, fmt.Errorf("%s: duplicate_of names no other finding of this task: %q", item.ID, item.DuplicateOf)
 			}
 		}
 		files, err := cleanPaths(item.Files)
@@ -194,6 +205,7 @@ func (g *Gate) demand(cfg *config.Config, decisions []CriterionDecision) error {
 		g.Demands = append(g.Demands, demand)
 		delete(g.Resolutions, demand.ID)
 		g.Dispositions[demand.ID] = Disposition{ID: demand.ID, Decision: "accepted", Evidence: "sent to the writers by the lead"}
+		g.Ruled = true // the writers act on the lead's demand, not on the attempt before it
 	}
 	return nil
 }
