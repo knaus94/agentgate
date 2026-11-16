@@ -40,12 +40,14 @@ of several stages each stage may carry its own assessment and gets its own mode.
 | | light | medium | heavy | ultra |
 |---|---|---|---|---|
 | Preparation | `sol:medium` | `sol:medium` | `sol:medium` | `sol:medium` |
-| Architects | the plan | the plan | `fable:high` ∥ `astra:high`, independent, in parallel | `fable:xhigh` ∥ `astra:xhigh`, then each critiques the other at `high` |
-| Blocker round | — | — | optional, once | optional, once |
-| Backend writer | `sol:medium` | `opus:medium` | `opus:high` | `opus:xhigh` |
-| Frontend writer | `sonnet:medium` | `opus:medium` | `opus:high` | `opus:xhigh` |
-| Review lanes | one lane, `astra:medium`: correctness, architecture, simplicity | one lane, `astra:medium`: correctness, architecture, simplicity | architecture+simplicity `fable:high` ∥ correctness `astra:high` | architecture+simplicity `fable:high` ∥ correctness `fable:xhigh` ∥ correctness `astra:xhigh` ∥ security `astra:high` |
-| Effort ceiling | `high` | `high` | `xhigh` | `max` |
+| Architects | the plan | `opus:high` | `fable:high` ∥ `astra:high`, independent, in parallel | `fable:xhigh` ∥ `astra:xhigh`, then each critiques the other at `high` |
+| Blocker round | — | optional, once | optional, once | optional, once |
+| Backend writer | `sol:high` | `sol:xhigh` | `opus:high` | `opus:xhigh` |
+| Frontend writer | `sol:high` | `sol:xhigh` | `astra:high` | `astra:xhigh` |
+| Review lanes | one lane, `astra:medium`: correctness, architecture, simplicity | one lane, `opus:high`: correctness, architecture, simplicity | architecture+simplicity `fable:high` ∥ correctness `opus:high` | architecture+simplicity `fable:high` ∥ correctness `fable:xhigh` ∥ correctness `opus:xhigh` ∥ security `opus:high` |
+| UI designer | `astra:medium` | `astra:medium` | `astra:high` | `astra:xhigh` |
+| Browser check | `astra:high` | `astra:high` | `astra:high` | `astra:high` |
+| Effort ceiling | `xhigh` | `xhigh` | `xhigh` | `max` |
 | Blocking severities | P0, P1 | P0, P1 | P0, P1, P2 | P0, P1, P2 |
 | Declared checks | optional | at least one per stage, or a stated `checks_waiver` | the same | the same |
 | Review of the whole change after the last stage | with three or more stages | with three or more stages | always, for a staged plan | always, for a staged plan |

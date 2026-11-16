@@ -289,7 +289,7 @@ func (g *Gate) prepareVisual(cfg *config.Config, input VisualInput, now, key str
 		return filepath.Join(shots, name), nil
 	}
 	stage := &visualStage{}
-	independent := g.reviewerSkip(cfg)
+	independent := reviewerSkip(cfg)
 	stage.run = func() error {
 		prompt := assets.Prompt("visual") + "\nRead the packet at " + path + ". Screenshots you take are saved in " + shots + ".\n"
 		result, _, err := subs.invoke(cfg, provider.Call{Route: cfg.MustRoute(cfg.VisualReviewer), Prompt: prompt, Dir: filepath.Join(dir, "reviewer"),
@@ -475,13 +475,6 @@ func VisualPass(cfg *config.Config, gate *Gate, input VisualInput) (any, error) 
 				return nil, errors.New("browser verification needs an accepted ui contract")
 			}
 			if err := validateScenarios(input.Choice.Scenarios, gate.Plan.Stages); err != nil {
-				return nil, err
-			}
-			authors := gate.authors()
-			if resolved, err := gate.resolve(cfg); err == nil {
-				authors = append(authors, resolved.writerModels()...)
-			}
-			if err := browserReviewer(cfg, &Plan{Visual: input.Choice}, authors); err != nil {
 				return nil, err
 			}
 		}

@@ -283,6 +283,8 @@ func TestWholeTaskThroughTheCommandLine(t *testing.T) {
 		!strings.Contains(changed, "skills/agentgate/SKILL.md") || !strings.Contains(changed, "skills/agentgate/needs.md") {
 		t.Fatalf("install adds the command, the hook and the lead's pages: %v", installed)
 	}
+	// The scenario starts from the plan: medium without its design pass.
+	s.ok("", "config", "set", "modes.medium.architecture", "[]")
 	plan := `{"request":"change the file","assessment":{"size":"ordinary","evidence":"one file"},"brief":"a.txt must say fixed",
 	  "streams":[{"name":"core","domain":"backend","files":["a.txt"]}],
 	  "checks":[["grep","-q","fixed","a.txt"],["sh","-c","exit 7"]]}`
@@ -318,7 +320,7 @@ func TestWholeTaskThroughTheCommandLine(t *testing.T) {
 		t.Fatalf("a misspelled plan field must be an error, got %q", stderr)
 	}
 	panel, _, _ := s.run("", "watch", "--once")
-	for _, want := range []string{"TASKS 1", "medium", "decide", "writer  core", "opus:medium", "passed", "failed (7)", "steps"} {
+	for _, want := range []string{"TASKS 1", "medium", "decide", "writer  core", "sol:xhigh", "passed", "failed (7)", "steps"} {
 		if !strings.Contains(panel, want) {
 			t.Errorf("watch lacks %q:\n%s", want, panel)
 		}
@@ -351,7 +353,7 @@ func TestWholeTaskThroughTheCommandLine(t *testing.T) {
 		t.Fatalf("a refused command says why and what is possible: %d %s", code, refused)
 	}
 	panel, _, _ = s.run("", "watch", "--once")
-	for _, want := range []string{"done", "review  correctness", "astra:medium", "revision 2"} {
+	for _, want := range []string{"done", "review  correctness", "opus:high", "revision 2"} {
 		if !strings.Contains(panel, want) {
 			t.Errorf("watch lacks %q:\n%s", want, panel)
 		}

@@ -60,7 +60,7 @@ func modeTable(cfg *config.Config, name string) map[string]any {
 		scout = cfg.Modes["medium"].Scout + " (as in medium)"
 	}
 	return map[string]any{"scout": scout, "design": design, "backend": mode.Backend, "frontend": mode.Frontend, "review": review,
-		"blocking": mode.Blocking, "escalate_to": mode.EscalateTo}
+		"blocking": mode.Blocking, "escalate_to": mode.EscalateTo, "ui_designer": cfg.UIDesignerFor(name)}
 }
 
 // Modes renders the effective mode table for people.
@@ -68,10 +68,11 @@ func Modes(cfg *config.Config) string {
 	var out strings.Builder
 	for _, name := range config.ModeNames {
 		table := modeTable(cfg, name)
-		fmt.Fprintf(&out, "%s\n  planning  %s\n  architect %s\n  backend   %s\n  frontend  %s\n  review    %s\n  blocking  %s\n  escalate  up to %s when a correction stalls\n",
+		fmt.Fprintf(&out, "%s\n  planning  %s\n  architect %s\n  backend   %s\n  frontend  %s\n  review    %s\n  ui design %s\n  blocking  %s\n  escalate  up to %s when a correction stalls\n",
 			name, table["scout"], table["design"], table["backend"], table["frontend"], strings.Join(table["review"].([]string), " ∥ "),
-			strings.Join(cfg.Modes[name].Blocking, ", "), table["escalate_to"])
+			table["ui_designer"], strings.Join(cfg.Modes[name].Blocking, ", "), table["escalate_to"])
 	}
+	fmt.Fprintf(&out, "\nbrowser check %s · consultant %s\n", cfg.VisualReviewer, cfg.Consultant)
 	fmt.Fprintf(&out, "\nmodels\n")
 	aliases := make([]string, 0, len(cfg.Models))
 	for alias := range cfg.Models {
@@ -82,12 +83,6 @@ func Modes(cfg *config.Config) string {
 		model := cfg.Models[alias]
 		fmt.Fprintf(&out, "  %-8s %-7s %-22s pool %-7s fallback %s\n", alias, model.Provider, model.Model, model.Pool,
 			strings.Join(cfg.Fallbacks[alias], ", "))
-	}
-	if gaps := cfg.BrowserGaps(); len(gaps) > 0 {
-		fmt.Fprintf(&out, "\nwarnings\n")
-		for _, gap := range gaps {
-			fmt.Fprintf(&out, "  %s\n", gap)
-		}
 	}
 	return out.String()
 }

@@ -26,8 +26,9 @@ first:
   {"update": "The user asked for heavy after the review found a race", "mode": "heavy"}
   ```
 
-  Accepted stages keep the mode they ran in. Heavy and ultra need an accepted architecture
-  (`agentgate architecture`, the `inputs` page) before their writers start.
+  Accepted stages keep the mode they ran in. A mode with architects (`agentgate modes`: medium, heavy and
+  ultra by default) needs an accepted architecture (`agentgate architecture`, the `inputs` page) before its
+  writers start.
 
 When a flag or the plan sets a mode below what the assessment gives, `because` says so with the risks: tell
 the user what the lower mode leaves out.

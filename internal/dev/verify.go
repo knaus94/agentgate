@@ -522,8 +522,7 @@ func (g *Gate) reassess(cfg *config.Config, quality *qualityInputs, input RunInp
 		position = 0
 	}
 	lane := last.Lanes[position]
-	if lane.Route.Alias == "lead" || lane.Session == "" || slices.Contains(g.authors(), lane.Route.Model) ||
-		slices.Contains(cfg.ReviewersExcluded, lane.Route.Alias) {
+	if lane.Route.Alias == "lead" || lane.Session == "" || slices.Contains(cfg.ReviewersExcluded, lane.Route.Alias) {
 		return false, nil
 	}
 	dir := filepath.Join(g.dir(), fmt.Sprintf("review-%d-%s", g.Iteration, newID()[:8]))

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/knaus94/agentgate/internal/assets"
@@ -53,7 +54,8 @@ type DesignInput struct {
 	Context      []string `json:"context,omitempty"`
 	Revise       string   `json:"revise,omitempty"`
 	Notes        string   `json:"notes,omitempty"`
-	Effort       string   `json:"effort,omitempty"` // medium or high
+	Mode         string   `json:"mode,omitempty"`   // the task's mode: its ui_designer runs; default: the global one
+	Effort       string   `json:"effort,omitempty"` // an effort for this design instead of the route's
 	TimeoutS     int      `json:"timeout_s,omitempty"`
 }
 
@@ -88,10 +90,13 @@ func Design(cfg *config.Config, input DesignInput) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	route := cfg.MustRoute(cfg.UIDesigner)
+	if input.Mode != "" && !slices.Contains(config.ModeNames, input.Mode) {
+		return nil, fmt.Errorf("mode is one of %s", strings.Join(config.ModeNames, ", "))
+	}
+	route := cfg.MustRoute(cfg.UIDesignerFor(input.Mode))
 	if input.Effort != "" {
-		if input.Effort != "medium" && input.Effort != "high" {
-			return nil, errors.New("effort is medium or high")
+		if !slices.Contains(config.Efforts, input.Effort) {
+			return nil, fmt.Errorf("effort is one of %s", strings.Join(config.Efforts, ", "))
 		}
 		route.Effort = input.Effort
 	}

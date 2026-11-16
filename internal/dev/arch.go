@@ -229,13 +229,6 @@ func Architecture(cfg *config.Config, plan *Plan) (any, error) {
 	if err := firstError(errs); err != nil {
 		return nil, fmt.Errorf("architecture incomplete (finished passes are kept; run it again): %w", err)
 	}
-	models := map[string]bool{}
-	for _, lane := range designs {
-		if lane.Route.Model == "" || models[lane.Route.Model] {
-			return nil, errors.New("architecture routes resolved to the same model; configure independent models before accepting the design")
-		}
-		models[lane.Route.Model] = true
-	}
 	receipt.Lanes = designs
 	if mode.Critique {
 		critiques := make([]ArchLane, len(routes))

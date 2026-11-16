@@ -96,10 +96,8 @@ Other configured roles are `sol:medium` for consultation, `astra:medium` for UI 
 the optional browser pass. These are alias-and-effort pairs. The actual provider model identifiers come
 from `models` in the effective configuration.
 
-The profile assigns substantial writing and review to different model identities. The runtime excludes
-any model that authored part of the change, including failed partial writers, previous stages and fallbacks.
-If no eligible reviewer remains, the task reports a routing failure rather than treating self-review as
-independent evidence. Separate aliases pointing to the same model do not satisfy this rule.
+The profile assigns substantial writing and review to different model identities. The tool runs each role on
+the model the profile names; it does not enforce that the reviewer differs from the writer.
 
 All default routes in this profile use Codex. They therefore do not provide cross-provider review, and
 parallel calls may share account limits. Configured [accounts](accounts.md) allow account selection and

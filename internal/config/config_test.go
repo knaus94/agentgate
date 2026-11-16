@@ -62,6 +62,10 @@ func TestBuiltInTableIsValidAndComplete(t *testing.T) {
 	if light := cfg.Modes["light"].Review; len(light) != 1 || light[0].Route != "astra:medium" || len(cfg.Modes["ultra"].Review) != 4 || !cfg.Modes["ultra"].Critique {
 		t.Fatal("light has one reviewer, astra:medium; ultra has four lanes and a critique")
 	}
+	if len(cfg.Fallbacks) != 0 || cfg.VisualReviewer != "astra:high" || cfg.UIDesignerFor("ultra") != "astra:xhigh" || cfg.UIDesignerFor("") != "astra:medium" ||
+		cfg.Modes["heavy"].Backend != "opus:high" || cfg.Modes["heavy"].Frontend != "astra:high" || len(cfg.Modes["medium"].Architecture) != 1 {
+		t.Fatal("the built-in table has no substitutes, astra checks the browser, the designer is set per mode, opus writes the backend of heavy")
+	}
 	route, err := cfg.Route("fable:xhigh")
 	if err != nil || route.Provider != "claude" || route.Pool != "fable" || route.String() != "fable:xhigh" {
 		t.Fatalf("route: %+v %v", route, err)
@@ -71,6 +75,7 @@ func TestBuiltInTableIsValidAndComplete(t *testing.T) {
 			t.Errorf("route %q must be rejected", bad)
 		}
 	}
+	cfg.Fallbacks = map[string][]string{"fable": {"astra", "opus"}}
 	alternates := cfg.Alternates(route)
 	if len(alternates) != 2 || alternates[0].Alias != "astra" || alternates[0].Effort != "xhigh" || alternates[0].SubstitutedFrom != "fable:xhigh" {
 		t.Fatalf("alternates keep the effort and remember what they replace: %+v", alternates)
@@ -125,7 +130,7 @@ func TestSetUnsetAndRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg, _ := Load()
-	if cfg.Modes["heavy"].Backend != "sol:xhigh" || cfg.Models["haiku"].Model != "claude-haiku-5-5" || cfg.Modes["heavy"].Frontend != "opus:high" {
+	if cfg.Modes["heavy"].Backend != "sol:xhigh" || cfg.Models["haiku"].Model != "claude-haiku-5-5" || cfg.Modes["heavy"].Frontend != "astra:high" {
 		t.Fatalf("a set key changes and its siblings stay: %+v", cfg.Modes["heavy"])
 	}
 	before, _ := os.ReadFile(UserPath())
@@ -155,7 +160,7 @@ func TestProjectFileOverridesTheUserFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg, err := Load()
-	if err != nil || cfg.MaxParallel != 3 || cfg.Modes["light"].Backend != "astra:low" || cfg.Modes["light"].Frontend != "sonnet:medium" {
+	if err != nil || cfg.MaxParallel != 3 || cfg.Modes["light"].Backend != "astra:low" || cfg.Modes["light"].Frontend != "sol:high" {
 		t.Fatalf("project values win and merge key by key: %+v %v", cfg, err)
 	}
 	_ = os.WriteFile(ProjectFile, []byte(`{broken`), 0o644)
@@ -291,7 +296,7 @@ func TestProfilesAreLaidUnderTheUsersSettings(t *testing.T) {
 	}
 	_ = Unset("modes.medium.backend")
 	cfg, err = Load()
-	if err != nil || cfg.MaxParallel != 7 || len(cfg.Accounts) != 0 || cfg.Modes["medium"].Backend != "opus:medium" {
+	if err != nil || cfg.MaxParallel != 7 || len(cfg.Accounts) != 0 || cfg.Modes["medium"].Backend != "sol:xhigh" {
 		t.Fatalf("a user profile is loaded, without accounts: %+v %v", cfg, err)
 	}
 	listed := Profiles()

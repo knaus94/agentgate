@@ -27,8 +27,9 @@ passes; `backend`, `frontend` — the writers; `review` — the reviewer lanes, 
 `escalate_to` — the highest effort a stalled correction may reach; `*_timeout_s` — process ceilings. Light has
 one reviewer lane, `astra:medium`; an empty `review` makes the lead the reviewer.
 
-The model that wrote the code never reviews it, whatever the table says: a lane whose model is an author is
-moved to its first independent fallback, and a plan with no independent reviewer is refused before it starts.
+Every role runs on the model the table names, also when that model writes too: which model reviews is the
+user's choice. `reviewers_excluded` is the only exclusion. `ui_designer` may be set per mode
+(`modes.<mode>.ui_designer`); `visual_reviewer` and `consultant` are one each.
 
 `review_rules` add a repository's own instructions to an existing reviewer. The reviewer assesses each rule on
 the files it applies to; a `blocking` rule that is not satisfied keeps a stage open, an `advisory` one is

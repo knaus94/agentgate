@@ -9,41 +9,39 @@ changes with `agentgate config validate`.
 
 ## Invariants before preferences
 
-1. A reviewer cannot use a model that authored any part of the change, including a failed partial writer,
-   a fallback writer, or a writer in an earlier stage. Comparing actual model identities prevents aliases
-   from bypassing this rule. The browser reviewer (`visual_reviewer`) is a reviewer too: a plan with browser
-   verification that no configured route could run is refused at `start` and at `visual {choice}`, and
-   `agentgate config validate` and `agentgate modes` warn about such a mode.
-2. A fallback can spend only the accounts and aliases declared in configuration. Quota exhaustion may
-   trigger an alternate; a successful answer mentioning a rate limit is not an exhaustion event.
+1. Every role runs on the model the table names for it. Which model reviews is the user's choice, also the
+   model that writes the code; `reviewers_excluded` is the only exclusion.
+2. A fallback can spend only the accounts and aliases declared in configuration; the built-in table declares
+   none, so an exhausted limit stops the call until it returns. A successful answer mentioning a rate limit is
+   not an exhaustion event.
 3. Continuing a worker keeps both its provider session identifier and its actual lane directory. Account
    rotation may retry that session within the same provider; if the CLI refuses it, the error is explicit.
    Model substitution is disabled for a resumed session.
 4. The selected effort is explicit. A recheck can be cheaper because it sees a delta; escalation is tied to
    lack of progress rather than to an unsupported claim about a universal best model.
-5. The dashboard and receipts show the actual routes and substitutions, each with its reason: the routed
-   model wrote the code under review, no account of the provider has room (and when one is back), or every
-   account is kept for the lead. Model independence is mandatory; vendor diversity depends on the configured
-   profile and the available fallbacks.
+5. The dashboard and receipts show the actual routes and substitutions, each with its reason: no account of
+   the provider has room (and when one is back), every account is kept for the lead, or the route is kept from
+   review.
 
 ## Mixed-provider defaults
 
 | Role | light | medium | heavy | ultra |
 |---|---|---|---|---|
 | Preparation | sol:medium | sol:medium | sol:medium | sol:medium |
-| Architecture | the plan | the plan | fable:high + astra:high | fable:xhigh + astra:xhigh, cross-critique |
-| Backend writer | sol:medium | opus:medium | opus:high | opus:xhigh |
-| Frontend writer | sonnet:medium | opus:medium | opus:high | opus:xhigh |
-| Architecture and simplicity review | lead | astra:medium, one lane with correctness | fable:high | fable:high |
-| Correctness review | lead | the same lane | astra:high | fable:xhigh + astra:xhigh |
-| Security review | — | — | — | astra:high |
-| Escalation ceiling | high | high | xhigh | max |
+| Architecture | the plan | opus:high | fable:high + astra:high | fable:xhigh + astra:xhigh, cross-critique |
+| Backend writer | sol:high | sol:xhigh | opus:high | opus:xhigh |
+| Frontend writer | sol:high | sol:xhigh | astra:high | astra:xhigh |
+| Architecture and simplicity review | astra:medium, one lane with correctness | opus:high, one lane with correctness | fable:high | fable:high |
+| Correctness review | the same lane | the same lane | opus:high | fable:xhigh + opus:xhigh |
+| Security review | — | — | — | opus:high |
+| UI designer | astra:medium | astra:medium | astra:high | astra:xhigh |
+| Browser check | astra:high | astra:high | astra:high | astra:high |
+| Escalation ceiling | xhigh | xhigh | xhigh | max |
 
-Medium has one review lane that judges correctness, architecture and simplicity together; a second vendor's
-opinion is what heavy pays for ([decision 0009](decisions/0009-review-economics.md)). Heavy and ultra use Opus
-for both implementation domains. The previous table used Astra for frontend work
-and also for correctness review, which conflicted with author independence in mixed tasks. Keeping Fable
-and Astra available as reviewers makes the standard routes coherent before any fallback is needed.
+No route has a fallback: when a provider's limit is exhausted on every account, the call stops and the lead
+pauses the task until it returns. In heavy and ultra a reviewer may be the model that writes part of the code
+(Opus writes the backend and reviews correctness; Astra writes the frontend and checks the browser): that is
+the table's choice, and the tool runs it as configured.
 
 The table intentionally does not encode prices, subscription multipliers or benchmark scores. Those change
 independently of the gate and do not establish the best route for a particular repository. Use observed
@@ -57,7 +55,8 @@ configured. See [Codex](codex.md) and the actual profile in
 [internal/assets/profiles/codex.json](../internal/assets/profiles/codex.json).
 
 A single-provider setup cannot provide cross-vendor review. It can still enforce independent sessions,
-different author/reviewer model identities, current checks and evidence-bound completion. A single-model
+current checks and evidence-bound completion, and different models for writing and review where the profile
+names them. A single-model
 setup is suitable only for a mode configured with `review: []`, where the lead reviews the change.
 
 ## Change a route

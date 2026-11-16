@@ -30,28 +30,6 @@ func TestStreamIdentifiersCannotEscapeStateDirectories(t *testing.T) {
 	}
 }
 
-func TestReviewExcludesFrontendAndSupersededWriters(t *testing.T) {
-	f := newFixture(t)
-	mode := f.cfg.Modes["medium"]
-	mode.Frontend = "astra:medium"
-	f.cfg.Modes["medium"] = mode
-	f.start(f.plan("-m implement both", Stream{Name: "api", Domain: "backend", Files: []string{"a.txt"}},
-		Stream{Name: "ui", Domain: "frontend", Files: []string{"b.txt"}}))
-	gate := Current()
-	if len(gate.Reviews) == 0 {
-		t.Fatal("the change was not reviewed")
-	}
-	for _, lane := range gate.Reviews[0].Lanes {
-		if slices.Contains(gate.authors(), lane.Route.Model) {
-			t.Fatalf("author reviewed its own work: %s", lane.Route.Model)
-		}
-	}
-	gate.Writers = append(gate.Writers, &Writer{Stream: "api", Route: f.cfg.MustRoute("sonnet:medium"), Status: "COMPLETED"})
-	if !slices.Contains(gate.authors(), f.cfg.MustRoute("opus:medium").Model) {
-		t.Fatal("a later writer erased the model that authored the earlier implementation")
-	}
-}
-
 func TestAnInterruptedCorrectionIsRetriedInTheSameRound(t *testing.T) {
 	f := newFixture(t)
 	plan := f.plan("-m fix the content")

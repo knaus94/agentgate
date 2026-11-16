@@ -35,7 +35,8 @@ only on their word, with `resume`.
      mode is below what the facts call for. The mode comes from the assessment; a flag is the user's to type.
      Do not offer the user a choice of modes as a question. Get the authorizations the plan needs: heavy checks, a stand, new
      tests.
-2. **Design**, heavy and ultra only: `agentgate architecture --plan <name>`; the answer shows the designs,
+2. **Design**, in a mode with architects (medium, heavy and ultra by default; `agentgate modes`):
+   `agentgate architecture --plan <name>`; the answer shows the designs,
    the blockers and the plan entry that accepts them.
 3. **Start.** `agentgate start --plan <name>`. A plan from a `plan` request is a proposal: it starts only with
    `--implement`, your statement that the user authorized the implementation.
@@ -95,8 +96,9 @@ your command was not started. `status` shows what runs (`running`) and how the l
   or production operations. Checks are the exact commands in the plan.
 - Commits, pushes and destructive Git need the user's word. An isolated task lands only on it, and a commit
   takes your `message` in the repository's convention. `drop` and `forget` happen only on the user's word.
-- A model that hit its limit is replaced by a configured fallback and reported; the author of the code never
-  reviews it. You never set `CLAUDE_CONFIG_DIR` or `CODEX_HOME` and never change the model table for a task.
+- A model that hit its limit is replaced by its configured fallback, when one is configured, and reported; with
+  none the task cannot go on until the limit returns: `pause` with that reason. You never set
+  `CLAUDE_CONFIG_DIR` or `CODEX_HOME` and never change the model table for a task.
 - Never read or edit the tool's state, never call the design kit's scripts, never parse answers with scripts,
   and never recreate a task to get past a refusal: fix the cause, `amend`, or `pause` with the true reason and
   report INCOMPLETE.

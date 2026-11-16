@@ -2,6 +2,30 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.19.1
+
+The model table the user settled on becomes the built-in one, and the rule that refused a task when a reviewer
+would be the model that writes is gone.
+
+**Changed**
+
+- Every role runs on the model the table names, also when that model writes the code: a review lane, the
+  browser check and a reassessment are no longer moved to a fallback or refused because their model wrote part
+  of the task. `reviewers_excluded` is the only exclusion. Two architects on one model are no longer refused.
+- The built-in table: light writes `sol:high`, reviewed by `astra:medium`; medium has an architect
+  `opus:high`, writes `sol:xhigh`, reviewed by `opus:high`; heavy writes the backend with `opus:high` and the
+  frontend with `astra:high`, reviewed by `fable:high` and `opus:high`; ultra writes with `opus:xhigh` and
+  `astra:xhigh`, reviewed by `fable:high`, `fable:xhigh`, `opus:xhigh` and `opus:high`. The browser check is
+  `astra:high` in every mode. The effort ceiling of light and medium is `xhigh`.
+- The built-in table declares no fallbacks: an exhausted limit stops the call until it returns.
+- Medium has an architecture pass by default: `agentgate architecture` before `start`.
+
+**Added**
+
+- `modes.<mode>.ui_designer`: the UI designer per mode — `astra:medium` in light and medium, `astra:high` in
+  heavy, `astra:xhigh` in ultra. `agentgate design` takes `mode`; `agentgate modes` shows the designer, the
+  browser check and the consultant.
+
 ## 0.19.0
 
 An account for the lead, the limits a model has of its own, and what the sessions on 0.18 showed: the tool's

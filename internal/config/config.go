@@ -34,8 +34,9 @@ type ReviewRule struct {
 }
 
 type Mode struct {
-	Scout                string   `json:"scout"`       // cheap route that gathers the context pack once; empty: the lead's context is enough
-	EscalateTo           string   `json:"escalate_to"` // highest effort a stalled correction or a hard stream may be raised to
+	Scout                string   `json:"scout"`                 // cheap route that gathers the context pack once; empty: the lead's context is enough
+	EscalateTo           string   `json:"escalate_to"`           // highest effort a stalled correction or a hard stream may be raised to
+	UIDesigner           string   `json:"ui_designer,omitempty"` // the designer of new screens in this mode; default: the global ui_designer
 	Architecture         []string `json:"architecture"`
 	Critique             bool     `json:"critique"`
 	ArchitectureTimeoutS int      `json:"architecture_timeout_s"`

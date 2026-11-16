@@ -686,23 +686,25 @@ func TestBrowserScenariosAreDueAtTheirStage(t *testing.T) {
 	}
 }
 
-func TestASubstitutionSaysWhyAndABrowserReviewerWithNoRouteIsRefusedEarly(t *testing.T) {
+func TestAReviewerOnTheWritersModelRunsAsConfigured(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("node is not installed")
 	}
 	f := newFixture(t)
 	f.cfg.VisualReviewer = "opus:medium" // the model that writes medium
-	plan := browserPlan(t, f, Scenario{ID: "list", Screen: "List", State: "filled", Viewport: "1440x900", Role: "operator", Expected: "label"})
-	fallbacks := f.cfg.Fallbacks["opus"]
 	f.cfg.Fallbacks["opus"] = nil
-	f.fails("start", "visual_reviewer opus:medium", func() (any, error) { return Start(f.cfg, plan, "", false, RunInput{}) })
-	f.cfg.Fallbacks["opus"] = fallbacks
+	plan := browserPlan(t, f, Scenario{ID: "list", Screen: "List", State: "filled", Viewport: "1440x900", Role: "operator", Expected: "label"})
 	f.start(plan)
 	stand := VisualInput{URL: "http://localhost:4200/list", Origins: []string{"http://localhost:4200"}}
 	f.do("run", func() (any, error) { return Run(f.cfg, Current(), RunInput{Visual: &stand}) })
-	substitutions := Current().Substitutions
-	if len(substitutions) == 0 || !strings.Contains(substitutions[len(substitutions)-1].Reason, "wrote the code under review") {
-		t.Fatalf("a substitution by authorship says so, not that a limit ran out: %+v", substitutions)
+	var browser provider.Call
+	for _, call := range f.calls {
+		if call.MCP != nil {
+			browser = call
+		}
+	}
+	if browser.Route.Alias != "opus" || len(Current().Substitutions) != 0 || len(Current().VisualRuns) != 1 {
+		t.Fatalf("which model checks the browser is the user's choice, also the model that writes: %+v %+v", browser.Route, Current().Substitutions)
 	}
 }
 
@@ -901,14 +903,13 @@ func TestRouteAndPreviewStartNothing(t *testing.T) {
 	if table := Modes(f.cfg); !strings.Contains(table, "ultra") || !strings.Contains(table, "fallback astra, opus") {
 		t.Fatalf("modes table: %s", table)
 	}
-	// A plan whose reviewer could only be its writer is reported before anything runs.
+	// A reviewer on the model that writes runs as configured: which model reviews is the user's choice.
 	medium := f.cfg.Modes["medium"]
 	medium.Review = []config.Lane{{Axes: []string{"correctness"}, Route: "opus:medium"}}
 	f.cfg.Modes["medium"] = medium
 	f.cfg.Fallbacks["opus"] = nil
-	f.fails("start", "no reviewer independent of the writer", func() (any, error) { return Start(f.cfg, f.plan("-m task"), "", false, RunInput{}) })
-	if Current() != nil || len(f.calls) != 0 {
-		t.Fatal("a plan nobody could review independently must not start a writer")
+	if done := f.start(f.plan("-m task")); done["step"] != StepDone || Current().Reviews[0].Lanes[0].Route.Alias != "opus" {
+		t.Fatalf("a plan reviewed by its writer's model starts and is reviewed by it: %v", done)
 	}
 }
 
@@ -1416,6 +1417,7 @@ func TestPlansMoveToASyncedFolderAndStayUsable(t *testing.T) {
 	}
 
 	// The link itself is not part of any change, and an isolated task still reaches the helper scripts.
+	must(t, json.Unmarshal([]byte(scenarioTable), cfg))
 	f.cfg = cfg
 	plan.Checks = []Check{{Argv: []string{".agentgate/tools/check.sh", "x"}}}
 	if done := f.start(plan); done["step"] != StepDone {

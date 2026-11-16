@@ -480,15 +480,10 @@ func configCommand(rest []string) (any, int, error) {
 		}
 		return info, 0, nil
 	case "validate":
-		cfg, err := config.Load()
-		if err != nil {
+		if _, err := config.Load(); err != nil {
 			return nil, 0, err
 		}
-		out := map[string]any{"valid": true, "configuration": config.UserPath()}
-		if gaps := cfg.BrowserGaps(); len(gaps) > 0 {
-			out["warnings"] = gaps
-		}
-		return out, 0, nil
+		return map[string]any{"valid": true, "configuration": config.UserPath()}, 0, nil
 	case "show":
 	default:
 		return nil, 0, errors.New("usage: agentgate config show|path|init|validate|set <key> <value>|unset <key>|extensions|profiles|profile <name>")

@@ -440,59 +440,25 @@ func Start(cfg *config.Config, plan *Plan, name string, implement bool, input Ru
 	return Run(cfg, gate, input)
 }
 
-// independent refuses a plan whose reviewers could not be independent of its writers: the model that writes a
-// stage and every permitted substitute of a review lane would be the same.
+// independent refuses a plan a review lane of which no configured route may run: the lane and every fallback of it
+// are kept from review by reviewers_excluded. Which model reviews is otherwise the user's choice, also the model
+// that writes.
 func (r *Resolved) independent() error {
 	if !r.Request.Writes() {
 		return nil
 	}
 	cfg := r.Config
-	for index, stage := range r.Plan.Stages {
-		mode := cfg.Modes[r.Modes[index]]
-		var authors []string
-		for _, stream := range stage.Streams {
-			authors = append(authors, writerRoute(cfg, r.Modes[index], stream, 0).Model)
-		}
-		for _, lane := range mode.Review {
+	free := func(route config.Route) bool { return !slices.Contains(cfg.ReviewersExcluded, route.Alias) }
+	for index := range r.Plan.Stages {
+		for _, lane := range cfg.Modes[r.Modes[index]].Review {
 			route := cfg.MustRoute(lane.Route)
-			free := func(route config.Route) bool {
-				return !slices.Contains(authors, route.Model) && !slices.Contains(cfg.ReviewersExcluded, route.Alias)
+			if !free(route) && !slices.ContainsFunc(cfg.Alternates(route), free) {
+				return fmt.Errorf("%s is kept from review by reviewers_excluded and has no fallback that may review; change modes.%s.review before starting",
+					lane.Route, r.Modes[index])
 			}
-			if free(route) || slices.ContainsFunc(cfg.Alternates(route), free) {
-				continue
-			}
-			return fmt.Errorf("stage %q: no reviewer independent of the writer is configured for %s; change modes.%s.review or its fallbacks before starting",
-				stage.Name, lane.Route, r.Modes[index])
 		}
 	}
-	return browserReviewer(cfg, r.Plan, r.writerModels())
-}
-
-// writerModels are the models that write the plan's stages.
-func (r *Resolved) writerModels() []string {
-	var out []string
-	for index, stage := range r.Plan.Stages {
-		for _, stream := range stage.Streams {
-			out = append(out, writerRoute(r.Config, r.Modes[index], stream, 0).Model)
-		}
-	}
-	return out
-}
-
-// browserReviewer refuses an opted-in browser verification that no configured route could run: the visual
-// reviewer and every fallback of it wrote the code, or are kept from review. Found before the work, not after
-// it.
-func browserReviewer(cfg *config.Config, plan *Plan, authors []string) error {
-	if plan.Visual == nil || !plan.Visual.Enabled {
-		return nil
-	}
-	if _, ok := cfg.ReviewerFor(cfg.VisualReviewer, authors); ok {
-		return nil
-	}
-	route, _ := cfg.Route(cfg.VisualReviewer)
-	return fmt.Errorf("browser verification is opted in, but visual_reviewer %s and every fallback of it are the model that writes this plan (%s) "+
-		"or are kept from review; give %s a fallback on another model, or choose another visual_reviewer (`agentgate config set visual_reviewer …`) — "+
-		"the user's settings, on their word", cfg.VisualReviewer, route.Model, route.Alias)
+	return nil
 }
 
 // Run takes every determined step of the task and stops where a person is needed.
@@ -822,7 +788,6 @@ func (g *Gate) accept(cfg *config.Config) (string, error) {
 		// The task ends here: what the last stage's workers did stays readable in the finished task.
 		return g.finish(now)
 	}
-	g.AuthorModels = g.authors()
 	g.Writers, g.Reviews, g.ReviewError, g.Reading = nil, nil, "", nil
 	g.VisualRuns, g.VisualSkip = nil, ""
 	g.Dispositions, g.Resolutions, g.Baselines, g.Disputes = map[string]Disposition{}, map[string]string{}, map[string]int{}, map[string]Dispute{}

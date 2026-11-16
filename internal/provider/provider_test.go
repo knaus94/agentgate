@@ -75,6 +75,8 @@ func setup(t *testing.T) (*config.Config, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Substitution is what these tests exercise: the built-in table declares none.
+	cfg.Fallbacks = map[string][]string{"sol": {"sonnet"}, "sonnet": {"opus", "sol"}}
 	return cfg, root
 }
 
@@ -257,6 +259,7 @@ func TestAnExhaustedAccountHandsOverBeforeTheModelChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	cfg.Fallbacks = map[string][]string{"sol": {"sonnet"}} // the model changes only through a declared substitute
 	probe := func(account config.Account) accounts.Status {
 		return accounts.Status{Account: account, LoggedIn: true, Identity: account.Name, ProbedAt: time.Now().Unix(),
 			Windows: []accounts.Window{{Label: "week", Used: map[string]float64{"main": 10, "second": 40}[account.Name]}}}

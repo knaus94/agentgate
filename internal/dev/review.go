@@ -126,19 +126,6 @@ type laneSpec struct {
 	Route config.Route
 }
 
-// authors are the models whose code is under review; none of them may judge it.
-func (g *Gate) authors() []string {
-	all := slices.Clone(g.AuthorModels)
-	for _, writer := range g.Writers {
-		// Even a failed or superseded writer may have changed the checkout.
-		if writer.Route.Model != "" {
-			all = append(all, writer.Route.Model)
-		}
-	}
-	sort.Strings(all)
-	return slices.Compact(all)
-}
-
 func (g *Gate) reviewPolicy(cfg *config.Config) string {
 	return digest(map[string]any{"lanes": cfg.Modes[g.Mode].Review, "excluded": cfg.ReviewersExcluded, "models": cfg.Models})
 }
@@ -147,12 +134,11 @@ func (g *Gate) independentReview(cfg *config.Config, review Review) bool {
 	if review.Policy != g.reviewPolicy(cfg) {
 		return false
 	}
-	authors := g.authors()
 	for _, lane := range review.Lanes {
 		if lane.Route.Alias == "lead" && len(cfg.Modes[g.Mode].Review) == 0 {
 			continue
 		}
-		if lane.Route.Model == "" || slices.Contains(authors, lane.Route.Model) || slices.Contains(cfg.ReviewersExcluded, lane.Route.Alias) {
+		if lane.Route.Model == "" || slices.Contains(cfg.ReviewersExcluded, lane.Route.Alias) {
 			return false
 		}
 	}
@@ -173,31 +159,29 @@ func (g *Gate) reviewDiversity() map[string]any {
 	sort.Strings(models)
 	sort.Strings(providers)
 	models, providers = slices.Compact(models), slices.Compact(providers)
-	result := map[string]any{"models": models, "providers": providers, "authors_excluded": g.authors()}
+	result := map[string]any{"models": models, "providers": providers}
 	if len(models) > 0 && len(providers) < 2 {
 		result["note"] = "The completed review used one provider; it did not provide cross-provider validation."
 	}
 	return result
 }
 
-// lanes are the reviewer processes of the mode, each on a model that wrote none of the code.
-// reviewerSkip says why a route may not judge this task's code: its model wrote it, or the configuration keeps
-// it from review. "" when it may.
-func (g *Gate) reviewerSkip(cfg *config.Config) func(config.Route) string {
-	authors := g.authors()
+// reviewerSkip says why a route may not judge the code: the configuration keeps it from review. "" when it may.
+// A reviewer runs on the model configured for it, also when that model wrote the code: which model reviews is
+// the user's choice.
+func reviewerSkip(cfg *config.Config) func(config.Route) string {
 	return func(route config.Route) string {
-		switch {
-		case slices.Contains(authors, route.Model):
-			return route.Alias + " (" + route.Model + ") wrote the code under review"
-		case slices.Contains(cfg.ReviewersExcluded, route.Alias):
+		if slices.Contains(cfg.ReviewersExcluded, route.Alias) {
 			return route.Alias + " is kept from review by reviewers_excluded"
 		}
 		return ""
 	}
 }
 
+// lanes are the reviewer processes of the mode.
+
 func (g *Gate) lanes(cfg *config.Config, subs *substitutions) ([]laneSpec, func(config.Route) string, error) {
-	skip := g.reviewerSkip(cfg)
+	skip := reviewerSkip(cfg)
 	var out []laneSpec
 	for _, lane := range cfg.Modes[g.Mode].Review {
 		route := cfg.MustRoute(lane.Route)
@@ -211,7 +195,7 @@ func (g *Gate) lanes(cfg *config.Config, subs *substitutions) ([]laneSpec, func(
 				}
 			}
 			if !replaced {
-				return nil, nil, fmt.Errorf("no reviewer independent of the writer is configured for %s", lane.Route)
+				return nil, nil, fmt.Errorf("%s is kept from review by reviewers_excluded and no fallback of it may review", lane.Route)
 			}
 		}
 		out = append(out, laneSpec{Axes: lane.Axes, Scope: "task", Files: g.scope(), Route: route})
@@ -390,7 +374,7 @@ func (g *Gate) previousLane(cfg *config.Config, spec laneSpec) *LaneRun {
 	for index := range lanes {
 		lane := &lanes[index]
 		if slices.Equal(lane.Axes, spec.Axes) && lane.Scope == spec.Scope && lane.Session != "" &&
-			permittedContinuation(cfg, spec.Route, lane.Route) && !slices.Contains(g.authors(), lane.Route.Model) && !slices.Contains(cfg.ReviewersExcluded, lane.Route.Alias) {
+			permittedContinuation(cfg, spec.Route, lane.Route) && !slices.Contains(cfg.ReviewersExcluded, lane.Route.Alias) {
 			return lane
 		}
 	}

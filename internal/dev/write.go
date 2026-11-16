@@ -493,7 +493,6 @@ func (g *Gate) runWriter(cfg *config.Config, stream Stream, record *Writer, answ
 		Writable: append(append([]string{g.board()}, toolDirs...), caches...), ReadDirs: reads, Env: env}, nil)
 	if used.Model != "" {
 		mu.Lock()
-		g.AuthorModels = append(g.AuthorModels, record.Route.Model, used.Model)
 		record.Route = used
 		if result.Dir != "" {
 			record.Dir = result.Dir

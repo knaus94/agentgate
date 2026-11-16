@@ -48,10 +48,11 @@ changing one of them needs a new pass. Adding a requirement or a stage does not.
 
 ```json
 {"task": "...", "brief": "...", "usage_context": "Roles, frequency, decisions, data", "files": [], "context": [],
- "effort": "medium", "revise": "<design id>", "notes": "Lead notes for the revision"}
+ "mode": "heavy", "revise": "<design id>", "notes": "Lead notes for the revision"}
 ```
 
-Accept only a `READY` design, as `ui {design: "<id>", acceptance}` in the plan; at most two revisions. Exact
+`mode` is the task's mode: its `ui_designer` runs. Accept only a `READY` design, as
+`ui {design: "<id>", acceptance}` in the plan; at most two revisions. Exact
 local edits need no designer: `ui {summary, criteria, preserve}` written by you. Non-visual edits of UI files:
 `ui {skip}`.
 

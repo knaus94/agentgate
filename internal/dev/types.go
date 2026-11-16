@@ -241,7 +241,6 @@ type Gate struct {
 	AutoRounds   int                    `json:"auto_rounds,omitempty"` // corrections opened by the tool since the lead last acted
 	Iteration    int                    `json:"iteration"`             // corrections of the present stage
 	Writers      []*Writer              `json:"writers"`
-	AuthorModels []string               `json:"author_models,omitempty"` // retained across stages and correction routes
 	Reviews      []Review               `json:"reviews"`
 	ReviewError  string                 `json:"review_error,omitempty"`
 	VisualRuns   []VisualRun            `json:"visual_runs,omitempty"`

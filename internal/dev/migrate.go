@@ -47,7 +47,6 @@ type legacyGate struct {
 	HoldReason    string                 `json:"hold_reason"`
 	Iteration     int                    `json:"iteration"`
 	Writers       []*Writer              `json:"writers"`
-	AuthorModels  []string               `json:"author_models"`
 	Reviews       []Review               `json:"reviews"`
 	VisualRuns    []VisualRun            `json:"visual_runs"`
 	VisualSkip    string                 `json:"visual_skip"`
@@ -106,7 +105,7 @@ func migrateState(raw []byte) (*Gate, error) {
 		plan.Brief = strings.TrimSpace(plan.Brief) + "\n\nNotes carried over from the plan's context:\n- " + strings.Join(notes, "\n- ")
 	}
 	gate := &Gate{Version: stateVersion, ID: old.ID, Session: old.Session, Cwd: old.Cwd, Request: old.Request, Plan: plan, Mode: old.Mode,
-		Accepted: old.StageRecords, Round: old.Round, Iteration: old.Iteration, Writers: old.Writers, AuthorModels: old.AuthorModels,
+		Accepted: old.StageRecords, Round: old.Round, Iteration: old.Iteration, Writers: old.Writers,
 		Reviews: old.Reviews, VisualRuns: old.VisualRuns, VisualSkip: old.VisualSkip, Dispositions: old.Dispositions, Resolutions: old.Resolutions,
 		Checks: old.Checks, Baselines: old.Baselines, Corrections: old.Corrections, ContextPack: old.ContextPack, Boost: old.Boost,
 		Worktree: old.Worktree, Branch: old.Branch, Landed: old.Landed, Conflicts: old.Conflicts, Signals: old.Signals, Reported: old.Reported,

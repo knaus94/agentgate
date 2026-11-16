@@ -151,6 +151,9 @@ func (c *Config) validate() error {
 			return fmt.Errorf("config: mode %q timeouts must not be negative", name)
 		}
 		specs = append(specs, mode.Backend, mode.Frontend)
+		if mode.UIDesigner != "" {
+			specs = append(specs, mode.UIDesigner)
+		}
 		if mode.Scout != "" {
 			specs = append(specs, mode.Scout)
 		}

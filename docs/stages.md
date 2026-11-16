@@ -55,8 +55,6 @@ A good stage leaves the declared checks green and is small enough to read in one
   delivered (their writers' summaries and the contracts they left), and the list of later stages, which are
   not theirs to do.
 - **Its own review.** Reviewers see the stage's change, measured from where the previous stage ended.
-  Reviewer independence still excludes models that authored earlier stages or failed partial attempts;
-  starting a new stage does not erase the task's author history.
 - **Kept on acceptance.** The stage's reviews, findings, decisions and check receipts are archived with the
   task, so the history of one stage is not overwritten by the next. The record of the stage is its writers'
   own summary, not prose written afterwards.

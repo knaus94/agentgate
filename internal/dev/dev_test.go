@@ -30,6 +30,9 @@ type fixture struct {
 	model func(kind string, packet map[string]any, call provider.Call) (string, error)
 }
 
+// scenarioTable is the routing the scenarios exercise: the built-in table of 0.19.0.
+const scenarioTable = `{"fallbacks":{"fable":["astra","opus"],"opus":["fable","astra","sonnet"],"sonnet":["opus","sol"],"sol":["sonnet"],"astra":["fable","opus"]},"ui_designer":"opus:medium","visual_reviewer":"astra:medium","modes":{"light":{"scout":"","architecture":[],"critique":false,"backend":"sol:medium","frontend":"sonnet:medium","review":[{"axes":["correctness","architecture","simplicity"],"route":"astra:medium"}],"blocking":["P0","P1"],"escalate_to":"high"},"medium":{"scout":"sol:medium","architecture":[],"critique":false,"backend":"opus:medium","frontend":"opus:medium","review":[{"axes":["correctness","architecture","simplicity"],"route":"astra:medium"}],"blocking":["P0","P1"],"escalate_to":"high"},"heavy":{"scout":"","architecture":["fable:high","astra:high"],"critique":false,"architecture_timeout_s":900,"reviewer_timeout_s":1200,"backend":"opus:high","frontend":"opus:high","review":[{"axes":["architecture","simplicity"],"route":"fable:high"},{"axes":["correctness"],"route":"astra:high"}],"blocking":["P0","P1","P2"],"escalate_to":"xhigh"},"ultra":{"scout":"","architecture":["fable:xhigh","astra:xhigh"],"critique":true,"architecture_timeout_s":1800,"writer_timeout_s":3600,"reviewer_timeout_s":1800,"backend":"opus:xhigh","frontend":"opus:xhigh","review":[{"axes":["architecture","simplicity"],"route":"fable:high"},{"axes":["correctness"],"route":"fable:xhigh"},{"axes":["correctness"],"route":"astra:xhigh"},{"axes":["security"],"route":"astra:high"}],"blocking":["P0","P1","P2"],"escalate_to":"max"}}}`
+
 var packetPath = regexp.MustCompile(`(/\S+\.json)`)
 
 func newFixture(t *testing.T) *fixture {
@@ -59,6 +62,9 @@ func newFixture(t *testing.T) *fixture {
 	cfg, err := config.Load()
 	must(t, err)
 	// The fixtures exercise the lead's own review in light mode: the configuration that has it is review: [].
+	// The scenarios were written for this table, not for whatever the built-in one is at the time: escalation from
+	// medium effort, substitutes between providers, opus writing medium.
+	must(t, json.Unmarshal([]byte(scenarioTable), cfg))
 	light := cfg.Modes["light"]
 	light.Review = nil
 	cfg.Modes["light"] = light

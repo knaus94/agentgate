@@ -18,7 +18,7 @@ The archive includes source, documentation, SHA-256 checksums, and binaries for 
 After extracting it:
 
 ```sh
-cd agentgate-0.19.0
+cd agentgate-0.19.1
 sh scripts/install-local.sh --lead both
 agentgate setup doctor
 agentgate config validate
@@ -81,8 +81,7 @@ inspects an existing change; `--fix` adds write authority.
 | Accept | A stage, and then the task, is accepted in the same run once everything it requires is current | Passing checks, a current review, due requirements verified |
 
 A failure before the task began is diagnostic evidence, not permission to ignore later failures. Changing a
-file, the plan's contract or required evidence makes stale exactly what it touches. An author model cannot
-review its own work, including earlier stages and partially failed attempts. The plan can be amended at any
+file, the plan's contract or required evidence makes stale exactly what it touches. The plan can be amended at any
 step without losing the task. [Why it works this way](docs/decisions/README.md).
 
 ## Commands organized around the work
@@ -124,14 +123,13 @@ Pipes, redirected input and `TERM=dumb` produce one snapshot instead of an inter
 
 | Mode | Typical scope | Architecture | Review | Blocking severities |
 |---|---|---|---|---|
-| light `-l` | Small, low-risk change | Lead | One independent reviewer, `astra:medium` | P0–P1 |
-| medium `-m` | Ordinary implementation | The plan | One independent reviewer: correctness, architecture, simplicity | P0–P1 |
+| light `-l` | Small, low-risk change | The plan | One reviewer, `astra:medium` | P0–P1 |
+| medium `-m` | Ordinary implementation | One architect, `opus:high` | One reviewer, `opus:high`: correctness, architecture, simplicity | P0–P1 |
 | heavy `-h` | Named risk or complex uncertain work | Two independent proposals | Separate architecture and correctness lanes | P0–P2 |
 | ultra `-x` | Severe or irreversible risk | Proposals and cross-critique | Additional correctness and security lanes | P0–P2 |
 
-With no flag, the recorded assessment selects a mode deterministically. A flag, or `mode` in the plan, takes precedence. The mixed
-profile keeps implementation models separate from the Fable/Astra review routes; a Codex-only profile is
-also included. These are editable starting configurations, not universal performance rankings.
+With no flag, the recorded assessment selects a mode deterministically. A flag, or `mode` in the plan, takes precedence. Every role
+runs on the model the table names, without substitutes by default; a Codex-only profile is also included. These are editable starting configurations, not universal performance rankings.
 [Routing policy](docs/model-selection.md) · [Mode rules](docs/modes.md).
 
 ```sh

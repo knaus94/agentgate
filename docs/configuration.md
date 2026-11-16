@@ -114,11 +114,9 @@ agentgate config set models.custom '{"provider":"codex","model":"your-enabled-mo
 agentgate config set modes.light.backend custom:medium
 ```
 
-For a single-provider setup, every active route and fallback must resolve to a model on that provider.
-With model review enabled, keep a reviewer model that has not authored any of the task's implementation.
-Two aliases for the same model do not create independence. The Codex profile supplies such routes; a
-Claude-only setup can use a personal profile. See [model routing](model-selection.md) for the exact
-independence policy and defaults.
+For a single-provider setup, every active route and fallback must resolve to a model on that provider. The
+Codex profile supplies such routes; a Claude-only setup can use a personal profile. See
+[model routing](model-selection.md) for the defaults.
 
 ## Routes and review
 
@@ -143,10 +141,8 @@ Modes are `light`, `medium`, `heavy` and `ultra`. Review axes are `correctness`,
 see [extensions](extensions.md).
 
 `reviewers_excluded` lists aliases forbidden from reviewing. The default excludes `sol` as a routing
-policy, not as a benchmark claim. At execution time the runtime also excludes every actual model that
-wrote any part of the task, including frontend work, failed partial work, fallback writers and earlier
-stages. This applies to alternate reviewers as well. If no independent route remains, review fails
-explicitly; configuration validation cannot predict every future combination of authors and fallbacks.
+policy, not as a benchmark claim. Otherwise every reviewer runs on the model the table names, also when that
+model writes part of the task: which model reviews is the user's choice.
 
 ## Fallbacks
 
@@ -154,12 +150,13 @@ explicitly; configuration validation cannot predict every future combination of 
 {"fallbacks":{"fable":["astra","opus"],"astra":["fable","opus"],"sol":["sonnet"]}}
 ```
 
-This example overrides those three lists and preserves other fallback keys from lower layers. A fallback
+The built-in table declares no fallbacks: an exhausted limit stops the call until it returns. This example
+adds three lists and preserves other fallback keys from lower layers. A fallback
 list names configured aliases in retry order. It cannot contain its own alias or duplicate entries.
 
 After a recognized quota refusal, routing first tries other eligible accounts for the same model, then
 the declared aliases at the same effort. Accounts already known to lack capacity are skipped. A reviewer
-candidate that authored the implementation or is excluded from review is skipped too. Substitutions are
+candidate excluded from review is skipped too. Substitutions are
 recorded in task results. Authentication, configuration, protocol and ordinary execution errors do not
 trigger a model switch.
 

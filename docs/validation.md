@@ -4,6 +4,20 @@ This record distinguishes live integrations from controlled provider fixtures an
 model quality, arbitrary specification size or every possible execution environment. It has two parts: what
 was run for the 0.16.0 source, and the release validation of 0.14.0, which is kept as it was written.
 
+## 0.19.1
+
+Checked on 2026-11-16 against `fc7db9f` (0.19.0).
+
+| Check | Actual result |
+|---|---|
+| `make check`: `gofmt`, `go vet ./...`, `go test -race ./...`, Node core suite | PASS |
+| Dry run | 109 of 109 promises in 11 scenarios; the harness gives medium no design pass, as its scenarios start from a plan |
+
+The scenario tests now run on the table they were written for (the built-in table of 0.19.0), set by the
+fixture, so they keep testing escalation, substitution and continuation rather than the shipped table; the
+tests of the built-in table check the new one. The test of the removed rule was deleted; two tests that
+asserted its refusals now assert that a reviewer on the writer's model runs as configured. No model was run.
+
 ## 0.19.0
 
 Checked on 2026-11-16 against the source based on `4497e12` (0.18.0). The work came from two plans: an account

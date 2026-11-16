@@ -40,12 +40,14 @@
 | | light | medium | heavy | ultra |
 |---|---|---|---|---|
 | Подготовка | `sol:medium` | `sol:medium` | `sol:medium` | `sol:medium` |
-| Архитекторы | план | план | `fable:high` ∥ `astra:high`, независимо и параллельно | `fable:xhigh` ∥ `astra:xhigh`, затем каждый критикует другой на `high` |
-| Раунд блокеров | — | — | по желанию, один | по желанию, один |
-| Бэкенд | `sol:medium` | `opus:medium` | `opus:high` | `opus:xhigh` |
-| Фронтенд | `sonnet:medium` | `opus:medium` | `opus:high` | `opus:xhigh` |
-| Ревью | одна полоса, `astra:medium`: корректность, архитектура, простота | одна полоса, `astra:medium`: корректность, архитектура, простота | архитектура+простота `fable:high` ∥ корректность `astra:high` | архитектура+простота `fable:high` ∥ корректность `fable:xhigh` ∥ корректность `astra:xhigh` ∥ безопасность `astra:high` |
-| Потолок усилия | `high` | `high` | `xhigh` | `max` |
+| Архитекторы | план | `opus:high` | `fable:high` ∥ `astra:high`, независимо и параллельно | `fable:xhigh` ∥ `astra:xhigh`, затем каждый критикует другой на `high` |
+| Раунд блокеров | — | по желанию, один | по желанию, один | по желанию, один |
+| Бэкенд | `sol:high` | `sol:xhigh` | `opus:high` | `opus:xhigh` |
+| Фронтенд | `sol:high` | `sol:xhigh` | `astra:high` | `astra:xhigh` |
+| Ревью | одна полоса, `astra:medium`: корректность, архитектура, простота | одна полоса, `opus:high`: корректность, архитектура, простота | архитектура+простота `fable:high` ∥ корректность `opus:high` | архитектура+простота `fable:high` ∥ корректность `fable:xhigh` ∥ корректность `opus:xhigh` ∥ безопасность `opus:high` |
+| UI-дизайнер | `astra:medium` | `astra:medium` | `astra:high` | `astra:xhigh` |
+| Браузерная проверка | `astra:high` | `astra:high` | `astra:high` | `astra:high` |
+| Потолок усилия | `xhigh` | `xhigh` | `xhigh` | `max` |
 | Блокирующие уровни | P0, P1 | P0, P1 | P0, P1, P2 | P0, P1, P2 |
 | Объявленные проверки | необязательны | минимум одна на этап либо объяснённый `checks_waiver` | так же | так же |
 | Ревью всего изменения после последнего этапа | при трёх и более этапах | при трёх и более этапах | всегда для плана с этапами | всегда для плана с этапами |

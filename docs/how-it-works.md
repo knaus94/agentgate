@@ -8,7 +8,7 @@
 |---|---|---|
 | Lead | your Claude Code or Codex session | everything a normal session can: your MCP servers, plugins and skills stay available. Its pages — what each need asks, what each command answers — are installed as the skill `agentgate` |
 | Preparation | one read-only model process, resumed on every call | read the repository, ask what only a person can decide, draft the plan and a map of the area |
-| Architect | a fresh model process | heavy and ultra: read the repository, return a design |
+| Architect | a fresh model process | modes with architects (medium, heavy, ultra by default): read the repository, return a design |
 | Writer | a model process per stream, resumed for corrections | edit the files of its stream |
 | Reviewer | a model process that did not write the code, resumed for rechecks | read the patch, return findings and verdicts on the criteria |
 
@@ -270,8 +270,8 @@ The board is read at natural boundaries. It is a note, not an interrupt: a write
 
 Starting a fresh process means re-reading the repository. Continuing a session means sending one message. The
 places where that matters are answers to the preparation worker, answers to writers, corrections and
-rechecks, and those are exactly the ones that repeat. Independence is not lost: a reviewer is still a
-different model from the writer, in a different process, and a first review is always a fresh context.
+rechecks, and those are exactly the ones that repeat. A reviewer is still a different process from the writer,
+on the model the table names for it, and a first review is always a fresh context.
 
 ## Parallelism and pools
 

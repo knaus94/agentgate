@@ -8,18 +8,17 @@ frontend writers, the reviewer lanes, the severities that block and the effort c
   user's file; do it only on their word, never for one task. The `config` page has the layers.
 - **Light mode** has one reviewer, `astra:medium`. A mode whose `review` is `[]` makes you the reviewer
   (`needs: review`).
-- **Limits.** A model whose limit is exhausted is replaced by its first configured fallback (`fallbacks`); the
-  answer reports it in `substitutions`, and the `receipt` at the end lists every substitution. `agentgate
+- **Limits.** A model whose limit is exhausted is replaced by its first configured fallback (`fallbacks`, none
+  by default); the answer reports it in `substitutions`, and the `receipt` at the end lists every substitution.
+  With no fallback the call stops: `pause` with the reason and when the limit returns. `agentgate
   accounts` lists the CLI profiles, each limit by name and when an exhausted one returns. An account "kept
   for the lead" is the user's reservation: no worker runs on it, and a worker with no other account goes
   to its fallback; `accounts unreserve` is theirs to run, not yours. Never set `CLAUDE_CONFIG_DIR` or
   `CODEX_HOME` yourself.
-- **Independence.** The model that wrote the code never reviews it, the browser reviewer included: a lane
-  whose model is an author moves to its first independent fallback, and a plan without an independent
-  reviewer, or with browser verification no configured route could run, is refused before it starts.
-  `agentgate config validate` and `modes` warn per mode.
-- **Substitutions say why**: the routed model wrote the code under review, no account of the provider has
-  room (and when one is back), or every account is kept for the lead. Tell the user the reason as it is.
+- **Who reviews is the table's.** Every role runs on the model configured for it, also the model that writes
+  the code; only `reviewers_excluded` keeps a model from review. The UI designer is set per mode.
+- **Substitutions say why**: no account of the provider has room (and when one is back), every account is kept
+  for the lead, or the route is kept from review. Tell the user the reason as it is.
 - **A started stream keeps its session and its model.** To move the rest of its work to another model, close
   the stream with `done: true` and add a new stream for the rest, in the complete plan through `amend`.
 - **Profiles.** `agentgate config profile codex` makes every worker a Codex model; `config profile default`
