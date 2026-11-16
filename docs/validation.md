@@ -4,6 +4,41 @@ This record distinguishes live integrations from controlled provider fixtures an
 model quality, arbitrary specification size or every possible execution environment. It has two parts: what
 was run for the 0.16.0 source, and the release validation of 0.14.0, which is kept as it was written.
 
+## 0.20.0
+
+Checked on 2026-11-16 against `958ef03` (0.19.2).
+
+| Check | Actual result |
+|---|---|
+| `make check`: `gofmt`, `go vet ./...`, `go test -race ./...`, Node core suite | PASS |
+| Dry run | 144 of 144 promises in 12 scenarios |
+| The new `design` scenario | 30 of 30 through the real binary and sandbox: a heavy pass of two designs and the closing round, a start held by an unanswered question and by another answer, a revision on the answer, a revision in the middle of a task with `plan_changes`, `amend {architecture}`, the `performance` axis on the correctness lane only |
+| The same scenario on 0.19.2 | stops at its first step: the plan's `load` is an unknown field |
+
+Tests adapted to the closing round and the new acceptance: heavy and ultra passes, the accepted design a writer
+receives, the saved plan, project rules. New: the architect's question holds the start and another answer goes
+back to it; a design is revised in the middle of a task; load facts reach the workers and add the axis.
+
+**A live run on the cheapest routes**, asked for by the maintainer: every role on `sonnet:low` or `sol:low`,
+an isolated configuration and state, a repository of five small files, eleven model calls.
+
+| Step | Observed |
+|---|---|
+| `prepare` | found the full scans of the existing code and the 15-second poll, and returned `BLOCKED` with two questions: the size of the largest case and the time allowed. With the answers: `READY`, `assessment.load` filled with the numbers and their sources, the measurement named in `setup` |
+| `architecture`, two architects with critique | both providers accepted the design schema; each design listed three alternatives; one critique raised a blocker; the closing round answered it under its id as resolved and took over the other design's question |
+| `start` with another answer | refused, naming the revision |
+| `architecture {revise, answers, notes}` with a doubt of the user | the architect agreed, replaced its mechanism, listed the rejected alternatives, asked one new question and returned four `plan_changes` |
+| `start` | found a defect: applying the architect's own `plan_changes` — a file leaves the stream — unbound its receipt, because a one-stage plan was bound to its files. Fixed, with the binding of 0.19 still accepted |
+| `start` after the fix | the writer built the revised design; the check passed; the reviewer reported `correctness`, `architecture`, `simplicity` and `performance` |
+
+Spent: about 105k fresh, 337k cached and 11k output tokens on Codex, and about 112k cache-write, 155k
+cache-read and 14k output tokens on Claude; the worker account's weekly meter stayed at 0%. In that run the
+closing round took 21 s of a 127 s pass. The run also showed the preparation worker writing a mechanism into a
+requirement, which the revision then had to reword; its instructions now forbid that.
+
+Not checked on models: a revision in the middle of a task and `amend {architecture}` (covered by the dry run
+and a test), ultra and heavy on their own models, and the lead's side of the guide.
+
 ## 0.19.2
 
 Checked on 2026-11-16 against `feade44` (0.19.1).

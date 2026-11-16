@@ -158,6 +158,11 @@ func (f *fixture) fitAxes(answer string, packet map[string]any) string {
 	return string(raw)
 }
 
+// design is an architect's answer: the design text and, when given, the JSON of its questions.
+func design(text, questions string) string {
+	return `{"summary":"design","design":"` + text + `","alternatives":[],"risks":[],"questions":[` + questions + `],"answered":[],"plan_changes":[]}`
+}
+
 func kindOf(call provider.Call) string {
 	switch {
 	case call.Writer:
@@ -209,7 +214,7 @@ func (f *fixture) defaultAnswer(kind string, packet map[string]any) string {
 		if packet["round"] == "critique" {
 			return `{"summary":"critique","agreements":"sound","blockers":[]}`
 		}
-		return `{"summary":"design","design":"keep the contract","risks":[],"open_questions":[]}`
+		return design("keep the contract", "")
 	}
 	if packet["axes"] == nil { // the reviewer is asked to reassess the criteria only
 		raw, _ := json.Marshal(map[string]any{"quality": fixtureQuality(packet)})
@@ -656,11 +661,14 @@ func TestHeavyNeedsAcceptedArchitecture(t *testing.T) {
 	plan := f.plan("-h change the contract")
 	f.fails("start", "architecture", func() (any, error) { return Start(f.cfg, plan, "", false, RunInput{}) })
 	receipt := f.do("architecture", func() (any, error) { return Architecture(f.cfg, plan) })
-	if f.count("architecture") != 2 || len(receipt["lanes"].([]any)) != 2 {
-		t.Fatalf("heavy runs two independent designs: %v", receipt)
+	if f.count("architecture") != 3 || len(receipt["lanes"].([]any)) != 3 || receipt["follows"] != "final by fable:high" {
+		t.Fatalf("heavy runs two independent designs and the first architect closes them into one: %v", receipt)
+	}
+	if closing := f.calls[2]; closing.Resume == "" || closing.Route.Alias != "fable" {
+		t.Fatalf("the closing round continues the first architect's session: %+v", closing.Route)
 	}
 	f.do("architecture", func() (any, error) { return Architecture(f.cfg, plan) })
-	if f.count("architecture") != 2 {
+	if f.count("architecture") != 3 {
 		t.Fatal("a finished design pass must be reused, not paid for again")
 	}
 	plan.Architecture = &Accepted{ID: receipt["id"].(string), Acceptance: "the first design, with the second one's boundary"}
@@ -672,9 +680,10 @@ func TestHeavyNeedsAcceptedArchitecture(t *testing.T) {
 	if _, err := Resolve(f.cfg, &criteria); err != nil {
 		t.Fatal(err)
 	}
+	criteria.Streams = []Stream{{Name: "core", Domain: "backend", Files: []string{"a.txt", "b.txt"}}}
 	resolved, _ := Resolve(f.cfg, &criteria)
 	if err := resolved.requireArchitecture(); err != nil {
-		t.Fatalf("adding a criterion must not throw an accepted design away: %v", err)
+		t.Fatalf("adding a criterion or a file must not throw an accepted design away: %v", err)
 	}
 	if summary := f.start(plan); summary["mode"] != "heavy" || summary["step"] != StepDone {
 		t.Fatalf("start: %v", summary)
@@ -685,31 +694,42 @@ func TestHeavyNeedsAcceptedArchitecture(t *testing.T) {
 	}
 }
 
-func TestUltraRequiresAnAnswerForEveryBlocker(t *testing.T) {
+func TestUltraClosesBlockersInTheFinalDesignAndTheUserDecidesARejectedOne(t *testing.T) {
 	f := newFixture(t)
 	f.model = func(kind string, packet map[string]any, call provider.Call) (string, error) {
-		if kind == "architecture" && packet["round"] == "critique" {
-			return `{"summary":"critique","agreements":"","blockers":[{"id":"race","evidence":"a.txt:1","remedy":"lock"}]}`, nil
+		switch {
+		case kind == "architecture" && packet["round"] == "critique":
+			return `{"summary":"critique","agreements":"","blockers":[{"id":"race","evidence":"a.txt:1","remedy":"lock"},{"id":"order","evidence":"a.txt:2","remedy":"sort"}]}`, nil
+		case kind == "architecture" && packet["round"] == "final":
+			if raised, _ := json.Marshal(packet["blockers"]); !strings.Contains(string(raised), "astra/race") || strings.Contains(string(raised), "fable/") {
+				t.Errorf("the closing round answers the blockers raised against its own design: %s", raised)
+			}
+			return `{"summary":"final","design":"the design with the lock","alternatives":[],"risks":[],"questions":[],"plan_changes":[],` +
+				`"answered":[{"id":"astra/race","resolved":true,"how":"the write takes the lock"}]}`, nil
 		}
 		return "", nil
 	}
 	plan := f.plan("-x move the money")
 	receipt := f.do("architecture", func() (any, error) { return Architecture(f.cfg, plan) })
-	if f.count("architecture") != 4 {
-		t.Fatalf("ultra runs two designs and two critiques, ran %d", f.count("architecture"))
+	if f.count("architecture") != 5 {
+		t.Fatalf("ultra runs two designs, two critiques and the closing round, ran %d", f.count("architecture"))
 	}
 	sessions := map[string]string{}
 	for _, call := range f.calls[:2] {
 		sessions[call.Dir] = call.Route.Alias
 	}
-	for _, call := range f.calls[2:] {
+	for _, call := range f.calls[2:4] {
 		if call.Resume == "" || sessions[call.Dir] != call.Route.Alias || call.Route.Effort != "high" {
 			t.Fatalf("a critique continues the session of the architect that read the code, one step lower: %+v", call.Route)
 		}
 	}
-	plan.Architecture = &Accepted{ID: receipt["id"].(string), Acceptance: "accepted"}
-	f.fails("start", "blocker", func() (any, error) { return Start(f.cfg, plan, "", false, RunInput{}) })
-	plan.Architecture.Blockers = map[string]string{"fable/race": "resolved by the lock", "astra/race": "same root cause"}
+	if closing := f.calls[4]; closing.Resume == "" || closing.Route.Alias != "fable" || closing.Route.Effort != "xhigh" {
+		t.Fatalf("the first architect closes the pass in its own session at its own effort: %+v", closing.Route)
+	}
+	// A blocker the closing design passed over is not resolved by that silence: the decision is the user's.
+	plan.Architecture = &Accepted{ID: receipt["id"].(string)}
+	f.fails("start", "astra/order", func() (any, error) { return Start(f.cfg, plan, "", false, RunInput{}) })
+	plan.Architecture.Blockers = map[string]string{"astra/order": "The user: the order does not matter here"}
 	f.start(plan)
 	if writer := Current().latest()["core"]; writer.Route.Alias != "opus" || writer.Route.Effort != "xhigh" {
 		t.Fatalf("ultra writes with opus at xhigh by default, never max, got %s", writer.Route.Alias)

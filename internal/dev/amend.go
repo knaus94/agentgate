@@ -272,6 +272,7 @@ type Operations struct {
 	Requirements []RequirementChange `json:"requirements,omitempty"` // requirements added, changed, or moved to the stage they are due at
 	Timeouts     *Timeouts           `json:"timeouts,omitempty"`
 	Design       []DesignChange      `json:"design,omitempty"`
+	Architecture *Accepted           `json:"architecture,omitempty"` // the receipt the task follows from now on, with the user's decisions
 }
 
 // ScopeChange gives a stream more files.
@@ -439,6 +440,9 @@ func (o Operations) apply(current *Plan, present int) (*Plan, error) {
 				*covers = slices.DeleteFunc(*covers, func(id string) bool { return id == change.ID })
 			}
 		}
+	}
+	if o.Architecture != nil {
+		next.Architecture = o.Architecture
 	}
 	if o.Timeouts != nil {
 		if o.Timeouts.WriterS != 0 {

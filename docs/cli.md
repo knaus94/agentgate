@@ -68,7 +68,7 @@ it is invalid. Configuration edits still use `config set`, `unset` and `profile`
 | `prepare` | A read-only worker drafts or revises the plan; the same worker continues with answers and notes |
 | `plan save`, `list`, `show`, `link` | Keep reusable plans in the repository |
 | `route`, `preview` | Mode decision and routes, read-only |
-| `architecture` | Design passes of heavy and ultra |
+| `architecture` | The design pass of a mode with architects; with `{revise, answers, notes}` the architect continues its design |
 | `start [--implement]` | Open a task from a plan and run it |
 | `run` | Write, check, review, correct, accept — until a person is needed |
 | `answer` | Reply to a blocked writer in its own session, then run on |

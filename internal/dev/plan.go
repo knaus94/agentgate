@@ -74,12 +74,13 @@ type Visual struct {
 	Scenarios []Scenario `json:"scenarios,omitempty"`
 }
 
-// Accepted is the lead's acceptance of an architecture receipt.
+// Accepted names the architecture receipt the task follows, with the user's decisions on its design.
 type Accepted struct {
 	ID         string            `json:"id"`
-	Acceptance string            `json:"acceptance"`
-	Base       string            `json:"base,omitempty"`     // model alias of the design the lead builds on; default: the first
-	Blockers   map[string]string `json:"blockers,omitempty"` // blocker id -> how it is resolved or why it is rejected
+	Answers    map[string]string `json:"answers,omitempty"`    // question id -> the user's answer
+	Acceptance string            `json:"acceptance,omitempty"` // what else the user decided about the design, in their words
+	Base       string            `json:"base,omitempty"`       // a receipt of 0.19 or earlier: the alias of the design to follow
+	Blockers   map[string]string `json:"blockers,omitempty"`   // a blocker the architects disagree about -> the user's decision
 }
 
 // Requirement is an observable acceptance criterion.
@@ -126,8 +127,8 @@ type Plan struct {
 	BaseRef          string        `json:"base_ref,omitempty"`   // review and clean: the commit the diff starts from
 	WriterTimeoutS   int           `json:"writer_timeout_s,omitempty"`
 	ReviewerTimeoutS int           `json:"reviewer_timeout_s,omitempty"`
-	Revise           string        `json:"revise,omitempty"`          // architecture only: receipt to revise
-	ReviseBlockers   []string      `json:"revise_blockers,omitempty"` // architecture only: blockers the lead verified
+	Revise           string        `json:"revise,omitempty"`          // 0.19 and earlier; a revision is `architecture` {revise, answers, notes}
+	ReviseBlockers   []string      `json:"revise_blockers,omitempty"` // 0.19 and earlier
 }
 
 // Assessment is what was found in the code. The mode is computed from these facts, not chosen by taste.
@@ -137,6 +138,9 @@ type Assessment struct {
 	Irreversible bool     `json:"irreversible,omitempty"` // hard to undo once shipped
 	Uncertainty  string   `json:"uncertainty,omitempty"`  // low (default) or material
 	Evidence     string   `json:"evidence"`               // the inspected code that supports the facts above
+	// Load sizes a path whose cost grows with data or with how often it runs: what grows and how large, how
+	// often, the time allowed, and where each number comes from. It does not raise the mode.
+	Load string `json:"load,omitempty"`
 }
 
 // Risks are the named reasons that raise the mode.

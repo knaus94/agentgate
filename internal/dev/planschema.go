@@ -17,7 +17,7 @@ func nullable(schema map[string]any) map[string]any {
 var integer = map[string]any{"type": "integer"}
 
 var assessmentSchema = object(map[string]any{"size": enum("trivial", "ordinary", "complex"), "risks": list(enum(Risks...)),
-	"irreversible": boolean, "uncertainty": enum("low", "material"), "evidence": text})
+	"irreversible": boolean, "uncertainty": enum("low", "material"), "evidence": text, "load": nullable(text)})
 
 var streamSchema = object(map[string]any{"name": text, "domain": enum("backend", "frontend"), "files": list(text), "after": list(text),
 	"brief": text, "effort": nullable(enum(config.Efforts...)), "done": boolean})
@@ -52,11 +52,14 @@ var planSchema = object(map[string]any{
 	"rework": list(text),
 })
 
+// questionsSchema is a decision a worker asks the user for: the preparation worker and the architect ask alike.
+var questionsSchema = items(map[string]any{"id": text, "question": text, "options": list(text), "recommended": text})
+
 var prepareSchema = object(map[string]any{
 	"status":    enum("READY", "BLOCKED"),
 	"name":      nullable(text),
 	"summary":   text,
-	"questions": items(map[string]any{"id": text, "question": text, "options": list(text), "recommended": text}),
+	"questions": questionsSchema,
 	"setup":     list(text),
 	// A preparation that needs more of a Figma file than the catalogue it was given asks for it; the tool reads it.
 	"design_requests": items(map[string]any{"node": text, "depth": integer}),

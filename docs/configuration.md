@@ -137,7 +137,7 @@ for a particular model's effort range.
 | `ui_designer`, `visual_reviewer`, `consultant` | Routes for scoped UI design, optional browser review and consultations |
 
 Modes are `light`, `medium`, `heavy` and `ultra`. Review axes are `correctness`, `architecture`, `simplicity`,
-`security` and `design`. Local `review_rules` attach acceptance instructions without granting extra tools;
+`performance`, `security` and `design`. Local `review_rules` attach acceptance instructions without granting extra tools;
 see [extensions](extensions.md).
 
 `reviewers_excluded` lists aliases forbidden from reviewing. The default excludes `sol` as a routing

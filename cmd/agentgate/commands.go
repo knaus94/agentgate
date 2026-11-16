@@ -267,9 +267,26 @@ func run(args arguments) (any, int, error) {
 		gate.Inside(func() { value = dev.Respond(cfg, gate, posted) })
 		return value, 0, nil
 	case "architecture":
-		plan, err := loadPlan()
+		raw, err := args.read()
 		if err != nil {
 			return nil, 0, err
+		}
+		// A plan asks for the pass; {revise, answers, notes} asks the architect of a design to continue it.
+		var keys map[string]json.RawMessage
+		if args.plan == "" && json.Unmarshal(raw, &keys) == nil && keys["revise"] != nil && keys["brief"] == nil {
+			input := dev.ArchitectureInput{}
+			if err := decodeInput(raw, &input); err != nil {
+				return nil, 0, fmt.Errorf("architecture input: %w", err)
+			}
+			value, err := dev.Execute("architecture", func() (any, error) { return dev.ArchitectureRevise(cfg, input) })
+			return value, 0, err
+		}
+		if len(bytes.TrimSpace(raw)) == 0 {
+			return nil, 0, errors.New("architecture needs --plan <name> or --file <path>")
+		}
+		plan := &dev.Plan{}
+		if err := decodeInput(raw, plan); err != nil {
+			return nil, 0, fmt.Errorf("architecture input: %w", err)
 		}
 		value, err := dev.Execute("architecture", func() (any, error) { return dev.Architecture(cfg, plan) })
 		return value, 0, err

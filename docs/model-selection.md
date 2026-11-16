@@ -28,7 +28,7 @@ changes with `agentgate config validate`.
 | Role | light | medium | heavy | ultra |
 |---|---|---|---|---|
 | Preparation | sol:medium | sol:medium | sol:medium | sol:medium |
-| Architecture | the plan | opus:high | fable:high + astra:high | fable:xhigh + astra:xhigh, cross-critique |
+| Architecture | the plan | opus:high | fable:high + astra:high, closed by fable | fable:xhigh + astra:xhigh, cross-critique, closed by fable |
 | Backend writer | sol:high | sol:xhigh | opus:high | opus:xhigh |
 | Frontend writer | sol:high | sol:xhigh | astra:high | astra:xhigh |
 | Architecture and simplicity review | astra:medium, one lane with correctness | opus:high, one lane with correctness | fable:high | fable:high |

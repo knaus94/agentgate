@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -23,21 +24,33 @@ type Issue struct {
 	Remedy   string `json:"remedy"`
 }
 
+// BlockerAnswer is what the closing design does with a blocker raised against it.
+type BlockerAnswer struct {
+	ID       string `json:"id"`
+	Resolved bool   `json:"resolved"`
+	How      string `json:"how"` // how the design resolves it, or the evidence that it is wrong
+}
+
 type archReport struct {
-	Summary       string   `json:"summary"`
-	Design        string   `json:"design,omitempty"`
-	Risks         []Issue  `json:"risks,omitempty"`
-	OpenQuestions []string `json:"open_questions,omitempty"`
-	Blockers      []Issue  `json:"blockers,omitempty"`
-	Agreements    string   `json:"agreements,omitempty"`
+	Summary       string          `json:"summary"`
+	Design        string          `json:"design,omitempty"`
+	Alternatives  []string        `json:"alternatives,omitempty"`
+	Risks         []Issue         `json:"risks,omitempty"`
+	Questions     []Question      `json:"questions,omitempty"`
+	OpenQuestions []string        `json:"open_questions,omitempty"` // a receipt of 0.19 or earlier
+	Answered      []BlockerAnswer `json:"answered,omitempty"`
+	PlanChanges   []string        `json:"plan_changes,omitempty"`
+	Blockers      []Issue         `json:"blockers,omitempty"`
+	Agreements    string          `json:"agreements,omitempty"`
 }
 
 type ArchLane struct {
-	Round   string       `json:"round"` // design, critique or revision
-	Route   config.Route `json:"route"`
-	Session string       `json:"session"`
-	Dir     string       `json:"dir,omitempty"` // where the session lives, so a later round can continue it
-	Report  archReport   `json:"report"`
+	Round   string            `json:"round"` // design, critique, final or revision
+	Route   config.Route      `json:"route"`
+	Session string            `json:"session"`
+	Dir     string            `json:"dir,omitempty"`     // where the session lives, so a later round can continue it
+	Answers map[string]string `json:"answers,omitempty"` // a revision: the user's answers it was given
+	Report  archReport        `json:"report"`
 }
 
 // Receipt is the stored result of an architecture pass or a UI design, bound to the contract it answered.
@@ -82,12 +95,12 @@ func (r *Receipt) save() error {
 }
 
 // fingerprint binds an architecture receipt to what was asked, not to file contents or to how the work is
-// split: source drift after a long pass, a stage added later or an intermediate criterion must not throw
-// the design away.
-func (r *Resolved) fingerprint(rules []reviewRule) string {
+// split: source drift after a long pass, a stage added later, an intermediate criterion or a file a stream
+// turned out to need must not throw the design away. withFiles is the binding of 0.19 and earlier, which also
+// held a one-stage plan to its files.
+func (r *Resolved) fingerprint(rules []reviewRule, withFiles bool) string {
 	parts := map[string]any{"brief": r.Plan.Brief, "ui": r.Plan.UI, "mode": r.Mode}
-	if len(r.Plan.Stages) == 1 {
-		// A task of one stage is designed for exactly its files.
+	if withFiles && len(r.Plan.Stages) == 1 {
 		parts["files"] = r.Plan.Files()
 	}
 	if len(rules) > 0 {
@@ -106,22 +119,139 @@ func (r *Resolved) checkArchitectureContract(fingerprint string) error {
 	if err != nil {
 		return err
 	}
-	if fingerprint != r.fingerprint(rules) {
-		return errors.New("the brief, files, ui, mode or project rules changed since the architecture pass; run it again")
+	if fingerprint != r.fingerprint(rules, false) && fingerprint != r.fingerprint(rules, true) {
+		return errors.New("the brief, ui, mode or project rules changed since the architecture pass: `agentgate architecture` with {revise, notes} " +
+			"lets its architect bring the design to the present contract")
 	}
 	return nil
 }
 
-var designSchema = object(map[string]any{"summary": text, "design": text, "open_questions": list(text),
-	"risks": list(object(map[string]any{"id": text, "evidence": text, "remedy": text}))})
+var issuesSchema = items(map[string]any{"id": text, "evidence": text, "remedy": text})
 
-var critiqueSchema = object(map[string]any{"summary": text, "agreements": text,
-	"blockers": list(object(map[string]any{"id": text, "evidence": text, "remedy": text}))})
+// designSchema is the answer of every round that returns a design: the first one, the closing one and a revision.
+var designSchema = object(map[string]any{"summary": text, "design": text, "alternatives": list(text), "risks": issuesSchema,
+	"questions": questionsSchema, "answered": items(map[string]any{"id": text, "resolved": boolean, "how": text}), "plan_changes": list(text)})
 
-// Architecture runs the mode's design passes. Independent designs run in parallel on different pools;
-// in ultra each architect then looks for blockers in the other's design. A critique and a revision continue
-// the session of the architect that already read the code, instead of paying for that reading again.
+var critiqueSchema = object(map[string]any{"summary": text, "agreements": text, "blockers": issuesSchema})
+
+// pass is one call of `architecture`: the plan it designs for, the receipt it writes and how a round is run.
+type pass struct {
+	cfg      *config.Config
+	resolved *Resolved
+	receipt  *Receipt
+	packet   map[string]any
+	timeout  time.Duration
+	subs     *substitutions
+}
+
+// newPass binds a pass to the plan as it is now. The architect is told what the preparation found — the named
+// risks and the load — and reads the code itself: a prepared map saves an expensive model no reading.
+func newPass(cfg *config.Config, source *Plan) (*pass, error) {
+	resolved, err := Resolve(cfg, source)
+	if err != nil {
+		return nil, err
+	}
+	plan := resolved.Plan
+	ui, err := loadUI(plan)
+	if err != nil {
+		return nil, err
+	}
+	rules, err := loadReviewRules(cfg, plan.Files())
+	if err != nil {
+		return nil, err
+	}
+	timeout := seconds(resolved.ModeConfig().ArchitectureTimeoutS)
+	if timeout == 0 {
+		timeout = seconds(timeoutDefault)
+	}
+	receipt := &Receipt{ID: newID(), Kind: "architecture", Fingerprint: resolved.fingerprint(rules, false), Mode: resolved.Mode}
+	receipt.Dir = filepath.Join(designsDir(), receipt.ID)
+	packet := map[string]any{"brief": plan.Brief, "assessment": plan.Assessment, "requirements": plan.Requirements, "files": plan.Files(),
+		"streams": plan.allStreams(), "context": plan.Context, "ui": ui, "review_rules": rules}
+	if len(plan.Stages) > 1 {
+		packet["stages"] = plan.Stages
+	}
+	return &pass{cfg: cfg, resolved: resolved, receipt: receipt, packet: packet, timeout: timeout, subs: &substitutions{}}, nil
+}
+
+// run is one round of one architect. A round after the first continues the session of the architect that
+// already read the code, instead of paying for that reading again.
+func (p *pass) run(round, name string, route config.Route, extra map[string]any, schema any, from *ArchLane) (ArchLane, error) {
+	body := map[string]any{"round": round}
+	for key, value := range p.packet {
+		body[key] = value
+	}
+	for key, value := range extra {
+		body[key] = value
+	}
+	key := digest(map[string]any{"fingerprint": p.receipt.Fingerprint, "route": route.String(), "body": body})
+	cache := filepath.Join(designsDir(), "cache", key+".json")
+	lane := ArchLane{}
+	if raw, err := os.ReadFile(cache); err == nil && json.Unmarshal(raw, &lane) == nil {
+		return lane, nil // a completed pass of an interrupted run is never paid for twice
+	}
+	dir := filepath.Join(p.receipt.Dir, name)
+	if err := writePacket(filepath.Join(dir, "packet.json"), body); err != nil {
+		return lane, err
+	}
+	tools, toolDirs, toolNote := workerTools(p.cfg, "architect")
+	prompt := assets.Prompt("architecture") + "\nYour round: " + round + ". Read the packet at " + filepath.Join(dir, "packet.json") + ".\n" + toolNote
+	call := provider.Call{Route: route, Prompt: prompt, Dir: dir, Schema: schema, Timeout: p.timeout, MCP: tools, Writable: toolDirs, Persist: true}
+	var result provider.Result
+	var used config.Route
+	err := errors.New("no session to continue")
+	if from != nil && from.Session != "" && dirExists(from.Dir) {
+		again := call
+		again.Dir, again.Resume, again.ReadDirs = from.Dir, from.Session, []string{dir}
+		again.Route = from.Route // the model and the account the session belongs to
+		again.Route.Effort, again.Route.SubstitutedFrom = route.Effort, ""
+		again.Prompt = "Your next round: " + round + ". Its rules are in your first instructions. Read the packet at " +
+			filepath.Join(dir, "packet.json") + " and return JSON matching the schema of this turn.\n" + toolNote
+		if result, used, err = p.subs.invoke(p.cfg, again, nil); err == nil {
+			dir = from.Dir
+		} else if ops.IsCancelled(err) || errors.Is(err, ops.ErrTimeout) {
+			return lane, err
+		}
+	}
+	if err != nil { // nothing to continue, or the session could not be continued: a fresh architect
+		if result, used, err = p.subs.invoke(p.cfg, call, nil); err != nil {
+			return lane, err
+		}
+	}
+	if result.Dir != "" {
+		dir = result.Dir
+	}
+	lane = ArchLane{Round: round, Route: used, Session: result.Session, Dir: dir}
+	if err := decode(result.Answer, &lane.Report); err != nil {
+		return lane, err
+	}
+	if strings.TrimSpace(lane.Report.Summary) == "" {
+		return lane, errors.New("an architecture report came back empty")
+	}
+	for index := range lane.Report.Blockers {
+		lane.Report.Blockers[index].ID = used.Alias + "/" + lane.Report.Blockers[index].ID
+	}
+	_ = writePacket(cache, lane)
+	return lane, nil
+}
+
+// finish stores the receipt and returns it as the lead reads it.
+func (p *pass) finish() (any, error) {
+	p.receipt.Substitutions = p.subs.list
+	if err := p.resolved.checkArchitectureContract(p.receipt.Fingerprint); err != nil {
+		return nil, err
+	}
+	return p.receipt.view(), p.receipt.save()
+}
+
+// Architecture runs the mode's design pass for a plan. Independent designs run in parallel on different pools;
+// in ultra each architect then looks for blockers in the other's design. Two designs are closed by the first
+// architect: it reads the other design and the blockers raised against its own, and returns the one design the
+// task follows. Nobody else chooses between them.
 func Architecture(cfg *config.Config, plan *Plan) (any, error) {
+	if plan.Revise != "" {
+		return nil, errors.New("a revision is its own input: `agentgate architecture` with {revise, answers, notes} (`agentgate reference inputs`)")
+	}
 	resolved, err := Resolve(cfg, plan)
 	if err != nil {
 		return nil, err
@@ -131,167 +261,157 @@ func Architecture(cfg *config.Config, plan *Plan) (any, error) {
 		return map[string]any{"mode": resolved.Mode, "decision": resolved.Decision,
 			"next": "This mode has no architecture pass: the brief is the design. Launch directly."}, nil
 	}
-	limit, err := resolved.Parallelism()
+	p, err := newPass(cfg, plan)
 	if err != nil {
 		return nil, err
 	}
-	ui, err := loadUI(plan)
+	limit, err := p.resolved.Parallelism()
 	if err != nil {
 		return nil, err
-	}
-	rules, err := loadReviewRules(cfg, plan.Files())
-	if err != nil {
-		return nil, err
-	}
-	timeout := seconds(mode.ArchitectureTimeoutS)
-	if timeout == 0 {
-		timeout = seconds(timeoutDefault)
-	}
-	receipt := &Receipt{ID: newID(), Kind: "architecture", Fingerprint: resolved.fingerprint(rules), Mode: resolved.Mode}
-	receipt.Dir = filepath.Join(designsDir(), receipt.ID)
-	subs := &substitutions{}
-	plan = resolved.Plan
-	packet := map[string]any{"brief": plan.Brief, "requirements": plan.Requirements, "files": plan.Files(), "streams": plan.allStreams(), "context": plan.Context, "ui": ui, "review_rules": rules}
-	if len(plan.Stages) > 1 {
-		packet["stages"] = plan.Stages
-	}
-	run := func(round, name string, route config.Route, extra map[string]any, schema any, from *ArchLane) (ArchLane, error) {
-		body := map[string]any{"round": round}
-		for key, value := range packet {
-			body[key] = value
-		}
-		for key, value := range extra {
-			body[key] = value
-		}
-		key := digest(map[string]any{"fingerprint": receipt.Fingerprint, "route": route.String(), "body": body})
-		cache := filepath.Join(designsDir(), "cache", key+".json")
-		lane := ArchLane{}
-		if raw, err := os.ReadFile(cache); err == nil && json.Unmarshal(raw, &lane) == nil {
-			return lane, nil // a completed pass of an interrupted run is never paid for twice
-		}
-		dir := filepath.Join(receipt.Dir, name)
-		if err := writePacket(filepath.Join(dir, "packet.json"), body); err != nil {
-			return lane, err
-		}
-		tools, toolDirs, toolNote := workerTools(cfg, "architect")
-		prompt := assets.Prompt("architecture") + "\nYour round: " + round + ". Read the packet at " + filepath.Join(dir, "packet.json") + ".\n" + toolNote
-		call := provider.Call{Route: route, Prompt: prompt, Dir: dir, Schema: schema, Timeout: timeout, MCP: tools, Writable: toolDirs, Persist: true}
-		var result provider.Result
-		var used config.Route
-		err := errors.New("no session to continue")
-		if from != nil && from.Session != "" && dirExists(from.Dir) {
-			again := call
-			again.Dir, again.Resume, again.ReadDirs = from.Dir, from.Session, []string{dir}
-			again.Route = from.Route // the model and the account the session belongs to
-			again.Route.Effort, again.Route.SubstitutedFrom = route.Effort, ""
-			again.Prompt = "Your next round: " + round + ". Its rules are in your first instructions. Read the packet at " +
-				filepath.Join(dir, "packet.json") + " and return JSON matching the schema of this turn.\n" + toolNote
-			if result, used, err = subs.invoke(cfg, again, nil); err == nil {
-				dir = from.Dir
-			} else if ops.IsCancelled(err) || errors.Is(err, ops.ErrTimeout) {
-				return lane, err
-			}
-		}
-		if err != nil { // nothing to continue, or the session could not be continued: a fresh architect
-			if result, used, err = subs.invoke(cfg, call, nil); err != nil {
-				return lane, err
-			}
-		}
-		if result.Dir != "" {
-			dir = result.Dir
-		}
-		lane = ArchLane{Round: round, Route: used, Session: result.Session, Dir: dir}
-		if err := decode(result.Answer, &lane.Report); err != nil {
-			return lane, err
-		}
-		if strings.TrimSpace(lane.Report.Summary) == "" {
-			return lane, errors.New("an architecture report came back empty")
-		}
-		for index := range lane.Report.Blockers {
-			lane.Report.Blockers[index].ID = used.Alias + "/" + lane.Report.Blockers[index].ID
-		}
-		_ = writePacket(cache, lane)
-		return lane, nil
-	}
-
-	if plan.Revise != "" {
-		return revise(resolved, receipt, run)
 	}
 	routes := make([]config.Route, len(mode.Architecture))
 	for index, spec := range mode.Architecture {
 		routes[index] = cfg.MustRoute(spec)
 	}
+	incomplete := func(err error) error {
+		return fmt.Errorf("architecture incomplete (finished passes are kept; run it again): %w", err)
+	}
 	designs := make([]ArchLane, len(routes))
 	errs := parallel(len(routes), limit, func(index int) (err error) {
-		designs[index], err = run("design", fmt.Sprintf("design-%d", index), routes[index], nil, designSchema, nil)
+		designs[index], err = p.run("design", fmt.Sprintf("design-%d", index), routes[index], nil, designSchema, nil)
 		return err
 	})
 	if err := firstError(errs); err != nil {
-		return nil, fmt.Errorf("architecture incomplete (finished passes are kept; run it again): %w", err)
+		return nil, incomplete(err)
 	}
-	receipt.Lanes = designs
+	p.receipt.Lanes = designs
+	last := &designs[0] // the first architect's session as it stands
+	var against []Issue // blockers raised against the first design
 	if mode.Critique {
 		critiques := make([]ArchLane, len(routes))
 		errs := parallel(len(routes), limit, func(index int) (err error) {
 			other := designs[len(routes)-1-index].Report
 			critic := routes[index]
 			critic.Effort = config.Lower(critic.Effort) // judging one finished design takes less than producing one
-			critiques[index], err = run("critique", fmt.Sprintf("critique-%d", index), critic,
+			critiques[index], err = p.run("critique", fmt.Sprintf("critique-%d", index), critic,
 				map[string]any{"design_under_review": other}, critiqueSchema, &designs[index])
 			return err
 		})
 		if err := firstError(errs); err != nil {
-			return nil, fmt.Errorf("architecture incomplete (finished passes are kept; run it again): %w", err)
+			return nil, incomplete(err)
 		}
-		receipt.Lanes = append(receipt.Lanes, critiques...)
+		p.receipt.Lanes = append(p.receipt.Lanes, critiques...)
+		last, against = &critiques[0], critiques[len(routes)-1].Report.Blockers
 	}
-	receipt.Substitutions = subs.list
-	if err := resolved.checkArchitectureContract(receipt.Fingerprint); err != nil {
-		return nil, err
+	if len(routes) > 1 {
+		final, err := p.run("final", "final", routes[0], map[string]any{"other_design": designs[1].Report, "blockers": against}, designSchema, last)
+		if err != nil {
+			return nil, incomplete(err)
+		}
+		// Every blocker gets exactly one answer, under its own id: an architect may name it without the critic's
+		// alias, and a blocker the closing design passes over in silence is not resolved by that silence.
+		answered := make([]BlockerAnswer, len(against))
+		for index, issue := range against {
+			answered[index] = BlockerAnswer{ID: issue.ID}
+			for _, answer := range final.Report.Answered {
+				if answer.ID == issue.ID || strings.HasSuffix(issue.ID, "/"+answer.ID) {
+					answered[index].Resolved, answered[index].How = answer.Resolved, answer.How
+				}
+			}
+		}
+		final.Report.Answered = answered
+		p.receipt.Lanes = append(p.receipt.Lanes, final)
 	}
-	return receipt.view(), receipt.save()
+	return p.finish()
 }
 
-// revise lets the first architect address the blockers the lead verified. One round only:
-// what is still open after it is a decision for the lead or the user, not another model pass.
-func revise(resolved *Resolved, receipt *Receipt, run func(string, string, config.Route, map[string]any, any, *ArchLane) (ArchLane, error)) (any, error) {
-	plan := resolved.Plan
-	previous, err := loadReceipt(plan.Revise, "architecture")
+// ArchitectureInput asks the architect of a design to continue it: with the user's answers to its questions,
+// or with what the user said about the design.
+type ArchitectureInput struct {
+	Plan    string            `json:"plan,omitempty"` // a saved plan; default: the plan of this session's task
+	Revise  string            `json:"revise"`
+	Answers map[string]string `json:"answers,omitempty"` // question id -> the user's answer
+	Notes   string            `json:"notes,omitempty"`
+}
+
+// ArchitectureRevise continues the session of the architect whose design a receipt accepts. It is how a design
+// changes, before a task and during one: the lead carries the user's words, the architect reworks the design
+// and says what the plan needs. The new receipt is bound to the contract as it is now.
+func ArchitectureRevise(cfg *config.Config, input ArchitectureInput) (any, error) {
+	gate, err := LoadCurrent()
 	if err != nil {
 		return nil, err
 	}
-	if previous.Fingerprint != receipt.Fingerprint {
-		return nil, errors.New("the contract changed since that receipt; run a fresh architecture pass")
+	previous, err := loadReceipt(input.Revise, "architecture")
+	if err != nil {
+		return nil, err
 	}
-	if previous.Revised {
-		return nil, errors.New("this receipt was already revised once; resolve what remains in architecture.blockers")
+	if len(input.Answers) == 0 && strings.TrimSpace(input.Notes) == "" {
+		return nil, errors.New("a revision needs answers {question id: the user's answer} or notes: what the user said about the design")
 	}
-	known := previous.blockers()
-	var chosen []Issue
-	for _, id := range plan.ReviseBlockers {
-		issue, ok := known[id]
-		if !ok {
-			return nil, fmt.Errorf("unknown blocker %q", id)
+	var plan *Plan
+	extra := map[string]any{"notes": input.Notes}
+	switch {
+	case input.Plan != "":
+		path, err := PlanFile(input.Plan)
+		if err != nil {
+			return nil, err
 		}
-		chosen = append(chosen, issue)
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("no saved plan %q: %w", input.Plan, err)
+		}
+		plan = &Plan{}
+		if err := json.Unmarshal(raw, plan); err != nil {
+			return nil, err
+		}
+	case gate != nil && gate.active():
+		plan = gate.Plan
+		var accepted []string
+		for _, record := range gate.Accepted {
+			accepted = append(accepted, record.Name)
+		}
+		extra["task"] = map[string]any{"step": gate.Step, "position": gate.position(), "accepted_stages": accepted}
+	default:
+		return nil, errors.New("no task is open in this session: name the saved plan in `plan`")
 	}
-	if len(chosen) == 0 {
-		return nil, errors.New("revise_blockers lists the blockers the lead verified against the code")
+	base := ""
+	if plan.Architecture != nil && plan.Architecture.ID == previous.ID {
+		base = plan.Architecture.Base
 	}
-	primary := resolved.Config.MustRoute(resolved.ModeConfig().Architecture[0])
-	var designed *ArchLane
-	if len(previous.Lanes) > 0 && previous.Lanes[0].Round == "design" {
-		designed = &previous.Lanes[0]
+	design := previous.accepted(base)
+	if design == nil {
+		return nil, errors.New("that receipt holds no design to revise")
 	}
-	lane, err := run("revision", "revision", primary, map[string]any{"prior": previous.Lanes, "verified_blockers": chosen}, designSchema, designed)
+	var answers []map[string]string
+	for _, question := range design.Report.Questions {
+		if answer, given := input.Answers[question.ID]; given {
+			answers = append(answers, map[string]string{"id": question.ID, "question": question.Question, "recommended": question.Recommended, "answer": answer})
+		}
+	}
+	if len(answers) != len(input.Answers) {
+		var known []string
+		for _, question := range design.Report.Questions {
+			known = append(known, question.ID)
+		}
+		return nil, fmt.Errorf("answers name a question that design does not ask; its questions: %s", strings.Join(known, ", "))
+	}
+	extra["answers"], extra["prior"] = answers, design.Report
+	p, err := newPass(cfg, plan)
 	if err != nil {
 		return nil, err
 	}
-	receipt.Lanes, receipt.Revised = append(previous.Lanes, lane), true
-	if err := resolved.checkArchitectureContract(receipt.Fingerprint); err != nil {
+	mode := p.resolved.ModeConfig()
+	if len(mode.Architecture) == 0 {
+		return nil, fmt.Errorf("%s has no architect: `prepare` with notes revises the plan", p.resolved.Mode)
+	}
+	lane, err := p.run("revision", "revision", cfg.MustRoute(mode.Architecture[0]), extra, designSchema, design)
+	if err != nil {
 		return nil, err
 	}
-	return receipt.view(), receipt.save()
+	lane.Answers, lane.Report.Answered = input.Answers, nil
+	p.receipt.Lanes, p.receipt.Revised = append(previous.Lanes, lane), true
+	return p.finish()
 }
 
 func (r *Receipt) blockers() map[string]Issue {
@@ -304,14 +424,51 @@ func (r *Receipt) blockers() map[string]Issue {
 	return out
 }
 
-// requireArchitecture refuses to start writers before the mode's design is accepted and every blocker has an answer.
+// disputed are the blockers the closing design rejects, in the order they were answered: the architects
+// disagree, so the decision is the user's.
+func (r *Receipt) disputed() []BlockerAnswer {
+	var out []BlockerAnswer
+	for _, lane := range r.Lanes {
+		for _, answer := range lane.Report.Answered {
+			if !answer.Resolved {
+				out = append(out, answer)
+			}
+		}
+	}
+	return out
+}
+
+// open are the questions of a design that still wait for the user: a revision has taken the ones it was given.
+func (lane *ArchLane) open() []Question {
+	out := []Question{}
+	for _, question := range lane.Report.Questions {
+		if _, taken := lane.Answers[question.ID]; !taken {
+			out = append(out, question)
+		}
+	}
+	return out
+}
+
+// recommended says whether the user's answer is the option the design is built on. A client's question tool
+// marks that option in its label, so the mark is not a difference.
+func recommended(answer, option string) bool {
+	plain := func(text string) string {
+		text = strings.ToLower(strings.TrimSpace(text))
+		return strings.TrimRight(strings.TrimSpace(strings.TrimSuffix(text, "(recommended)")), ".")
+	}
+	return plain(answer) == plain(option)
+}
+
+// requireArchitecture refuses to start writers before the mode's design is accepted: every question of the
+// architect has the user's answer, the design is built on those answers, and a blocker the architects
+// disagree about is decided.
 func (r *Resolved) requireArchitecture() error {
 	if len(r.ModeConfig().Architecture) == 0 || r.Request.ReviewFirst() {
 		return nil
 	}
 	accepted := r.Plan.Architecture
-	if accepted == nil || strings.TrimSpace(accepted.Acceptance) == "" {
-		return fmt.Errorf("%s needs an architecture pass: run `agentgate architecture` and add architecture {id, acceptance}", r.Mode)
+	if accepted == nil || accepted.ID == "" {
+		return fmt.Errorf("%s needs an architecture pass: run `agentgate architecture` and add architecture {id} to the plan", r.Mode)
 	}
 	receipt, err := loadReceipt(accepted.ID, "architecture")
 	if err != nil {
@@ -320,40 +477,71 @@ func (r *Resolved) requireArchitecture() error {
 	if err := r.checkArchitectureContract(receipt.Fingerprint); err != nil {
 		return err
 	}
-	if receipt.accepted(accepted.Base) == nil {
+	lane := receipt.accepted(accepted.Base)
+	if lane == nil {
 		return fmt.Errorf("architecture.base %q names no design of that receipt", accepted.Base)
 	}
+	var unanswered, differ []string
+	for _, question := range lane.open() {
+		switch answer := strings.TrimSpace(accepted.Answers[question.ID]); {
+		case answer == "":
+			unanswered = append(unanswered, question.ID)
+		case !recommended(answer, question.Recommended):
+			differ = append(differ, question.ID)
+		}
+	}
+	if len(unanswered) > 0 {
+		return fmt.Errorf("the architect's questions wait for the user: %s. Ask them as written (`agentgate show architecture`), then add "+
+			"architecture.answers {id: answer}", strings.Join(unanswered, ", "))
+	}
+	if len(differ) > 0 {
+		return fmt.Errorf("the design is built on the recommended answers, and the user chose otherwise on %s: `agentgate architecture` with "+
+			"{revise: %q, answers} lets the architect rework it; accept the receipt it returns", strings.Join(differ, ", "), receipt.ID)
+	}
 	var open []string
-	for id := range receipt.blockers() {
-		if strings.TrimSpace(accepted.Blockers[id]) == "" {
-			open = append(open, id)
+	if lane.Round == "design" {
+		// A receipt of 0.19 or earlier, where two designs had no closing round: every blocker needs an answer.
+		for id := range receipt.blockers() {
+			if strings.TrimSpace(accepted.Blockers[id]) == "" {
+				open = append(open, id)
+			}
+		}
+	} else {
+		for _, answer := range receipt.disputed() {
+			if strings.TrimSpace(accepted.Blockers[answer.ID]) == "" {
+				open = append(open, answer.ID)
+			}
 		}
 	}
 	if len(open) > 0 {
-		return fmt.Errorf("say how each blocker is resolved or why it is rejected in architecture.blockers: %s", strings.Join(open, ", "))
+		slices.Sort(open)
+		return fmt.Errorf("the architects disagree about a blocker; record the user's decision in architecture.blockers: %s", strings.Join(open, ", "))
 	}
 	return nil
 }
 
-// accepted returns the one design the task follows: the revision when there was one, otherwise the design
-// the lead chose as its base.
+// accepted returns the one design the task follows: the latest revision, else the design that closed the pass,
+// else the first design. base selects among the designs of a receipt that has no closing round.
 func (r *Receipt) accepted(base string) *ArchLane {
-	var chosen *ArchLane
+	var design, closing *ArchLane
 	for index := range r.Lanes {
 		lane := &r.Lanes[index]
 		switch {
-		case lane.Round == "revision":
-			return lane
-		case lane.Round == "design" && ((chosen == nil && base == "") || lane.Route.Alias == base):
-			chosen = lane
+		case lane.Round == "final" || lane.Round == "revision":
+			closing = lane
+		case lane.Round == "design" && (design == nil && base == "" || lane.Route.Alias == base):
+			design = lane
 		}
 	}
-	return chosen
+	if closing != nil {
+		return closing
+	}
+	return design
 }
 
-// ArchitectureView is an architecture receipt as the lead judges it: every design and critique in readable
-// form, every blocker under its id, and the plan entry that accepts it. It is the receipt the plan accepted,
-// or else the newest of this checkout.
+// ArchitectureView is an architecture receipt as the lead reads it: the design the task follows, the questions
+// it asks the user, every round for the record, and the plan entry that accepts it. It is the receipt the plan
+// accepted, or else the newest of this checkout.
 func ArchitectureView(plan *Plan) (map[string]any, error) {
 	var receipt *Receipt
 	if plan != nil && plan.Architecture != nil {
@@ -386,15 +574,20 @@ func (r *Receipt) view() map[string]any {
 		return out
 	}
 	lanes := []map[string]any{}
-	blockers := map[string]string{}
 	var bases []string
 	for _, lane := range r.Lanes {
 		item := map[string]any{"round": lane.Round, "by": lane.Route.String(), "summary": lane.Report.Summary}
 		if lane.Report.Design != "" {
 			item["design"] = lane.Report.Design
 		}
+		if len(lane.Report.Alternatives) > 0 {
+			item["alternatives"] = lane.Report.Alternatives
+		}
 		if len(lane.Report.Risks) > 0 {
 			item["risks"] = issues(lane.Report.Risks)
+		}
+		if len(lane.Report.Questions) > 0 {
+			item["questions"] = lane.Report.Questions
 		}
 		if len(lane.Report.OpenQuestions) > 0 {
 			item["open_questions"] = lane.Report.OpenQuestions
@@ -402,33 +595,75 @@ func (r *Receipt) view() map[string]any {
 		if len(lane.Report.Blockers) > 0 {
 			item["blockers"] = issues(lane.Report.Blockers)
 		}
+		if len(lane.Report.Answered) > 0 {
+			item["answered"] = lane.Report.Answered
+		}
 		if lane.Report.Agreements != "" {
 			item["agreements"] = lane.Report.Agreements
 		}
 		if lane.Round == "design" {
 			bases = append(bases, lane.Route.Alias)
 		}
-		for _, issue := range lane.Report.Blockers {
-			blockers[issue.ID] = "<how it is resolved, or why it is wrong>"
-		}
 		lanes = append(lanes, item)
 	}
-	base := "<the alias of the design you build on: " + strings.Join(bases, ", ") + ">"
-	if len(bases) == 1 {
-		base = bases[0]
+	out := map[string]any{"id": r.ID, "mode": r.Mode, "lanes": lanes, "substitutions": r.Substitutions, "receipt_file": filepath.Join(r.Dir, "receipt.json")}
+	accept := map[string]any{"id": r.ID}
+	raised := r.blockers()
+	decide := map[string]string{}
+	design := r.accepted("")
+	if design == nil {
+		return out
 	}
-	accept := map[string]any{"id": r.ID, "base": base, "acceptance": "<your amendments to that design; where they differ, they win>"}
-	if len(blockers) > 0 {
-		accept["blockers"] = blockers
+	out["follows"] = design.Round + " by " + design.Route.String()
+	if design.Round == "design" && len(bases) > 1 { // a receipt of 0.19 or earlier
+		accept["base"] = "<the alias of the design the task follows: " + strings.Join(bases, ", ") + ">"
+		for id := range raised {
+			decide[id] = "<how it is resolved, or why it is wrong>"
+		}
 	}
-	return map[string]any{"id": r.ID, "mode": r.Mode, "lanes": lanes, "substitutions": r.Substitutions, "receipt_file": filepath.Join(r.Dir, "receipt.json"),
-		"input": map[string]any{"architecture": accept},
-		"next": "Judge the designs and blockers. Put `input.architecture` into the plan with your acceptance and an answer for every blocker, " +
-			"save it (`plan save`), then `start`; an active task takes it with `amend`."}
+	var disputed []map[string]any
+	for _, answer := range r.disputed() {
+		disputed = append(disputed, map[string]any{"id": answer.ID, "blocker": oneLine(raised[answer.ID].Evidence) + " → " + oneLine(raised[answer.ID].Remedy),
+			"architect": answer.How})
+		decide[answer.ID] = "<the user's decision>"
+	}
+	if len(disputed) > 0 {
+		out["disputed"] = disputed
+	}
+	if len(decide) > 0 {
+		accept["blockers"] = decide
+	}
+	if len(design.Report.PlanChanges) > 0 {
+		out["plan_changes"] = design.Report.PlanChanges
+	}
+	next := "Tell the user the design in a few lines: what it changes and what it rejected (`alternatives`). "
+	if design.Round == "revision" {
+		next = "Tell the user what the architect answered (`summary`) and what changed in the design. "
+	}
+	if questions := design.open(); len(questions) > 0 {
+		answers := map[string]string{}
+		for _, question := range questions {
+			answers[question.ID] = "<the user's answer: an option as written, or their own words>"
+		}
+		out["questions"], accept["answers"] = questions, answers
+		next = "Ask the user every question as it is written: the options and the recommendation are the architect's. "
+	}
+	if len(disputed) > 0 {
+		next += "The architects disagree about `disputed`: give the user both arguments; their decision goes in `blockers`. "
+	}
+	next += "Put `input.architecture` into the plan"
+	if len(design.Report.PlanChanges) > 0 {
+		next += ", and `plan_changes` as the architect worded them"
+	}
+	next += fmt.Sprintf(" (`plan save`), then `start`; an active task takes the same with `amend`. An answer other than the recommended one, and anything else the user says about the design, goes back to the "+
+		"architect, not into the plan: `architecture` with {revise: %q, answers, notes}.", r.ID)
+	out["input"], out["next"] = map[string]any{"architecture": accept}, next
+	return out
 }
 
-// architectureFor is what writers and reviewers receive: one accepted design and the lead's amendments to it.
-// The other design stays in the receipt; handing both to a writer would make it choose between them again.
+// architectureFor is what writers and reviewers receive: the one design the task follows and the user's
+// decisions on it. The other rounds stay in the receipt; handing two designs to a writer would make it choose
+// between them again.
 func architectureFor(plan *Plan) any {
 	if plan.Architecture == nil {
 		return nil
@@ -441,8 +676,14 @@ func architectureFor(plan *Plan) any {
 	if lane == nil {
 		return nil
 	}
+	answers := []map[string]string{}
+	for _, question := range lane.open() {
+		if answer := plan.Architecture.Answers[question.ID]; answer != "" {
+			answers = append(answers, map[string]string{"question": question.Question, "answer": answer})
+		}
+	}
 	return map[string]any{"design": lane.Report.Design, "risks": lane.Report.Risks, "designed_by": lane.Route.String(),
-		"lead_acceptance": plan.Architecture.Acceptance, "blockers": plan.Architecture.Blockers,
-		"rule":        "Follow the design as amended by lead_acceptance. Where they differ, lead_acceptance wins.",
+		"answers": answers, "acceptance": plan.Architecture.Acceptance, "blockers": plan.Architecture.Blockers,
+		"rule":        "Follow the design. `answers`, `acceptance` and `blockers` are the user's decisions on it: where the design says otherwise, they win.",
 		"all_designs": filepath.Join(receipt.Dir, "receipt.json")}
 }

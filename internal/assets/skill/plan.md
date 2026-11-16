@@ -58,7 +58,10 @@ A plan has `streams` or `stages`, not both. Validation reports every problem at 
 - **`assessment`** is required when neither the plan nor the request sets a mode. `size`: `trivial`, `ordinary`, `complex`.
   `risks`: `authorization`, `security`, `money`, `data-integrity`, `concurrency`, `migration`,
   `public-contract` — only what the change really touches. `uncertainty`: `low` or `material`. A stage may
-  carry its own; the mode is computed per stage.
+  carry its own; the mode is computed per stage. `load`, when the change touches a path whose cost grows with
+  data or with how often it runs: what grows and how large, how often, the time allowed, and the source of
+  each number. It does not change the mode; the architect designs for it, writers and reviewers read it in the
+  brief, and the reviewer of correctness also reports the axis `performance`.
 - **`streams[].files`** is what the stream owns: exact repository-relative files (existing or to be created),
   directories written with a trailing slash, and patterns (`*` within a name, `**` across directories). An
   entry that names a directory owns what is inside it: `migrations/*_orders` owns
@@ -88,7 +91,8 @@ A plan has `streams` or `stages`, not both. Validation reports every problem at 
   UI files (`.tsx .jsx .vue .svelte .html .css .scss .sass .less`) are in scope.
 - **`visual`**: `{enabled, reason, scenarios: [{id, screen, state, viewport: "1440x900", role, expected}]}`.
   Browser verification is opt-in and off unless the user asks for it.
-- **`architecture`**: `{id, base?, acceptance, blockers}` — the accepted design of heavy and ultra.
+- **`architecture`**: `{id, answers?, blockers?, acceptance?}` — the design the task follows and the user's
+  decisions on it; see `agentgate reference inputs`.
 - **`design`**: a Figma design a stream implements; see `agentgate reference design`.
 - **`base_ref`** (default `HEAD`): where the diff of a `review` or `clean` request starts. Such a plan may
   leave out `streams`: its scope is whatever differs from the base.
@@ -109,7 +113,7 @@ refused with the advice to stage it; `--single` in the request allows it, `--sta
  "requirements": [{"id": "R3", "stage": "page"}, {"id": "R7", "text": "Expired claims are refused", "method": "check"}],
  "timeouts": {"writer_s": 5400, "reviewer_s": 2400},
  "design": [{"design": "checkout", "set": {"root": "main [data-checkout]"}}, {"add": {"figma": "https://…", "stream": "web"}}],
- "mode": "heavy",
+ "mode": "heavy", "architecture": {"id": "<receipt id>", "answers": {"retention": "30 days"}},
  "authorized": "", "rework": ["api"]}
 ```
 
@@ -122,6 +126,8 @@ refused with the advice to stage it; `--single` in the request allows it, `--sta
   it and no stage after it does.
 - `design`: `add` an entry, or name one (`design`: its screen, name or figma link) with `set` for the fields
   that change, or `remove: true`.
+- `architecture`: the receipt the task follows from now on — a revision the architect returned — with the
+  user's answers. Name in `rework` the streams whose written code the revised design changes.
 - The complete plan: `agentgate show plan` prints it under `result.plan`; send it back changed, with `update`.
 
 - Accepted stages are frozen, and so is every requirement an accepted stage covers. The pass over the whole

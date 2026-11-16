@@ -1079,28 +1079,110 @@ func TestAFailingCheckGoesBackToTheWriterBeforeAnyReviewer(t *testing.T) {
 	}
 }
 
-func TestWritersReceiveOneAcceptedDesign(t *testing.T) {
+func TestTheArchitectAsksTheUserAndWritersFollowItsOneDesign(t *testing.T) {
 	f := newFixture(t)
+	retention := `{"id":"retention","question":"How long are exports kept?","options":["30 days","forever"],"recommended":"30 days"}`
 	f.model = func(kind string, packet map[string]any, call provider.Call) (string, error) {
-		if kind == "architecture" {
-			return `{"summary":"design","design":"design by ` + call.Route.Alias + `","risks":[],"open_questions":[]}`, nil
-		}
-		if kind == "writer" {
+		switch {
+		case kind == "architecture" && packet["round"] == "final":
+			if other, _ := json.Marshal(packet["other_design"]); !strings.Contains(string(other), "design by astra") {
+				t.Errorf("the closing round reads the other design: %s", other)
+			}
+			return design("the closing design", retention), nil
+		case kind == "architecture" && packet["round"] == "revision":
+			if answers, _ := json.Marshal(packet["answers"]); call.Resume == "" || !strings.Contains(string(answers), "How long are exports kept?") ||
+				!strings.Contains(string(answers), "forever") || packet["notes"] != "The user: «and no archive table»" {
+				t.Errorf("a revision continues the architect's session with the user's answers and words: %s", answers)
+			}
+			return design("the design that keeps exports", retention), nil // a repeated question is not asked again
+		case kind == "architecture":
+			return design("design by "+call.Route.Alias, ""), nil
+		case kind == "writer":
 			accepted := packet["architecture"].(map[string]any)
-			if accepted["design"] != "design by astra" || accepted["lead_acceptance"] != "astra's boundary, with one amendment" || accepted["lanes"] != nil {
-				t.Errorf("the writer follows one design as amended by the lead, not both: %v", accepted)
+			if accepted["design"] != "the design that keeps exports" || accepted["acceptance"] != "The user: ship it behind the flag" || accepted["lanes"] != nil {
+				t.Errorf("the writer follows the one design and the user's decisions on it: %v", accepted)
 			}
 		}
 		return "", nil
 	}
 	plan := f.plan("-h change the contract")
 	receipt := f.do("architecture", func() (any, error) { return Architecture(f.cfg, plan) })
-	plan.Architecture = &Accepted{ID: receipt["id"].(string), Acceptance: "astra's boundary, with one amendment", Base: "ghost"}
-	f.fails("start", "names no design", func() (any, error) { return Start(f.cfg, plan, "", false, RunInput{}) })
-	plan.Architecture.Base = "astra"
+	if asked := receipt["questions"].([]any); len(asked) != 1 || asked[0].(map[string]any)["recommended"] != "30 days" {
+		t.Fatalf("the architect's question reaches the lead with its options and recommendation: %v", receipt["questions"])
+	}
+	plan.Architecture = &Accepted{ID: receipt["id"].(string)}
+	f.fails("start", "wait for the user: retention", func() (any, error) { return Start(f.cfg, plan, "", false, RunInput{}) })
+	plan.Architecture.Answers = map[string]string{"retention": "forever"}
+	f.fails("start", "chose otherwise on retention", func() (any, error) { return Start(f.cfg, plan, "", false, RunInput{}) })
+	_, err := PlanSave(f.cfg, plan, "exports")
+	must(t, err)
+	f.fails("architecture", "does not ask", func() (any, error) {
+		return ArchitectureRevise(f.cfg, ArchitectureInput{Plan: "exports", Revise: plan.Architecture.ID, Answers: map[string]string{"ghost": "x"}})
+	})
+	revised := f.do("architecture", func() (any, error) {
+		return ArchitectureRevise(f.cfg, ArchitectureInput{Plan: "exports", Revise: plan.Architecture.ID,
+			Answers: map[string]string{"retention": "forever"}, Notes: "The user: «and no archive table»"})
+	})
+	if revised["questions"] != nil || revised["follows"] != "revision by fable:high" {
+		t.Fatalf("the revision took the answer; nothing waits for the user: %v", revised)
+	}
+	plan.Architecture = &Accepted{ID: revised["id"].(string), Acceptance: "The user: ship it behind the flag"}
 	f.start(plan)
 	if f.count("writer") != 1 {
 		t.Fatal("the writer must have run")
+	}
+}
+
+func TestADesignIsRevisedInTheMiddleOfATask(t *testing.T) {
+	f := newFixture(t)
+	f.model = func(kind string, packet map[string]any, call provider.Call) (string, error) {
+		switch {
+		case kind == "architecture" && packet["round"] == "revision":
+			if task, _ := packet["task"].(map[string]any); task == nil || task["step"] == nil || packet["notes"] != "The user: «will it hold for a large account?»" {
+				t.Errorf("a revision during a task knows where the task stands and what the user said: %v", packet["task"])
+			}
+			return `{"summary":"revised","design":"read only the window","alternatives":["a materialized view: refreshes every account at once"],` +
+				`"risks":[],"questions":[],"answered":[],"plan_changes":["Add a requirement: a refresh reads only the rows of its window"]}`, nil
+		case kind == "writer" && packet["update"] == nil:
+			return `{"status":"BLOCKED","summary":"need a decision","blockers":["Which wording?"],"handoff":"","deviations":[],"disputes":[]}`, nil
+		}
+		return "", nil
+	}
+	plan := f.plan("-h change the contract")
+	receipt := f.do("architecture", func() (any, error) { return Architecture(f.cfg, plan) })
+	plan.Architecture = &Accepted{ID: receipt["id"].(string)}
+	f.start(plan)
+	revised := f.do("architecture", func() (any, error) {
+		return ArchitectureRevise(f.cfg, ArchitectureInput{Revise: plan.Architecture.ID, Notes: "The user: «will it hold for a large account?»"})
+	})
+	if changes := asStrings(revised["plan_changes"]); len(changes) != 1 || !strings.Contains(revised["next"].(string), "plan_changes") {
+		t.Fatalf("the architect says what the plan needs: %v", revised)
+	}
+	f.do("amend", func() (any, error) {
+		return AmendOperations(f.cfg, Current(), Operations{Update: "The architect revised the design for large accounts", Rework: []string{"core"},
+			Architecture: &Accepted{ID: revised["id"].(string)},
+			Requirements: []RequirementChange{{ID: "R1", Text: "A refresh reads only the rows of its window"}}})
+	})
+	if gate := Current(); gate.Plan.Architecture.ID != revised["id"] || len(gate.Plan.Requirements) != 1 {
+		t.Fatalf("the task follows the revised design: %+v", gate.Plan.Architecture)
+	}
+}
+
+func TestLoadFactsReachTheWorkersAndAddThePerformanceAxis(t *testing.T) {
+	f := newFixture(t)
+	f.model = func(kind string, packet map[string]any, _ provider.Call) (string, error) {
+		if kind == "writer" && !strings.Contains(packet["brief"].(string), "## Load\n\n50k participants, refreshed every 15 s, under 2 s") {
+			t.Errorf("the writer reads the load facts in its brief: %v", packet["brief"])
+		}
+		return "", nil
+	}
+	plan := f.plan("-m recount the participants")
+	plan.Assessment.Load = "50k participants, refreshed every 15 s, under 2 s"
+	if done := f.start(plan); done["step"] != StepDone {
+		t.Fatalf("start: %v", done)
+	}
+	if lane := Current().Reviews[0].Lanes[0]; !slices.Equal(lane.Axes, []string{"correctness", "architecture", "simplicity", "performance"}) || len(lane.Reports) != 4 {
+		t.Fatalf("the lane that judges correctness also judges the cost of the path: %v", lane.Axes)
 	}
 }
 
@@ -1165,7 +1247,7 @@ func TestSavedPlanIsReadableAndRunsFromAnotherSession(t *testing.T) {
 	loaded := &Plan{}
 	must(t, json.Unmarshal(raw, loaded))
 	summary := f.do("start", func() (any, error) { return Start(f.cfg, loaded, "contract-change", false, RunInput{}) })
-	if summary["mode"] != "heavy" || summary["step"] != StepDone || f.count("architecture") != 2 {
+	if summary["mode"] != "heavy" || summary["step"] != StepDone || f.count("architecture") != 3 {
 		t.Fatalf("the plan starts without a second design pass: %v", summary)
 	}
 	if foreign := Current().Foreign; len(foreign) != 0 {

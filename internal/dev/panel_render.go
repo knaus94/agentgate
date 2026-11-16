@@ -1,6 +1,7 @@
 package dev
 
 import (
+	"cmp"
 	"fmt"
 	"strings"
 	"time"
@@ -556,7 +557,7 @@ func (m *panel) detail(width, room int) []string {
 		}
 		if accepted := plan.Architecture; accepted != nil {
 			body = append(body, "", " "+p.bold("accepted design"))
-			text("", accepted.Acceptance)
+			text("", cmp.Or(accepted.Acceptance, "receipt "+accepted.ID))
 		}
 	}
 	room = max(1, room-len(head)-1)

@@ -98,6 +98,14 @@ rely on.
   Missing dependencies do not independently change agreed requirements. Assess explicit alternative states
   against the accepted contract. Inspect the supplied viewport/state coverage before making a responsive claim.
 - `security`: trust boundaries, authorization, injection, secrets, data exposure and integrity under abuse.
+- `performance`: the cost of the changed paths at the size the brief's "Load" section states. You have this
+  axis because the plan names such a path. Follow each one through the code it runs, including existing code
+  it calls: a read that grows with history instead of with the window asked for; a filter or an order no index
+  serves; every row rewritten when one changed; a query per item of a list; an unbounded result held in
+  memory; a statement or transaction that cannot finish inside its timeout at that size; a lock held across
+  the slow part. Judge against the stated numbers and against `quality.checks` of kind measurement, not
+  against taste: a finding names the path, the size at which it fails and why. Speed-ups nobody needs at that
+  size are not findings.
 
 ## Simplicity
 

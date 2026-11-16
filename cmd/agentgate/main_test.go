@@ -232,7 +232,7 @@ func TestReferenceDocumentsEveryCommand(t *testing.T) {
 		}
 	}
 	for _, field := range []string{"assessment", "streams", "stages", "covers", "requirements", "checks", "checks_waiver", "baseline", "update", "authorized",
-		"rework", "answers", "notes", "findings", "work", "cause", "escalate", "attachments", "mode", "scope", "timeouts", "recheck", "revise_blockers",
+		"rework", "answers", "notes", "findings", "work", "cause", "escalate", "attachments", "mode", "scope", "timeouts", "recheck", "revise", "plan_changes",
 		"usage_context", "skip_reason"} {
 		if !strings.Contains(reference, field) {
 			t.Errorf("the reference does not document the %q field", field)

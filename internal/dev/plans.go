@@ -216,6 +216,9 @@ func renderBrief(name string, resolved *Resolved, revisions []Revision) string {
 			facts = append(facts, "uncertainty "+assessment.Uncertainty)
 		}
 		line("**Assessment:** %s. %s\n", strings.Join(facts, "; "), strings.TrimSpace(assessment.Evidence))
+		if load := strings.TrimSpace(assessment.Load); load != "" {
+			line("**Load:** %s\n", load)
+		}
 	}
 	line("## Brief\n\n%s\n", strings.TrimSpace(plan.Brief))
 	streams := func(mode string, list []Stream, heading string) {
@@ -320,13 +323,15 @@ func renderBrief(name string, resolved *Resolved, revisions []Revision) string {
 		line("## Accepted architecture\n")
 		line("Receipt `%s`%s.\n\n%s\n", accepted.ID, map[bool]string{true: ", built on the design by " + accepted.Base, false: ""}[accepted.Base != ""],
 			strings.TrimSpace(accepted.Acceptance))
-		ids := make([]string, 0, len(accepted.Blockers))
-		for id := range accepted.Blockers {
-			ids = append(ids, id)
-		}
-		sort.Strings(ids)
-		for _, id := range ids {
-			line("- **%s:** %s", id, accepted.Blockers[id])
+		for _, decided := range []map[string]string{accepted.Answers, accepted.Blockers} {
+			ids := make([]string, 0, len(decided))
+			for id := range decided {
+				ids = append(ids, id)
+			}
+			sort.Strings(ids)
+			for _, id := range ids {
+				line("- **%s:** %s", id, decided[id])
+			}
 		}
 		if lane := architectureLane(plan); lane != "" {
 			line("\n### Design\n\n%s", lane)

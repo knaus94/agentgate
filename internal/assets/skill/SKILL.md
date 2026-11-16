@@ -36,7 +36,7 @@ fields are refused.
 | `prepare` | the request as typed, or `{request, name?, mode?, context?, attachments?, notes?, answers?, fresh?}` | a read-only worker drafts or revises the plan; the same worker continues on every call |
 | `plan save [name]`, `plan list`, `plan show <name>` | plan | keep a plan in `.agentgate/plans/<name>/` with a readable `brief.md` |
 | `route` | plan | the mode, its reasons and the models; starts nothing |
-| `architecture` | plan | the design passes of heavy and ultra |
+| `architecture` | plan, or `{revise, answers, notes}` | the design pass of a mode with architects; the architect continues its design with the user's answers and words |
 | `start [--implement]` | plan | open a task and run it |
 | `run` | `{visual?, recheck?, reviewer_timeout_s?}` or nothing | every determined step, until a person is needed |
 | `answer` | `{stream, answer}` | reply to a blocked writer in its own session, then run on |

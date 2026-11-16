@@ -47,7 +47,7 @@ Every command about the task answers with one object. Read it as it is; do not p
 | `show stage` | `{position, stages, accepted, brief}` |
 | `show checks` | `{checks: [{id, argv, kind, status, returncode, log}], failing}` |
 | `show review` | what to judge in a review and the input to answer it with |
-| `show architecture` | the designs and blockers of the architecture pass and the plan entry that accepts them |
+| `show architecture` | the design the task follows, the questions it asks the user, every round of the pass and the plan entry that accepts it |
 | `show receipt` | the receipt, also before `done` |
 | `check` | `{receipts: [{check, returncode, reused, log}], failed}`; exit 2 when one failed |
 | `tell` | `{posted}` |

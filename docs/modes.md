@@ -41,7 +41,8 @@ of several stages each stage may carry its own assessment and gets its own mode.
 |---|---|---|---|---|
 | Preparation | `sol:medium` | `sol:medium` | `sol:medium` | `sol:medium` |
 | Architects | the plan | `opus:high` | `fable:high` ∥ `astra:high`, independent, in parallel | `fable:xhigh` ∥ `astra:xhigh`, then each critiques the other at `high` |
-| Blocker round | — | optional, once | optional, once | optional, once |
+| Closing round | — | — | the first architect, in its own session: one design out of two | the same, answering every blocker of the critique |
+| Revision | `prepare` with notes | the architect, on the user's answers and remarks, before the task or during it | the same | the same |
 | Backend writer | `sol:high` | `sol:xhigh` | `opus:high` | `opus:xhigh` |
 | Frontend writer | `sol:high` | `sol:xhigh` | `astra:high` | `astra:xhigh` |
 | Review lanes | one lane, `astra:medium`: correctness, architecture, simplicity | one lane, `opus:high`: correctness, architecture, simplicity | architecture+simplicity `fable:high` ∥ correctness `opus:high` | architecture+simplicity `fable:high` ∥ correctness `fable:xhigh` ∥ correctness `opus:xhigh` ∥ security `opus:high` |
@@ -94,9 +95,20 @@ regardless of severity; a finding the lead accepted blocks until it is resolved.
 
 ## Why the design pass is parallel
 
-Design followed by critique is two long model calls in a row. Two independent designs take the time of one, and
-their disagreements show the lead where the real decision is. Ultra adds the critique as a second parallel
-round, because there the cost of a missed blocker is higher than the minutes.
+Design followed by critique is two long model calls in a row. Two independent designs take the time of one.
+Ultra adds the critique as a second parallel round, because there the cost of a missed blocker is higher than
+the minutes. The first architect then closes the pass in its own session: it reads the other design, answers
+every blocker and returns the one design the task follows. Nobody chooses between two texts.
+
+## Who owns the design
+
+The lead coordinates; it does not design. A design asks the user what is theirs to decide as structured
+questions with a recommendation, and is built on the recommended options; `start` waits for the answers, and
+another answer goes back to the architect. What the user says about the design later — a doubt, an alternative,
+a new constraint — goes to the same architect's session, also in the middle of a task: it returns the design as
+it stands, or the evidence that it already holds, and what the plan needs. The plan's `assessment` tells the
+architect the named risks and, for a path whose cost grows with data, the `load` it has to carry; with `load`
+the review lane that judges correctness also reports the axis `performance`.
 
 Design reports are asked to stay near 800 words, and every mode sets its own process ceilings
 (`architecture_timeout_s`, `writer_timeout_s`, `reviewer_timeout_s`): generous in ultra, where `max` effort

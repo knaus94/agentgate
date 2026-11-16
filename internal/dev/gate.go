@@ -25,6 +25,29 @@ func (g *Gate) stage() *Stage {
 	return nil
 }
 
+// load is the load facts of what is built now: the present stage's, or every stage's in the final pass.
+func (g *Gate) load() string {
+	of := func(assessment *Assessment) string {
+		if assessment == nil {
+			assessment = g.Plan.Assessment
+		}
+		if assessment == nil {
+			return ""
+		}
+		return strings.TrimSpace(assessment.Load)
+	}
+	if stage := g.stage(); stage != nil {
+		return of(stage.Assessment)
+	}
+	var all []string
+	for _, stage := range g.Plan.Stages {
+		if load := of(stage.Assessment); load != "" && !slices.Contains(all, load) {
+			all = append(all, load)
+		}
+	}
+	return strings.Join(all, "\n")
+}
+
 // scope is what the present position owns: the stage's entries, or the whole plan's in the final pass.
 func (g *Gate) scope() []string { return g.Plan.scope(g.stageIndex()) }
 
@@ -174,6 +197,9 @@ func (g *Gate) brief() string {
 	plan := g.Plan
 	var out strings.Builder
 	out.WriteString(strings.TrimSpace(plan.Brief))
+	if load := g.load(); load != "" {
+		out.WriteString("\n\n## Load\n\n" + load)
+	}
 	if g.Whole {
 		out.WriteString("\n\n## Integration pass\n\nThe work was written and reviewed stage by stage. This pass reads the whole change for what a " +
 			"review of one stage cannot see: seams between stages, a contract that drifted from one stage to the next, leftovers of an earlier " +
@@ -271,6 +297,9 @@ func (g *Gate) codeContract() string {
 		"architecture": architectureFor(g.Plan), "whole": g.Whole}
 	if stage := g.stage(); stage != nil {
 		parts["goal"], parts["acceptance"] = stage.Goal, stage.Acceptance
+	}
+	if load := g.load(); load != "" {
+		parts["load"] = load
 	}
 	ui, uiError := loadUI(g.Plan)
 	parts["ui_contract"] = ui

@@ -133,7 +133,7 @@ Codex такие маршруты уже заданы; для работы то�
 | `modes.<режим>.architecture_timeout_s`, `.writer_timeout_s`, `.reviewer_timeout_s` | Ограничения процесса в секундах; `0` означает значение среды выполнения; план может переопределить лимиты писателя и ревьюера |
 | `ui_designer`, `visual_reviewer`, `consultant` | Маршруты локального UI-дизайна, необязательной браузерной проверки и консультаций |
 
-Режимы: `light`, `medium`, `heavy`, `ultra`. Оси ревью: `correctness`, `architecture`, `simplicity`,
+Режимы: `light`, `medium`, `heavy`, `ultra`. Оси ревью: `correctness`, `architecture`, `simplicity`, `performance`,
 `security`, `design`. Локальные `review_rules` добавляют инструкции приёмки без выдачи новых инструментов;
 см. [расширения](extensions.md).
 

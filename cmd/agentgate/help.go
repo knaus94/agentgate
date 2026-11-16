@@ -35,7 +35,7 @@ var commandSpecs = []commandSpec{
 	{name: "preview", group: "Lead protocol", summary: "Preview routing and work without starting workers", syntax: "preview [request] [--file <path>|-]", input: true, example: "agentgate preview -- '-m add pagination'"},
 	{name: "prepare", group: "Lead protocol", summary: "Draft or revise a plan with a read-only worker; the same worker continues with answers and notes", syntax: "prepare [--file <path>|-]", input: true},
 	{name: "route", group: "Lead protocol", summary: "Validate a plan and resolve model routing", syntax: "route --file <path>|- | --plan <name>", input: true, plan: true},
-	{name: "architecture", group: "Lead protocol", summary: "Run independent architecture proposals and critiques", syntax: "architecture --file <path>|- | --plan <name>", input: true, plan: true},
+	{name: "architecture", group: "Lead protocol", summary: "Design a plan with the mode's architects, or continue a design with the user's answers and notes", syntax: "architecture --plan <name> | --file <path>|-", input: true, plan: true},
 	{name: "design", group: "Lead protocol", summary: "Prepare or revise an interface specification", syntax: "design --file <path>|-", input: true},
 	{name: "consult", group: "Lead protocol", summary: "Ask read-only consultants scoped questions", syntax: "consult --file <path>|-", input: true},
 	{name: "start", group: "Lead protocol", summary: "Open a task from a plan and run it", syntax: "start --plan <name> | --file <path>|- [--implement]", input: true, plan: true, flags: []string{"implement"}, example: "agentgate start --plan wallet"},

@@ -13,7 +13,7 @@ shape, one validator and one set of rules ([decision 0003](decisions/0003-one-pl
 ```
 plan with stages
    │
-   ├─ design          heavy, ultra: once, for the whole plan; the architects may challenge the split
+   ├─ design          a mode with architects: once, for the whole plan; the architects may challenge the split
    ├─ stage 1         write → checks → review → correct → accept      (a commit, when isolated)
    ├─ stage 2         starts from what stage 1 left; reviewed on its own change only
    ├─ …

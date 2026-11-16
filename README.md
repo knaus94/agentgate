@@ -18,7 +18,7 @@ The archive includes source, documentation, SHA-256 checksums, and binaries for 
 After extracting it:
 
 ```sh
-cd agentgate-0.19.2
+cd agentgate-0.20.0
 sh scripts/install-local.sh --lead both
 agentgate setup doctor
 agentgate config validate
@@ -67,13 +67,15 @@ $dev add rate limiting to the export endpoint          Codex
 A read-only worker prepares the plan and the tool validates all of it before anything starts. From then on
 one command, `agentgate run`, takes every step the state determines and stops only where a person is needed:
 a blocked writer, a finding its author and the reviewer disagree about, an unmet requirement, a correction
-that went nowhere. `--preview` shows intended work. `plan`, `research` and `verify` are read-only. `review`
+that went nowhere. The lead coordinates and does not design: how the change is built is the architect's, the
+user approves it, and what the user says about the design later goes back to the same architect, also in the
+middle of a task. `--preview` shows intended work. `plan`, `research` and `verify` are read-only. `review`
 inspects an existing change; `--fix` adds write authority.
 
 | Step | What happens | Evidence |
 |---|---|---|
 | Prepare | One resumable read-only worker explores, asks, and drafts a typed plan | A plan validated as a whole, every problem named at once |
-| Design (heavy, ultra) | Independent architecture proposals and critiques | The accepted design |
+| Design (medium and above) | An architect designs the change and asks the user what is theirs to decide; two architects are closed into one design | The design the task follows, with the user's answers |
 | Write | Disjoint streams, dependency waves and bounded parallelism | Structured reports and a file ownership audit |
 | Check | Declared commands run before any reviewer | Exit code and log, bound to the tree they ran against |
 | Review | A separate model reads one patch and judges the criteria | Findings and verdicts bound to content and contract |
@@ -125,8 +127,8 @@ Pipes, redirected input and `TERM=dumb` produce one snapshot instead of an inter
 |---|---|---|---|---|
 | light `-l` | Small, low-risk change | The plan | One reviewer, `astra:medium` | P0–P1 |
 | medium `-m` | Ordinary implementation | One architect, `opus:high` | One reviewer, `opus:high`: correctness, architecture, simplicity | P0–P1 |
-| heavy `-h` | Named risk or complex uncertain work | Two independent proposals | Separate architecture and correctness lanes | P0–P2 |
-| ultra `-x` | Severe or irreversible risk | Proposals and cross-critique | Additional correctness and security lanes | P0–P2 |
+| heavy `-h` | Named risk or complex uncertain work | Two independent proposals, closed into one design | Separate architecture and correctness lanes | P0–P2 |
+| ultra `-x` | Severe or irreversible risk | Proposals, cross-critique, one closing design | Additional correctness and security lanes | P0–P2 |
 
 With no flag, the recorded assessment selects a mode deterministically. A flag, or `mode` in the plan, takes precedence. Every role
 runs on the model the table names, without substitutes by default; a Codex-only profile is also included. These are editable starting configurations, not universal performance rankings.

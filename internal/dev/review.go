@@ -200,6 +200,15 @@ func (g *Gate) lanes(cfg *config.Config, subs *substitutions) ([]laneSpec, func(
 		}
 		out = append(out, laneSpec{Axes: lane.Axes, Scope: "task", Files: g.scope(), Route: route})
 	}
+	// A path whose cost grows with data is also judged for that cost, by the lane that judges correctness.
+	if g.load() != "" && !slices.ContainsFunc(out, func(lane laneSpec) bool { return slices.Contains(lane.Axes, "performance") }) {
+		for index := range out {
+			if slices.Contains(out[index].Axes, "correctness") {
+				out[index].Axes = append(slices.Clone(out[index].Axes), "performance")
+				break
+			}
+		}
+	}
 	// The design is judged by eye by a model that did not write the code: the first lane takes it along.
 	if len(g.designs()) > 0 && len(out) > 0 {
 		out[0].Axes = append(slices.Clone(out[0].Axes), "design")

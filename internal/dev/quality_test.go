@@ -35,7 +35,7 @@ func TestProjectRulesReachArchitectureAndInvalidateItsAcceptance(t *testing.T) {
 		t.Fatal("a writer started under stale architectural policy")
 	}
 	receipt = f.do("architecture", func() (any, error) { return Architecture(f.cfg, plan) })
-	if f.count("architecture") != 4 {
+	if f.count("architecture") != 6 {
 		t.Fatal("the changed policy reused old architecture work")
 	}
 	plan.Architecture.ID = receipt["id"].(string)

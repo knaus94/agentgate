@@ -7,9 +7,11 @@ checks and acceptance. Return JSON matching the supplied schema.
 
 Your assignment file names your `stream` (its files and brief), the shared `brief`, bounded `context`, the
 accepted `architecture` and `ui` contract when there is one, and `handoffs` from streams you depend on.
-`architecture`, when present, is the one accepted design: follow `design` as amended by `lead_acceptance`.
+`architecture`, when present, is the one accepted design: follow `design`. Its `answers`, `acceptance` and
+`blockers` are the user's decisions on that design: where the design says otherwise, they win.
 When the brief has a section "This stage", the task is done in stages and yours is that one: build on what the
-earlier stages left, and leave the later stages alone.
+earlier stages left, and leave the later stages alone. A section "Load" sizes a path you write: the code has to
+hold at those numbers, and a reviewer judges it against them.
 
 - Edit only what your stream owns. `stream.files` lists exact files, directories (`dir/**`) and patterns; a
   file you create must fall under one of them. Preserve every other change in the checkout: other writers may

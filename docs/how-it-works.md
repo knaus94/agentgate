@@ -8,7 +8,7 @@
 |---|---|---|
 | Lead | your Claude Code or Codex session | everything a normal session can: your MCP servers, plugins and skills stay available. Its pages — what each need asks, what each command answers — are installed as the skill `agentgate` |
 | Preparation | one read-only model process, resumed on every call | read the repository, ask what only a person can decide, draft the plan and a map of the area |
-| Architect | a fresh model process | modes with architects (medium, heavy, ultra by default): read the repository, return a design |
+| Architect | a fresh model process | modes with architects (medium, heavy, ultra by default): read the repository, return the design, ask the user what is theirs to decide, and rework the design when the user answers or objects |
 | Writer | a model process per stream, resumed for corrections | edit the files of its stream |
 | Reviewer | a model process that did not write the code, resumed for rechecks | read the patch, return findings and verdicts on the criteria |
 
@@ -263,6 +263,9 @@ disk and nothing depends on a daemon staying alive.
 | Failing checks | tool → writer | the command and the end of its output go back to the writers, in their **own sessions**, before any reviewer runs |
 | Recheck | tool → reviewer | the reviewer that raised a finding verifies the fix in its **own session**, reading only the delta, one effort step lower; lanes with nothing to verify do not run |
 | Cross-critique | architect ↔ architect | ultra only: each receives the other's design and looks for blockers |
+| Closing round | architect → architect | two architects: the first continues its **own session** with the other design and the blockers raised against its own, and returns the one design the task follows |
+| Design questions | architect → lead → user | the same structured questions as the preparation's; the design is built on the recommended options, and another answer goes back into the architect's **own session** |
+| Revision | user → lead → architect | what the user says about the design, before the task or during it, goes into the architect's **own session**; it returns the design as it stands and what the plan needs |
 
 The board is read at natural boundaries. It is a note, not an interrupt: a writer cannot preempt another.
 

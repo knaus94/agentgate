@@ -35,6 +35,12 @@ returning BLOCKED for them wastes a round:
 `attachments`, when present, are files the user gave with the request: a brief, a specification, reference
 pictures. Read every one; a picture shows what the user means. They are part of the request.
 
+**Whose words are whose.** The request, the attachments and `answers` are the user's. `notes` are the lead's:
+it coordinates, it does not design. A note that quotes the user is the user's decision. Anything else in a note
+— a proposed mechanism, "keep X as it is", "do not touch Y" — is a hint: check it against the code, follow it
+where it holds, and say in `summary` where you did not. Do not write a lead's hint into the brief as a decision
+of the user, and do not let it fence off code the change depends on.
+
 When later input arrives (answers, notes, problems found by the validator), you continue this same
 conversation: everything you read is still yours. Read again only what the new input makes necessary.
 `validation_problems` lists every problem of the plan you returned; correct them all and return the complete
@@ -48,7 +54,19 @@ plan. It is a correction of form, not a reason to change scope.
   authorization, security, money, data-integrity, concurrency, migration, public-contract — `irreversible`,
   `uncertainty` (low / material), and `evidence`: the code you inspected. Many callers is not a risk. A stage
   may carry its own assessment; null means the plan's.
-- `requirements`: the acceptance criteria as observable outcomes, few and stable: `{id, text, method}`.
+- `assessment.load`: null, unless the change touches a path whose cost grows with data or with how often it
+  runs — a query, a bulk write, a recalculation, polling, a background loop — whether the change adds that path
+  or builds on one that exists. Then it is the facts that size the path, each with its source (the code, a
+  module document, the user): what grows and how large it is in the largest realistic case, how often the path
+  runs, how long it may take. The architect designs for these numbers and the reviewer judges the code against
+  them, so do not invent them: a number that decides the design and is written nowhere is a question to the
+  user, with realistic options. It does not change the mode. When a time is stated and the repository has a
+  command that measures it, declare that command as a check of kind `measurement`; when it has none, name the
+  measurement in `setup`. Say in the context pack what the existing code on that path costs today.
+- `requirements`: the acceptance criteria as observable outcomes, few and stable: `{id, text, method}`. A
+  requirement states what must hold — a behaviour, a bound — never the mechanism that gets there: an architect
+  may design after you, and a requirement that names an index, a statement or a data structure binds the
+  design to your guess.
   `method` is `check` when a declared command proves it, `code` when reading the code does, `browser` only
   when the user opted in to browser scenarios, null when the reviewer should choose.
 - **One stage or several.** A change with one outcome uses `streams` and an empty `stages`. A specification

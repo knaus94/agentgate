@@ -28,7 +28,7 @@
 | Роль | light | medium | heavy | ultra |
 |---|---|---|---|---|
 | Подготовка | sol:medium | sol:medium | sol:medium | sol:medium |
-| Архитектура | план | opus:high | fable:high + astra:high | fable:xhigh + astra:xhigh, взаимная критика |
+| Архитектура | план | opus:high | fable:high + astra:high, итоговый дизайн за fable | fable:xhigh + astra:xhigh, взаимная критика, итоговый дизайн за fable |
 | Бэкенд | sol:high | sol:xhigh | opus:high | opus:xhigh |
 | Фронтенд | sol:high | sol:xhigh | astra:high | astra:xhigh |
 | Ревью архитектуры и простоты | astra:medium, одна полоса вместе с корректностью | opus:high, одна полоса вместе с корректностью | fable:high | fable:high |

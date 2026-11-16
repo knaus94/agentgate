@@ -2,6 +2,55 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.20.0
+
+The design of a task has an owner. A lead session was found designing the change together with the user: it
+wrote a solution into the request, answered the architect's questions itself, and added whole designs to the
+plan as requirements. The tool had handed it the design in five places. Now the architect decides how the
+change is built, the user approves, and the lead carries.
+
+**Changed**
+
+- **The architect asks the user.** A design returns `questions` in the shape the preparation uses — options and
+  a recommendation — and is built on the recommended options. `start` and `amend` refuse a design while a
+  question has no answer in `architecture.answers`, and one whose answer differs from the recommendation until
+  the architect has reworked it. Before, `open_questions` were plain strings that nothing took to the user.
+- **Two architects end in one design.** In heavy and ultra the first architect closes the pass in its own
+  session: it reads the other design, answers every blocker of ultra's critique and returns the design the
+  task follows. The lead no longer chooses a `base` or verifies blockers against the code; only a blocker the
+  closing design rejects needs the user's decision in `architecture.blockers`. This is one more model call per
+  pass.
+- **`architecture.acceptance` is optional** and holds what else the user decided about the design, in their
+  words — not the lead's amendments. `architecture.id` accepts. Writers and reviewers receive the design with
+  `answers` and `acceptance` (was `lead_acceptance`).
+- **`revise` and `revise_blockers` in a plan are refused**: a revision is its own input, below.
+- **A design is no longer bound to the files of a one-stage plan.** A file a stream gains or loses does not
+  ask for the design again; a receipt of 0.19 stays valid for the files it was made with.
+- **The architect is told what the preparation found**: the plan's `assessment`, with its named risks and the
+  load. Its instructions say that the design covers the existing code the change is built on, that every named
+  risk and the load are answered, and `alternatives` lists what was weighed and why it lost.
+- **The guide: the design is not the lead's.** The request is the user's words, quoted, never the lead's
+  summary of a solution; `notes` are hints the preparation worker checks. A worker's question goes to the user
+  with the worker's options and recommendation. A doubt about how the change is built goes to the architect. A
+  requirement says what must be true, never how.
+
+**Added**
+
+- `agentgate architecture` with `{revise, answers, notes, plan}`: the architect of a design continues its
+  session with the user's answers and with what the user said about the design — before a task and in the
+  middle of one, any number of times. It returns a new receipt with the design as it stands, or the evidence
+  that the design already holds, and `plan_changes`: what the plan needs.
+- `amend` takes the named operation `architecture`: the receipt the task follows from now on.
+- `assessment.load`: for a path whose cost grows with data or with how often it runs — what grows and how
+  large, how often, the time allowed, and the source of each number. It does not change the mode. Writers and
+  reviewers read it in the brief, and the review lane that judges correctness also reports the new axis
+  `performance`.
+
+**On upgrade**
+
+A task in flight keeps its accepted design: a receipt of 0.19 is read as before, with `base` and an answer for
+every blocker. Its present stage is reviewed once more, because the packet of writers and reviewers changed.
+
 ## 0.19.2
 
 A lead that loses the answer of `prepare` no longer has to run the preparation worker again.
