@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // The before-image of a task is a git tree of the whole working tree: the user's uncommitted and untracked
@@ -195,6 +196,63 @@ func treeEntries(store, tree string, paths []string) (string, error) {
 		return "", err
 	}
 	return digest(string(out)), nil
+}
+
+// treeFileEntry is one file of a recorded tree: its mode, its object and its path.
+type treeFileEntry struct {
+	Mode, Object, Path string
+}
+
+// listings keeps the files of recently listed trees. A tree never changes, so its listing never goes stale.
+var listings = struct {
+	sync.Mutex
+	trees map[string][]treeFileEntry
+}{trees: map[string][]treeFileEntry{}}
+
+// treeListing is every file of a recorded tree, sorted by path.
+func treeListing(store, tree string) ([]treeFileEntry, error) {
+	listings.Lock()
+	defer listings.Unlock()
+	if entries, ok := listings.trees[tree]; ok {
+		return entries, nil
+	}
+	out, err := treeGit(store, nil, "ls-tree", "-r", "-z", "--full-tree", tree)
+	if err != nil {
+		return nil, err
+	}
+	var entries []treeFileEntry
+	for _, record := range strings.Split(string(out), "\x00") {
+		header, path, ok := strings.Cut(record, "\t")
+		fields := strings.Fields(header)
+		if !ok || len(fields) != 3 {
+			continue
+		}
+		entries = append(entries, treeFileEntry{Mode: fields[0], Object: fields[2], Path: path})
+	}
+	sort.Slice(entries, func(a, b int) bool { return entries[a].Path < entries[b].Path })
+	if len(listings.trees) >= 8 {
+		clear(listings.trees)
+	}
+	listings.trees[tree] = entries
+	return entries, nil
+}
+
+// under is the part of a sorted listing at a path: the file itself, or everything below the directory.
+func under(entries []treeFileEntry, root string) []treeFileEntry {
+	if root == "." || root == "" {
+		return entries
+	}
+	var out []treeFileEntry
+	if index := sort.Search(len(entries), func(index int) bool { return entries[index].Path >= root }); index < len(entries) && entries[index].Path == root {
+		out = append(out, entries[index])
+	}
+	prefix := root + "/"
+	start := sort.Search(len(entries), func(index int) bool { return entries[index].Path >= prefix })
+	end := start
+	for end < len(entries) && strings.HasPrefix(entries[end].Path, prefix) {
+		end++
+	}
+	return append(out, entries[start:end]...)
 }
 
 // treePatch is one unified diff of the named paths between two trees.

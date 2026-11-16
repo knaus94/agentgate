@@ -18,7 +18,7 @@ The archive includes source, documentation, SHA-256 checksums, and binaries for 
 After extracting it:
 
 ```sh
-cd agentgate-0.18.0
+cd agentgate-0.19.0
 sh scripts/install-local.sh --lead both
 agentgate setup doctor
 agentgate config validate
@@ -113,7 +113,8 @@ agentgate task watch --once --no-color
 agentgate task watch --json
 ```
 
-The panel shows tasks, stage durations, worker activity, checks and findings. Navigate with arrows or `j/k`;
+The panel shows tasks, stage durations, worker activity, checks, findings and the limits of every account by
+name. Navigate with arrows or `j/k`;
 Enter opens details, Escape goes back, `r` refreshes and `?` shows help. It adapts to terminal width and keeps
 the selection in view. `NO_COLOR` is respected. Untrusted text cannot inject terminal control sequences.
 Pipes, redirected input and `TERM=dumb` produce one snapshot instead of an interactive loop.
@@ -142,7 +143,9 @@ agentgate config validate
 ## Accounts, isolation and recovery
 
 Accounts are selected from configured CLI profiles using known quota headroom. Expired quota windows no
-longer block an account forever; failed probes do not invent fresh capacity. Selected accounts use private
+longer block an account forever; failed probes do not invent fresh capacity. An account can be kept for the
+lead (`accounts reserve <name>`): no worker runs on it. A limit a model has of its own, such as Fable's, is
+counted for that model only. Selected accounts use private
 worker credential snapshots, and refreshes are reconciled without overwriting a concurrent login.
 [Account guide](docs/accounts.md).
 

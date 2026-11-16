@@ -1,12 +1,14 @@
 package dev
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // Event is one thing a worker did, read from the event stream its CLI writes while it runs.
@@ -117,156 +119,231 @@ func shellCommand(command string) string {
 	return command
 }
 
-// laneEvents reads what the worker of a lane has done so far. Both CLIs write one JSON event per line;
-// the two dialects are folded into one list. Only the end of a long stream is read.
+// eventStream is one worker's events file as far as it was read: what it held, and where reading stopped.
+type eventStream struct {
+	info    os.FileInfo
+	head    []byte // the first bytes of the file: a file written anew is read anew
+	read    int64
+	partial []byte
+	events  []Event
+	pending map[string]int // tool or command id -> index of its event, to attach the result
+}
+
+var streams = struct {
+	sync.Mutex
+	files map[string]*eventStream
+}{files: map[string]*eventStream{}}
+
+// laneEvents reads what the worker of a lane has done so far. Both CLIs write one JSON event per line; the two
+// dialects are folded into one list. A stream is read on from where the last read ended, and only the end of a
+// long one is read the first time.
 func laneEvents(dir string) []Event {
-	raw := readTail(filepath.Join(dir, "events.jsonl"), 1<<20)
-	var out []Event
-	pending := map[string]int{} // tool or command id -> index of its event, to attach the result
-	for _, line := range strings.Split(string(raw), "\n") {
-		var event struct {
-			Type    string `json:"type"`
-			Subtype string `json:"subtype"`
-			IsError bool   `json:"is_error"`
-			Result  string `json:"result"`
-			Message struct {
-				Content json.RawMessage `json:"content"`
-			} `json:"message"`
-			Item *struct {
-				ID       string `json:"id"`
-				Type     string `json:"type"`
-				Text     string `json:"text"`
-				Command  string `json:"command"`
-				Output   string `json:"aggregated_output"`
-				ExitCode *int   `json:"exit_code"`
-				Server   string `json:"server"`
-				Tool     string `json:"tool"`
-				Changes  []struct {
-					Path string `json:"path"`
-					Kind string `json:"kind"`
-				} `json:"changes"`
-			} `json:"item"`
-			Error *struct {
-				Message string `json:"message"`
-			} `json:"error"`
-			Text string `json:"message_text"`
+	path := filepath.Join(dir, "events.jsonl")
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil
+	}
+	streams.Lock()
+	defer streams.Unlock()
+	stream := streams.files[path]
+	if stream != nil && os.SameFile(stream.info, info) && info.Size() == stream.read && info.ModTime().Equal(stream.info.ModTime()) {
+		return stream.events
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer file.Close()
+	fresh := stream == nil || !os.SameFile(stream.info, info) || info.Size() <= stream.read
+	if !fresh {
+		head := make([]byte, len(stream.head))
+		n, _ := file.ReadAt(head, 0)
+		fresh = !bytes.Equal(head[:n], stream.head)
+	}
+	if fresh {
+		stream = &eventStream{pending: map[string]int{}}
+		if len(streams.files) >= 64 {
+			clear(streams.files)
 		}
-		if json.Unmarshal([]byte(line), &event) != nil {
-			continue
-		}
-		switch {
-		case event.Item != nil: // Codex
-			item := event.Item
-			switch item.Type {
-			case "agent_message":
-				if line, ok := reportLine(item.Text); ok && event.Type == "item.completed" {
-					out = append(out, Event{Kind: "done", Text: line})
-				} else if event.Type == "item.completed" && strings.TrimSpace(item.Text) != "" {
-					out = append(out, Event{Kind: "say", Text: strings.TrimSpace(item.Text)})
-				}
-			case "reasoning":
-				if event.Type == "item.completed" && strings.TrimSpace(item.Text) != "" {
-					out = append(out, Event{Kind: "think", Text: strings.TrimSpace(item.Text)})
-				}
-			case "command_execution":
-				index, known := pending[item.ID]
-				if !known {
-					out = append(out, Event{Kind: "run", Text: strings.TrimSpace(shellCommand(item.Command))})
-					index = len(out) - 1
-					pending[item.ID] = index
-				}
-				if event.Type == "item.completed" {
-					out[index].Detail = lastLines(item.Output, 8)
-					out[index].Failed = item.ExitCode != nil && *item.ExitCode != 0
-				}
-			case "file_change":
-				if event.Type == "item.completed" {
-					for _, change := range item.Changes {
-						out = append(out, Event{Kind: "edit", Text: strings.TrimSpace(change.Kind + " " + change.Path)})
-					}
-				}
-			case "mcp_tool_call":
-				if event.Type == "item.started" {
-					out = append(out, Event{Kind: "tool", Text: item.Server + "." + item.Tool})
-				}
-			case "error":
-				out = append(out, Event{Kind: "error", Text: oneLine(item.Text), Failed: true})
-			}
-		case event.Type == "assistant" || event.Type == "user": // Claude
-			var parts []struct {
-				Type     string          `json:"type"`
-				ID       string          `json:"id"`
-				Name     string          `json:"name"`
-				Text     string          `json:"text"`
-				Thinking string          `json:"thinking"`
-				Input    map[string]any  `json:"input"`
-				ToolUse  string          `json:"tool_use_id"`
-				Content  json.RawMessage `json:"content"`
-				IsError  bool            `json:"is_error"`
-			}
-			if json.Unmarshal(event.Message.Content, &parts) != nil {
-				continue
-			}
-			for _, part := range parts {
-				text := func(key string) string { value, _ := part.Input[key].(string); return value }
-				switch part.Type {
-				case "text":
-					if strings.TrimSpace(part.Text) != "" {
-						out = append(out, Event{Kind: "say", Text: strings.TrimSpace(part.Text)})
-					}
-				case "thinking":
-					if strings.TrimSpace(part.Thinking) != "" {
-						out = append(out, Event{Kind: "think", Text: strings.TrimSpace(part.Thinking)})
-					}
-				case "tool_use":
-					made := Event{Kind: "tool", Text: part.Name}
-					switch part.Name {
-					case "Bash":
-						made = Event{Kind: "run", Text: strings.TrimSpace(text("command"))}
-					case "Read":
-						made = Event{Kind: "read", Text: text("file_path")}
-					case "Edit", "Write", "MultiEdit", "NotebookEdit":
-						made = Event{Kind: "edit", Text: text("file_path")}
-					case "Grep", "Glob":
-						made = Event{Kind: "search", Text: strings.TrimSpace(text("pattern") + " " + text("path"))}
-					case "StructuredOutput":
-						made = Event{Kind: "done", Text: "wrote the report"}
-						if raw, err := json.Marshal(part.Input); err == nil {
-							if line, ok := reportLine(string(raw)); ok {
-								made.Text = line
-							}
-						}
-					}
-					out = append(out, made)
-					pending[part.ID] = len(out) - 1
-				case "tool_result":
-					index, known := pending[part.ToolUse]
-					if !known || (out[index].Kind != "run" && !part.IsError) {
-						continue // a file's content is not worth repeating; a command's output and any error are
-					}
-					var plain string
-					var blocks []struct {
-						Text string `json:"text"`
-					}
-					if json.Unmarshal(part.Content, &plain) != nil && json.Unmarshal(part.Content, &blocks) == nil {
-						for _, block := range blocks {
-							plain += block.Text
-						}
-					}
-					out[index].Detail, out[index].Failed = lastLines(plain, 8), part.IsError
-				}
-			}
-		case event.Type == "result":
-			if event.IsError || (event.Subtype != "" && event.Subtype != "success") {
-				out = append(out, Event{Kind: "error", Text: "ended: " + event.Subtype + " " + oneLine(event.Result), Failed: true})
-			}
-		case event.Type == "error" || event.Type == "turn.failed":
-			message := event.Text
-			if event.Error != nil {
-				message = event.Error.Message
-			}
-			out = append(out, Event{Kind: "error", Text: oneLine(message), Failed: true})
+		streams.files[path] = stream
+	}
+	start, cut := stream.read, false
+	if fresh {
+		stream.head = make([]byte, 256)
+		n, _ := file.ReadAt(stream.head, 0)
+		stream.head = stream.head[:n]
+		if info.Size() > 1<<20 {
+			start, cut = info.Size()-1<<20, true
 		}
 	}
-	return out
+	if _, err := file.Seek(start, io.SeekStart); err != nil {
+		return stream.events
+	}
+	raw, _ := io.ReadAll(file)
+	stream.read, stream.info = start+int64(len(raw)), info
+	raw = append(stream.partial, raw...)
+	if cut {
+		// The first line after a cut is a fragment.
+		if index := bytes.IndexByte(raw, '\n'); index >= 0 {
+			raw = raw[index+1:]
+		}
+	}
+	lines := bytes.Split(raw, []byte("\n"))
+	stream.partial = append([]byte(nil), lines[len(lines)-1]...)
+	for _, line := range lines[:len(lines)-1] {
+		stream.feed(line)
+	}
+	// A last line without its newline is held back, unless it is already a whole event.
+	if json.Valid(stream.partial) {
+		stream.feed(stream.partial)
+		stream.partial = nil
+	}
+	return stream.events
+}
+
+// feed folds one event line into the stream.
+func (s *eventStream) feed(line []byte) {
+	var event struct {
+		Type    string `json:"type"`
+		Subtype string `json:"subtype"`
+		IsError bool   `json:"is_error"`
+		Result  string `json:"result"`
+		Message struct {
+			Content json.RawMessage `json:"content"`
+		} `json:"message"`
+		Item *struct {
+			ID       string `json:"id"`
+			Type     string `json:"type"`
+			Text     string `json:"text"`
+			Command  string `json:"command"`
+			Output   string `json:"aggregated_output"`
+			ExitCode *int   `json:"exit_code"`
+			Server   string `json:"server"`
+			Tool     string `json:"tool"`
+			Changes  []struct {
+				Path string `json:"path"`
+				Kind string `json:"kind"`
+			} `json:"changes"`
+		} `json:"item"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+		Text string `json:"message_text"`
+	}
+	if json.Unmarshal(line, &event) != nil {
+		return
+	}
+	switch {
+	case event.Item != nil: // Codex
+		item := event.Item
+		switch item.Type {
+		case "agent_message":
+			if line, ok := reportLine(item.Text); ok && event.Type == "item.completed" {
+				s.events = append(s.events, Event{Kind: "done", Text: line})
+			} else if event.Type == "item.completed" && strings.TrimSpace(item.Text) != "" {
+				s.events = append(s.events, Event{Kind: "say", Text: strings.TrimSpace(item.Text)})
+			}
+		case "reasoning":
+			if event.Type == "item.completed" && strings.TrimSpace(item.Text) != "" {
+				s.events = append(s.events, Event{Kind: "think", Text: strings.TrimSpace(item.Text)})
+			}
+		case "command_execution":
+			index, known := s.pending[item.ID]
+			if !known {
+				s.events = append(s.events, Event{Kind: "run", Text: strings.TrimSpace(shellCommand(item.Command))})
+				index = len(s.events) - 1
+				s.pending[item.ID] = index
+			}
+			if event.Type == "item.completed" {
+				s.events[index].Detail = lastLines(item.Output, 8)
+				s.events[index].Failed = item.ExitCode != nil && *item.ExitCode != 0
+			}
+		case "file_change":
+			if event.Type == "item.completed" {
+				for _, change := range item.Changes {
+					s.events = append(s.events, Event{Kind: "edit", Text: strings.TrimSpace(change.Kind + " " + change.Path)})
+				}
+			}
+		case "mcp_tool_call":
+			if event.Type == "item.started" {
+				s.events = append(s.events, Event{Kind: "tool", Text: item.Server + "." + item.Tool})
+			}
+		case "error":
+			s.events = append(s.events, Event{Kind: "error", Text: oneLine(item.Text), Failed: true})
+		}
+	case event.Type == "assistant" || event.Type == "user": // Claude
+		var parts []struct {
+			Type     string          `json:"type"`
+			ID       string          `json:"id"`
+			Name     string          `json:"name"`
+			Text     string          `json:"text"`
+			Thinking string          `json:"thinking"`
+			Input    map[string]any  `json:"input"`
+			ToolUse  string          `json:"tool_use_id"`
+			Content  json.RawMessage `json:"content"`
+			IsError  bool            `json:"is_error"`
+		}
+		if json.Unmarshal(event.Message.Content, &parts) != nil {
+			return
+		}
+		for _, part := range parts {
+			text := func(key string) string { value, _ := part.Input[key].(string); return value }
+			switch part.Type {
+			case "text":
+				if strings.TrimSpace(part.Text) != "" {
+					s.events = append(s.events, Event{Kind: "say", Text: strings.TrimSpace(part.Text)})
+				}
+			case "thinking":
+				if strings.TrimSpace(part.Thinking) != "" {
+					s.events = append(s.events, Event{Kind: "think", Text: strings.TrimSpace(part.Thinking)})
+				}
+			case "tool_use":
+				made := Event{Kind: "tool", Text: part.Name}
+				switch part.Name {
+				case "Bash":
+					made = Event{Kind: "run", Text: strings.TrimSpace(text("command"))}
+				case "Read":
+					made = Event{Kind: "read", Text: text("file_path")}
+				case "Edit", "Write", "MultiEdit", "NotebookEdit":
+					made = Event{Kind: "edit", Text: text("file_path")}
+				case "Grep", "Glob":
+					made = Event{Kind: "search", Text: strings.TrimSpace(text("pattern") + " " + text("path"))}
+				case "StructuredOutput":
+					made = Event{Kind: "done", Text: "wrote the report"}
+					if raw, err := json.Marshal(part.Input); err == nil {
+						if line, ok := reportLine(string(raw)); ok {
+							made.Text = line
+						}
+					}
+				}
+				s.events = append(s.events, made)
+				s.pending[part.ID] = len(s.events) - 1
+			case "tool_result":
+				index, known := s.pending[part.ToolUse]
+				if !known || (s.events[index].Kind != "run" && !part.IsError) {
+					continue // a file's content is not worth repeating; a command's output and any error are
+				}
+				var plain string
+				var blocks []struct {
+					Text string `json:"text"`
+				}
+				if json.Unmarshal(part.Content, &plain) != nil && json.Unmarshal(part.Content, &blocks) == nil {
+					for _, block := range blocks {
+						plain += block.Text
+					}
+				}
+				s.events[index].Detail, s.events[index].Failed = lastLines(plain, 8), part.IsError
+			}
+		}
+	case event.Type == "result":
+		if event.IsError || (event.Subtype != "" && event.Subtype != "success") {
+			s.events = append(s.events, Event{Kind: "error", Text: "ended: " + event.Subtype + " " + oneLine(event.Result), Failed: true})
+		}
+	case event.Type == "error" || event.Type == "turn.failed":
+		message := event.Text
+		if event.Error != nil {
+			message = event.Error.Message
+		}
+		s.events = append(s.events, Event{Kind: "error", Text: oneLine(message), Failed: true})
+	}
 }

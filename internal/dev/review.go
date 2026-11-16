@@ -181,20 +181,31 @@ func (g *Gate) reviewDiversity() map[string]any {
 }
 
 // lanes are the reviewer processes of the mode, each on a model that wrote none of the code.
-func (g *Gate) lanes(cfg *config.Config, subs *substitutions) ([]laneSpec, func(config.Route) bool, error) {
+// reviewerSkip says why a route may not judge this task's code: its model wrote it, or the configuration keeps
+// it from review. "" when it may.
+func (g *Gate) reviewerSkip(cfg *config.Config) func(config.Route) string {
 	authors := g.authors()
-	skip := func(route config.Route) bool {
-		return slices.Contains(cfg.ReviewersExcluded, route.Alias) || slices.Contains(authors, route.Model)
+	return func(route config.Route) string {
+		switch {
+		case slices.Contains(authors, route.Model):
+			return route.Alias + " (" + route.Model + ") wrote the code under review"
+		case slices.Contains(cfg.ReviewersExcluded, route.Alias):
+			return route.Alias + " is kept from review by reviewers_excluded"
+		}
+		return ""
 	}
+}
+
+func (g *Gate) lanes(cfg *config.Config, subs *substitutions) ([]laneSpec, func(config.Route) string, error) {
+	skip := g.reviewerSkip(cfg)
 	var out []laneSpec
 	for _, lane := range cfg.Modes[g.Mode].Review {
 		route := cfg.MustRoute(lane.Route)
-		if skip(route) {
+		if reason := skip(route); reason != "" {
 			replaced := false
 			for _, alternate := range cfg.Alternates(route) {
-				if !skip(alternate) {
-					subs.list = append(subs.list, provider.Substitution{Wanted: route.String(), Used: alternate.String(),
-						Reason: "the routed model wrote the code under review"})
+				if skip(alternate) == "" {
+					subs.list = append(subs.list, provider.Substitution{Wanted: route.String(), Used: alternate.String(), Reason: reason})
 					route, replaced = alternate, true
 					break
 				}
@@ -266,7 +277,7 @@ func reviewAxis(finding Finding) string {
 }
 
 func (g *Gate) runLane(cfg *config.Config, spec laneSpec, index int, dir string, packet map[string]any, key, contract string,
-	accepted []Finding, known map[string]Finding, timeout time.Duration, subs *substitutions, skip func(config.Route) bool, quality *qualityInputs) (LaneRun, error) {
+	accepted []Finding, known map[string]Finding, timeout time.Duration, subs *substitutions, skip func(config.Route) string, quality *qualityInputs) (LaneRun, error) {
 	relevant := g.relevant(spec, accepted)
 	var recheck []string
 	for _, finding := range relevant {
@@ -276,7 +287,7 @@ func (g *Gate) runLane(cfg *config.Config, spec laneSpec, index int, dir string,
 		"route": spec.Route.String(), "recheck": recheck, "decisions": g.Dispositions, "disputes": g.Disputes, "quality": quality.fingerprint()})
 	cache := filepath.Join(g.dir(), "review-cache", cacheKey+".json")
 	lane := LaneRun{}
-	if raw, err := os.ReadFile(cache); packet["refresh"] != true && err == nil && json.Unmarshal(raw, &lane) == nil && !skip(lane.Route) {
+	if raw, err := os.ReadFile(cache); packet["refresh"] != true && err == nil && json.Unmarshal(raw, &lane) == nil && skip(lane.Route) == "" {
 		return lane, nil // a finished lane of a partly failed review is kept
 	}
 	scoped := map[string]any{"axes": spec.Axes, "scope": spec.Scope, "scope_files": spec.Files}

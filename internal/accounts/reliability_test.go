@@ -70,7 +70,7 @@ func TestConcurrentAccountSelectionSharesOneProbe(t *testing.T) {
 				t.Error("selection unexpectedly failed")
 				return
 			}
-			manager.Release(account.Name, false)
+			manager.Release(account.Name, opus, false)
 		}()
 	}
 	wait.Wait()
@@ -98,7 +98,7 @@ func TestFailedProbeIsCachedAndExpiredUsageDoesNotPersist(t *testing.T) {
 		if !ok {
 			t.Fatal("expired usage blocked an account indefinitely after a failed refresh")
 		}
-		manager.Release(account.Name, false)
+		manager.Release(account.Name, opus, false)
 	}
 	if count != 1 {
 		t.Fatalf("failed probes were retried on every lane (%d requests)", count)

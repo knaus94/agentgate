@@ -88,8 +88,8 @@ func TestParseClaudeUsage(t *testing.T) {
 		"seven_day":{"utilization":41.0,"resets_at":"2026-11-15T10:00:00.000000+00:00"},"seven_day_opus":null,"something_new":{"a":1},
 		"limits":[{"kind":"weekly_all","percent":41,"resets_at":"2026-11-15T10:00:00Z"},
 			{"kind":"weekly_scoped","percent":38,"resets_at":"2026-11-15T10:00:00Z","scope":{"model":{"display_name":"Fable 5"}}}]}`))
-	if len(windows) != 2 || windows[0].Label != "week" || windows[0].Used != 41 || windows[0].ResetsAt == 0 ||
-		windows[1].Scope != "fable" || windows[1].Used != 38 {
+	if len(windows) != 2 || windows[0].Label != "week" || windows[0].Used != 41 || windows[0].ResetsAt == 0 || windows[0].Period != "week" ||
+		windows[1].Scope != "fable" || windows[1].Used != 38 || windows[1].Period != "week" {
 		t.Fatalf("the weekly limit and the Fable bucket are read, an empty window and unknown fields are skipped: %+v", windows)
 	}
 	if ParseClaudeUsage([]byte(`not json`)) != nil {
@@ -166,9 +166,9 @@ func TestPickPrefersRoomSparesTheLeadAndSpreads(t *testing.T) {
 	if first.Name != "second" || second.Name != "lead" || third.Name != "second" {
 		t.Fatalf("calls started together spread over the accounts: %s %s %s", first.Name, second.Name, third.Name)
 	}
-	manager.Release(first.Name, true)
-	manager.Release(third.Name, true)
-	manager.Release(second.Name, true)
+	manager.Release(first.Name, opus, true)
+	manager.Release(third.Name, opus, true)
+	manager.Release(second.Name, opus, true)
 	if next, _ := manager.Pick(opus, "", map[string]bool{"second": true}); next.Name != "lead" {
 		t.Fatalf("an account this call already failed on is not offered again: %s", next.Name)
 	}
@@ -272,5 +272,99 @@ func TestDiscoverSaveAddsOnlyNewCapacity(t *testing.T) {
 	list, added := merge(configured, known, found)
 	if strings.Join(added, ",") != "claude-2,codex" || len(list) != 3 {
 		t.Fatalf("only logged-in subscriptions that are not configured yet are added: %v", added)
+	}
+}
+
+func TestAnAccountKeptForTheLeadTakesNoWorker(t *testing.T) {
+	w := newWorld(t)
+	main := used(10)
+	main.Identity = "main-subscription"
+	w.set("main", main)
+	w.set("main-again", main) // the same subscription logged in under another directory
+	w.set("work", used(99.5))
+	list := claude("main", "main-again", "work")
+	if got := names(New(list, w.path).Order(opus, "")); got != "main" {
+		t.Fatalf("without the flag the choice is what it was: %s", got)
+	}
+	list[0].LeadOnly = true
+	manager := New(list, w.path)
+	if got := names(manager.Order(opus, "")); got != "" {
+		t.Fatalf("an account kept for the lead, and its subscription under another directory, take no worker even when nothing else has room: %s", got)
+	}
+	if _, ok := manager.Pick(opus, "", nil); ok || strings.Join(manager.Reserved("claude"), ",") != "main" {
+		t.Fatal("a worker finds no account and the reservation is named")
+	}
+}
+
+func TestAModelsOwnLimitIsLearnedNotAssumed(t *testing.T) {
+	w := newWorld(t)
+	own := Window{Label: "week, fable", Scope: "fable", Used: 50, ResetsAt: 2_000_000}
+	w.set("one", used(100, own))
+	w.set("two", used(100, own))
+	manager := New(claude("one", "two"), w.path)
+	learned := func(name string) (bool, bool) {
+		for _, status := range manager.Statuses(false) {
+			if status.Name == name {
+				caps, known := status.GeneralCaps["fable"]
+				return caps, known
+			}
+		}
+		return false, false
+	}
+	// Not known yet: with the general limit gone and its own free, Fable is tried; Opus has nothing left.
+	if got := names(manager.Order(fable, "")); got != "one,two" {
+		t.Fatalf("an unknown limit is found out by trying: %s", got)
+	}
+	if got := names(manager.Order(opus, "")); got != "" {
+		t.Fatalf("a model without a limit of its own stops with the general one: %s", got)
+	}
+	// Almost used up proves nothing: the call may have fitted into what was left.
+	w.set("one", used(99, own))
+	manager.Release("one", fable, true)
+	if _, known := learned("one"); known {
+		t.Fatal("a call that went through before the general limit was used up teaches nothing")
+	}
+	// A call that went through while the general limit still reads used up: the limits are apart.
+	w.set("one", used(100, own))
+	manager.Release("one", fable, true)
+	if caps, known := learned("one"); !known || caps {
+		t.Fatalf("a call that went through teaches that the general limit does not cap Fable: %v %v", caps, known)
+	}
+	for _, status := range manager.Statuses(false) {
+		if room, _ := status.Headroom(Family(fable)); status.Name == "one" && room != 50 {
+			t.Fatalf("once the limits are known apart, Fable's room is its own: %v", room)
+		}
+	}
+	// A refusal while the five-hour window is gone as well is explained by that window.
+	w.set("two", used(100, own, Window{Label: "5 hours", Used: 100, ResetsAt: 1_500_000}))
+	manager.Limited("two", fable)
+	if _, known := learned("two"); known {
+		t.Fatal("a refusal the five-hour window explains teaches nothing about the general limit")
+	}
+	// A call refused on the other subscription with only the general limit gone: there it caps Fable.
+	w.set("two", used(100, own))
+	if until := manager.Limited("two", fable); until != 2_000_000 {
+		t.Fatalf("a capped model rests until the general limit resets: %d", until)
+	}
+	if caps, known := learned("two"); !known || !caps {
+		t.Fatalf("a refusal teaches that the general limit caps Fable: %v %v", caps, known)
+	}
+	if got := names(manager.Order(fable, "")); got != "one" {
+		t.Fatalf("only the subscription whose limits are apart takes Fable: %s", got)
+	}
+	// Known capped, and a five-hour window at 100% in every state: no call.
+	capped := used(100, own)
+	capped.Account, capped.ProbedAt, capped.GeneralCaps = config.Account{Name: "x", Provider: "claude"}, now(), map[string]bool{"fable": true}
+	if ok, _ := capped.Available(Family(fable), now()); ok {
+		t.Fatal("a model known to be capped by the general limit is not tried again")
+	}
+	for _, caps := range []map[string]bool{nil, {"fable": false}, {"fable": true}} {
+		session := used(10, own, Window{Label: "5 hours", Used: 100, ResetsAt: 1_500_000})
+		session.Account, session.ProbedAt, session.GeneralCaps = config.Account{Name: "x", Provider: "claude"}, now(), caps
+		fableOK, _ := session.Available(Family(fable), now())
+		opusOK, _ := session.Available(Family(opus), now())
+		if fableOK || opusOK {
+			t.Fatalf("an exhausted five-hour window stops every model (%v)", caps)
+		}
 	}
 }

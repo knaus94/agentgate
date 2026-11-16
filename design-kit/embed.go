@@ -50,6 +50,10 @@ func materialize(root string) (string, error) {
 	}
 	key := hex.EncodeToString(sum.Sum(nil))[:24]
 	dir := filepath.Join(root, key)
+	// A complete kit is used as it is, without a lock: a worker whose sandbox cannot write reads it too.
+	if complete(dir, names) {
+		return dir, nil
+	}
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return "", err
 	}
@@ -64,16 +68,7 @@ func materialize(root string) (string, error) {
 	if info, err := os.Lstat(dir); err == nil && !info.IsDir() {
 		return "", fmt.Errorf("design toolkit path is not a directory: %s", dir)
 	}
-	complete := true
-	for _, name := range names {
-		expected, _ := files.ReadFile(name)
-		actual, err := os.ReadFile(filepath.Join(dir, name))
-		if err != nil || sha256.Sum256(actual) != sha256.Sum256(expected) {
-			complete = false
-			break
-		}
-	}
-	if complete {
+	if complete(dir, names) {
 		return dir, nil
 	}
 	staging, err := os.MkdirTemp(root, ".extract-")
@@ -128,4 +123,19 @@ func Skill(name string) string {
 		}
 	}
 	return text
+}
+
+// complete says whether the extracted kit holds every embedded file as it is embedded.
+func complete(dir string, names []string) bool {
+	if info, err := os.Lstat(dir); err != nil || !info.IsDir() {
+		return false
+	}
+	for _, name := range names {
+		expected, _ := files.ReadFile(name)
+		actual, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil || sha256.Sum256(actual) != sha256.Sum256(expected) {
+			return false
+		}
+	}
+	return true
 }

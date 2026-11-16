@@ -393,3 +393,42 @@ func TestStagesStepByStepInAWorktreeWithAnAmendedPlan(t *testing.T) {
 		t.Fatalf("landing brings every stage in at once: %v", landed)
 	}
 }
+
+func TestThePassOverTheWholeChangeTakesAdditions(t *testing.T) {
+	f := newFixture(t)
+	var briefs []string
+	stageWriter(f, &briefs)
+	staged := f.model
+	var raised atomic.Bool
+	f.model = func(kind string, packet map[string]any, call provider.Call) (string, error) {
+		integration := strings.Contains(fmt.Sprint(packet["brief"]), "## Integration pass")
+		switch {
+		case kind == "review" && integration && raised.CompareAndSwap(false, true):
+			return `{"reports":[{"axis":"correctness","status":"NEEDS_FIX","findings":[` + finding("P1") + `],"checked":["read"],"resolutions":[]}]}`, nil
+		case kind == "writer" && integration:
+			return `{"status":"BLOCKED","summary":"0.txt is outside my stream","blockers":["give me 0.txt"],"handoff":"","deviations":[],"disputes":[]}`, nil
+		}
+		return staged(kind, packet, call)
+	}
+	blocked := f.start(stagedPlan("-m build the feature"))
+	if !Current().Whole || !slices.Equal(needs(blocked), []string{"answer"}) {
+		t.Fatalf("the writer of the pass over the whole change asks for a file no stream owns: %v", blocked)
+	}
+	stream := blocked["needs"].([]any)[0].(map[string]any)["stream"].(string)
+	stage, name, _ := strings.Cut(stream, ".")
+	f.do("amend", func() (any, error) {
+		return AmendOperations(f.cfg, Current(), Operations{Update: "the whole pass found 0.txt outside every stream",
+			Scope:        []ScopeChange{{Stream: stream, Add: []string{"0.txt"}}},
+			Requirements: []RequirementChange{{ID: "R4", Text: "c.txt follows the contract"}}})
+	})
+	plan := Current().Plan
+	owner := plan.Stages[slices.IndexFunc(plan.Stages, func(s Stage) bool { return s.Name == stage })]
+	if !slices.Contains(owner.Streams[slices.IndexFunc(owner.Streams, func(s Stream) bool { return s.Name == name })].Files, "0.txt") ||
+		!slices.Contains(plan.Stages[len(plan.Stages)-1].Covers, "R4") {
+		t.Fatalf("an accepted stage takes a file and a new requirement in the pass over the whole change: %+v", plan.Stages)
+	}
+	f.fails("amend", "may only give its streams more files", func() (any, error) {
+		return AmendOperations(f.cfg, Current(), Operations{Update: "check the base again",
+			Checks: []CheckChange{{Stage: "base", Add: []Check{{Argv: []string{"false"}}}}}})
+	})
+}

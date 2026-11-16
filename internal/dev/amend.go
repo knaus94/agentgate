@@ -54,8 +54,22 @@ func Amend(cfg *config.Config, gate *Gate, source *Plan) (any, error) {
 	if len(next.Stages) < frozen {
 		return nil, errors.New("the revised plan has fewer stages than are already accepted")
 	}
+	added := map[string]bool{}
+	for _, requirement := range next.Requirements {
+		if !slices.ContainsFunc(old.Requirements, func(other Requirement) bool { return other.ID == requirement.ID }) {
+			added[requirement.ID] = true
+		}
+	}
 	for index := 0; index < frozen; index++ {
-		if digest(old.Stages[index]) != digest(next.Stages[index]) {
+		switch {
+		case digest(old.Stages[index]) == digest(next.Stages[index]):
+		case gate.Whole && digest(old.Stages[index]) == digest(withoutAdditions(old.Stages[index], next.Stages[index], added)):
+			// The pass over the whole change found what no stage owned: a stream may take it, a new requirement
+			// may be judged where it belongs.
+		case gate.Whole:
+			return nil, fmt.Errorf("stage %q is accepted: the pass over the whole change may only give its streams more files (scope) "+
+				"and its covers a new requirement", old.Stages[index].Name)
+		default:
 			return nil, fmt.Errorf("stage %q is accepted and cannot change; revise the stages after it", old.Stages[index].Name)
 		}
 	}
@@ -76,6 +90,25 @@ func Amend(cfg *config.Config, gate *Gate, source *Plan) (any, error) {
 		return nil, fmt.Errorf("the amendment changes or removes requirements %s. A requirement is never weakened to pass a review: move its coverage to the "+
 			"stage that completes it, or add an intermediate criterion beside it. When the user really changed what is asked, say who allowed it and in what "+
 			"words in `authorized`", strings.Join(changed, ", "))
+	}
+	// The inputs of a check the amendment adds or changes are looked at now, not when the check first runs.
+	var changedChecks []Check
+	for _, check := range next.checksFor(-1) {
+		if !slices.ContainsFunc(old.checksFor(-1), func(other Check) bool {
+			return slices.Equal(other.Argv, check.Argv) && slices.Equal(other.Inputs, check.Inputs)
+		}) {
+			changedChecks = append(changedChecks, check)
+		}
+	}
+	var inputNotes []string
+	if len(changedChecks) > 0 {
+		tree, err := gate.snapshot()
+		if err != nil {
+			return nil, err
+		}
+		if inputNotes, err = gate.inspectInputs(changedChecks, tree); err != nil {
+			return nil, err
+		}
 	}
 	var rework []string
 	if gate.Whole {
@@ -156,7 +189,7 @@ func Amend(cfg *config.Config, gate *Gate, source *Plan) (any, error) {
 		Rework: rework, Digest: digest(next), Changes: changes})
 	gate.Reading = nil
 	did := []string{fmt.Sprintf("plan amended (revision %d): %s", len(gate.Revisions), reason)}
-	did = append(did, changes...)
+	did = append(append(did, changes...), inputNotes...)
 	slices.Sort(rework)
 	rework = slices.Compact(rework)
 	switch {
@@ -202,6 +235,28 @@ func Amend(cfg *config.Config, gate *Gate, source *Plan) (any, error) {
 		return nil, err
 	}
 	return gate.report(cfg, did), nil
+}
+
+// withoutAdditions is a revised accepted stage with the additions the pass over the whole change may make taken
+// back out: files its streams gained and new requirements its covers gained. What is left differs from the
+// accepted stage only by changes that pass may not make.
+func withoutAdditions(accepted, revised Stage, added map[string]bool) Stage {
+	out := revised
+	out.Streams = slices.Clone(revised.Streams)
+	if len(out.Streams) == len(accepted.Streams) {
+		for index := range out.Streams {
+			kept := accepted.Streams[index].Files
+			if out.Streams[index].Name == accepted.Streams[index].Name &&
+				!slices.ContainsFunc(kept, func(file string) bool { return !slices.Contains(out.Streams[index].Files, file) }) {
+				out.Streams[index].Files = kept
+			}
+		}
+	}
+	covers := slices.DeleteFunc(slices.Clone(revised.Covers), func(id string) bool { return added[id] })
+	if slices.Equal(covers, accepted.Covers) {
+		out.Covers = accepted.Covers
+	}
+	return out
 }
 
 // Operations change named parts of the plan of an active task, instead of sending the complete plan. They are
@@ -293,6 +348,15 @@ func (o Operations) apply(current *Plan, present int) (*Plan, error) {
 		present = last
 	}
 	for _, change := range o.Scope {
+		// The pass over the whole change names its streams after their stage: `stage.stream`.
+		if change.Stage == "" {
+			for _, name := range names {
+				if rest, ok := strings.CutPrefix(change.Stream, name+"."); ok {
+					change.Stage, change.Stream = name, rest
+					break
+				}
+			}
+		}
 		index := stage(change.Stage, present)
 		if index < 0 {
 			continue

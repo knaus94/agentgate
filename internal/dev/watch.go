@@ -85,6 +85,9 @@ func WatchSnapshot(cfg *config.Config, global bool) map[string]any {
 		if task.Warning != "" {
 			row["error"] = task.Warning
 		}
+		if task.live() && task.Op.Doing != "" {
+			row["now"] = task.Op.Doing
+		}
 		if task.Gate != nil {
 			row["id"], row["mode"], row["session"], row["step"] = task.Gate.ID, task.Gate.Mode, task.Gate.Session, task.Gate.Step
 			if task.Gate.Pause != nil {
@@ -109,5 +112,5 @@ func WatchSnapshot(cfg *config.Config, global bool) map[string]any {
 	if global {
 		scope = "all"
 	}
-	return map[string]any{"schema_version": 2, "read_only": true, "scope": scope, "tasks": rows}
+	return map[string]any{"schema_version": 2, "read_only": true, "scope": scope, "tasks": rows, "accounts": savedAccounts(cfg)}
 }

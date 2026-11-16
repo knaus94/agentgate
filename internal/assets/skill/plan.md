@@ -113,7 +113,8 @@ refused with the advice to stage it; `--single` in the request allows it, `--sta
  "authorized": "", "rework": ["api"]}
 ```
 
-- `scope`: files a stream gets; `stage` defaults to the present one.
+- `scope`: files a stream gets; `stage` defaults to the present one. In the pass over the whole change a
+  stream is named `stage.stream`, as `needs` and `answer` name it.
 - `checks`: added to the plan's own list (every stage runs it) or to a named stage; `remove` names a check by
   its id or by a part of its command only it contains.
 - `requirements`: a new one (`text`, optionally `method`; due at the last stage unless `stage` says), a
@@ -123,7 +124,10 @@ refused with the advice to stage it; `--single` in the request allows it, `--sta
   that change, or `remove: true`.
 - The complete plan: `agentgate show plan` prints it under `result.plan`; send it back changed, with `update`.
 
-- Accepted stages are frozen, and so is every requirement an accepted stage covers.
+- Accepted stages are frozen, and so is every requirement an accepted stage covers. The pass over the whole
+  change takes additions only: more files for the stream of an accepted stage (`scope`), a new requirement, a
+  check. What an accepted stage built and the user no longer wants is removed by a stage added after it,
+  before the last stage is accepted.
 - A requirement may be added, or moved to the stage that completes it. Changing or removing one needs
   `authorized`: who allowed it and in what words. A requirement is never weakened to pass a review; give an
   intermediate result its own criterion instead.

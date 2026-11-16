@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/knaus94/agentgate/internal/config"
 )
 
 const codexStream = `{"type":"thread.started","thread_id":"t"}
@@ -90,6 +92,19 @@ func TestPanelShowsTasksStagesWorkersAndOpensDetails(t *testing.T) {
 	f.start(plan) // light: written and checked, waiting for the lead's review
 	gate := Current()
 
+	// Two subscriptions as the last reading saved them: the first kept for the lead, the second out of Fable.
+	f.cfg.Accounts = []config.Account{{Name: "main", Provider: "claude", Home: "~/.claude", LeadOnly: true},
+		{Name: "work2", Provider: "claude", Home: "~/.claude-second"}}
+	read, week := time.Now().Unix()-125, time.Now().Unix()+86400
+	must(t, os.WriteFile(filepath.Join(Root(), "accounts.json"), []byte(fmt.Sprintf(`{"accounts":{
+		"main":{"name":"main","provider":"claude","home":"~/.claude","identity":"a","plan":"max 20x","logged_in":true,"probed_at":%[1]d,"checked_at":%[1]d,"windows":[
+			{"label":"week","period":"week","used_percent":49,"resets_at":%[2]d},
+			{"label":"week, fable","scope":"fable","period":"week","used_percent":72,"resets_at":%[2]d}]},
+		"work2":{"name":"work2","provider":"claude","home":"~/.claude-second","identity":"b","plan":"max 5x","logged_in":true,"probed_at":%[1]d,"checked_at":%[1]d,"windows":[
+			{"label":"week","period":"week","used_percent":12,"resets_at":%[2]d},
+			{"label":"week, fable","scope":"fable","period":"week","used_percent":100,"resets_at":%[2]d}],
+			"cooling":{"fable":%[2]d},"general_caps":{"fable":false}}}}`, read, week)), 0o600))
+
 	// A reviewer is running right now: a receipt with a live process and a stream of events.
 	lane := filepath.Join(gate.dir(), "review-0-abcd", "lane-1", "run")
 	must(t, os.MkdirAll(lane, 0o700))
@@ -104,7 +119,8 @@ func TestPanelShowsTasksStagesWorkersAndOpensDetails(t *testing.T) {
 	text := strings.Join(m.frame(), "\n")
 	for _, want := range []string{"TASKS 1", "decide", "steps    start", "WORKERS", "writer  core", "review  correctness", "astra:medium @codex",
 		"1m15s ×2", "✔ reported: correctness PASS, 0 findings", "CHECKS", "sh -c echo checked the line", "PLAN  1 stages · 1 streams", "enter open",
-		"this mode has no reviewer process"} {
+		"this mode has no reviewer process", "main fable 72% · work2 fable 100%", "LIMITS", "read 2m", "max 20x", "all 49% · fable 72%",
+		"all 12% · fable 100% (back ", "kept for the lead · fable: unknown if all caps it", "fable resting until", "fable: own limit only"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the panel lacks %q:\n%s", want, text)
 		}

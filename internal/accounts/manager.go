@@ -105,6 +105,35 @@ func (m *Manager) refresh(force bool) (err error) {
 	}); err != nil {
 		return err
 	}
+	return m.update(stale)
+}
+
+// Refresh reads again the limits of the oldest of the configured accounts whose reading is older than age, and
+// reports its name; "" when every reading is younger. The panel uses it one account at a time.
+func (m *Manager) Refresh(age int64) (string, error) {
+	var oldest *config.Account
+	var when int64
+	if err := m.locked(false, func(state *saved) {
+		for index, account := range m.accounts {
+			checked := int64(0)
+			if previous := state.Statuses[account.Name]; previous != nil && previous.Home == account.Home {
+				checked = max(previous.CheckedAt, previous.ProbedAt)
+			}
+			if now()-checked >= age && (oldest == nil || checked < when) {
+				oldest, when = &m.accounts[index], checked
+			}
+		}
+	}); err != nil || oldest == nil {
+		return "", err
+	}
+	m.refreshMu.Lock()
+	defer m.refreshMu.Unlock()
+	return oldest.Name, m.update([]config.Account{*oldest})
+}
+
+// update probes the accounts and merges the readings into the saved state, keeping what the readings do not
+// carry: cooldowns, what was learned about the limits, and the last good reading when a probe failed.
+func (m *Manager) update(stale []config.Account) error {
 	fresh := make([]Status, len(stale))
 	var wait sync.WaitGroup
 	for index, account := range stale {
@@ -131,6 +160,15 @@ func (m *Manager) refresh(force bool) (err error) {
 				}
 				if status.ProbedAt == 0 && status.LoggedIn && (status.Identity == "" || status.Identity == previous.Identity) {
 					status.Windows, status.ProbedAt = previous.Windows, previous.ProbedAt // keep the last good reading
+				}
+				if status.Identity == "" || status.Identity == previous.Identity {
+					status.GeneralCaps = previous.GeneralCaps
+				}
+			}
+			// What was learned about a subscription holds for every directory it is logged in to.
+			for _, other := range state.Statuses {
+				if status.GeneralCaps == nil && other != nil && other.Identity != "" && other.Identity == status.Identity && other.Provider == status.Provider {
+					status.GeneralCaps = other.GeneralCaps
 				}
 			}
 			status.Configured = true
@@ -173,7 +211,49 @@ func cloneStatus(status Status) Status {
 		}
 		status.Cooling = cooling
 	}
+	if status.GeneralCaps != nil {
+		caps := make(map[string]bool, len(status.GeneralCaps))
+		for key, value := range status.GeneralCaps {
+			caps[key] = value
+		}
+		status.GeneralCaps = caps
+	}
 	return status
+}
+
+// Reserved names the accounts of a provider kept for the lead.
+func (m *Manager) Reserved(provider string) []string {
+	if m == nil {
+		return nil
+	}
+	var out []string
+	for _, account := range m.accounts {
+		if account.Provider == provider && account.LeadOnly {
+			out = append(out, account.Name)
+		}
+	}
+	return out
+}
+
+// Back is when the first account of the route's provider that workers may use is expected to have room for its
+// model again; 0 when no reading says.
+func (m *Manager) Back(route config.Route) int64 {
+	if m == nil {
+		return 0
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	family, at, out := Family(route), now(), int64(0)
+	for _, account := range m.accounts {
+		status := m.known[account.Name]
+		if account.Provider != route.Provider || account.LeadOnly || status == nil {
+			continue
+		}
+		if back := status.back(family, at); back > at && (out == 0 || back < out) {
+			out = back
+		}
+	}
+	return out
 }
 
 // Err exposes a persistence/probe-cache failure to the router. It must not be
@@ -236,17 +316,19 @@ func (m *Manager) order(route config.Route, prefer string, tried map[string]bool
 		}
 		return account.Provider + ":home:" + clean(account.Home)
 	}
-	triedIdentity, inflightIdentity := map[string]bool{}, map[string]int{}
+	triedIdentity, inflightIdentity, reserved := map[string]bool{}, map[string]int{}, map[string]bool{}
 	for _, account := range m.accounts {
 		key := identityOf(account)
 		triedIdentity[key] = triedIdentity[key] || tried[account.Name]
 		inflightIdentity[key] += m.inflight[account.Name]
+		// An account kept for the lead takes no worker, under whichever directory its subscription is logged in.
+		reserved[key] = reserved[key] || account.LeadOnly
 	}
 	var keys []string
 	for _, account := range m.accounts {
 		status := m.known[account.Name]
 		key := identityOf(account)
-		if account.Provider != route.Provider || status == nil || triedIdentity[key] {
+		if account.Provider != route.Provider || status == nil || triedIdentity[key] || reserved[key] {
 			continue
 		}
 		if ok, _ := status.Available(family, now()); !ok {
@@ -310,19 +392,57 @@ func (m *Manager) Pick(route config.Route, prefer string, tried map[string]bool)
 	return order[0], true
 }
 
-// Release ends a reservation made by Pick.
-func (m *Manager) Release(name string, succeeded bool) {
+// Release ends a reservation made by Pick. A call that went through while the general limit was used up shows
+// that this limit does not cap the model's own: it is checked on a fresh reading and remembered. Almost used
+// up is not enough: the call may have fitted into what was left.
+func (m *Manager) Release(name string, route config.Route, succeeded bool) {
 	m.mu.Lock()
 	if m.inflight[name] > 0 {
 		m.inflight[name]--
 	}
+	var before Status
+	if known := m.known[name]; known != nil {
+		before = cloneStatus(*known)
+	}
 	m.mu.Unlock()
-	if succeeded {
-		m.locked(true, func(state *saved) {
-			if status := state.Statuses[name]; status != nil {
-				status.LastUsed = now()
-			}
-		})
+	if !succeeded {
+		return
+	}
+	own := before.ownScope(Family(route))
+	_, seen := before.GeneralCaps[own]
+	separate := false
+	if own != "" && !seen && before.hasOwn(own, "week") && before.generalOut("week", now(), 100-minHeadroom) > 0 {
+		separate = Probe(before.Account).generalOut("week", now(), 100) > 0 // and it did not reset meanwhile
+	}
+	m.locked(true, func(state *saved) {
+		status := state.Statuses[name]
+		if status == nil {
+			return
+		}
+		status.LastUsed = now()
+		if separate {
+			m.learn(state, status, own, false)
+		}
+	})
+}
+
+// learn records whether the general limit caps a model's own, for every directory of the subscription.
+func (m *Manager) learn(state *saved, status *Status, scope string, caps bool) {
+	for _, other := range state.Statuses {
+		if other == nil || other != status && (status.Identity == "" || other.Provider != status.Provider || other.Identity != status.Identity) {
+			continue
+		}
+		if other.GeneralCaps == nil {
+			other.GeneralCaps = map[string]bool{}
+		}
+		other.GeneralCaps[scope] = caps
+		m.mu.Lock()
+		if known := m.known[other.Name]; known != nil {
+			copy := cloneStatus(*known)
+			copy.GeneralCaps = cloneStatus(*other).GeneralCaps
+			m.known[other.Name] = &copy
+		}
+		m.mu.Unlock()
 	}
 }
 
@@ -341,19 +461,31 @@ func (m *Manager) Limited(name string, route config.Route) int64 {
 	if !found {
 		return 0
 	}
-	family, scope := Family(route), strings.ToLower(route.Alias)
+	family, scope := Family(route), "*" // nothing read explains the refusal: every model rests
 	until := now() + int64(defaultCooldown.Seconds())
 	fresh := Probe(account)
+	own, capped := fresh.ownScope(family), false
 	if fresh.ProbedAt != 0 {
-		until = now() + int64(transientPause.Seconds())
+		until, scope = now()+int64(transientPause.Seconds()), strings.ToLower(route.Alias)
+		ownOut := false
 		for _, window := range fresh.Windows {
-			if applies(window.Scope, family) && window.Used >= 100-minHeadroom && window.ResetsAt > until {
-				until = window.ResetsAt
-				scope = window.Scope
+			if !applies(window.Scope, family) || window.Used < 100-minHeadroom || window.ResetsAt <= now() {
+				continue
+			}
+			ownOut = ownOut || window.Scope != ""
+			if window.ResetsAt > until {
+				until, scope = window.ResetsAt, window.Scope
 				if scope == "" {
-					scope = "*"
+					scope = "all" // the general limit: it holds the models without a limit of their own
 				}
 			}
+		}
+		// Refused with its own limit free and the general weekly one gone: the general limit caps this model too.
+		// It rests until that limit resets, and is not tried that way again. An exhausted session window explains
+		// the refusal by itself and teaches nothing.
+		reset, session := fresh.generalOut("week", now(), 100-minHeadroom), fresh.generalOut("session", now(), 100-minHeadroom)
+		if own != "" && !ownOut && reset > now() && session == 0 && fresh.hasOwn(own, "week") {
+			capped, until, scope = true, max(reset, now()+int64(transientPause.Seconds())), own
 		}
 	}
 	err := m.locked(true, func(state *saved) {
@@ -369,6 +501,12 @@ func (m *Manager) Limited(name string, route config.Route) int64 {
 		status.Cooling[scope] = until
 		if fresh.ProbedAt != 0 {
 			status.Windows, status.ProbedAt = fresh.Windows, fresh.ProbedAt
+		}
+		if status.Identity == "" {
+			status.Identity = fresh.Identity
+		}
+		if capped {
+			m.learn(state, status, own, true)
 		}
 		status.CheckedAt = now()
 		// A second profile of this subscription cannot bypass a cooldown.
@@ -397,7 +535,8 @@ func (m *Manager) Limited(name string, route config.Route) int64 {
 func (m *Manager) Reset(name string) error {
 	return m.locked(true, func(state *saved) {
 		if status := state.Statuses[name]; status != nil {
-			status.Cooling, status.ProbedAt, status.CheckedAt, status.Windows = nil, 0, 0, nil // and read its limits again
+			// read its limits again and learn them again: the plan may have changed
+			status.Cooling, status.ProbedAt, status.CheckedAt, status.Windows, status.GeneralCaps = nil, 0, 0, nil, nil
 		}
 	})
 }

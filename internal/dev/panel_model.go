@@ -1,9 +1,10 @@
 package dev
 
 import (
-	"github.com/knaus94/agentgate/internal/config"
-	"path/filepath"
 	"time"
+
+	"github.com/knaus94/agentgate/internal/accounts"
+	"github.com/knaus94/agentgate/internal/config"
 )
 
 // item is one selectable row of the selected task.
@@ -26,13 +27,19 @@ type panel struct {
 	width     int
 	height    int
 	paint     paint
-	limits    string
-	offset    int // overview viewport; keep the selected row visible on small terminals
+	accounts  []accounts.Status // the configured accounts and their last readings
+	noLimits  bool              // the LIMITS block is hidden by the user
+	offset    int               // overview viewport; keep the selected row visible on small terminals
 	unlimited bool
 	help      bool
 	proofAt   time.Time
 	proofKey  string
+	reverify  bool // the user asked to judge the evidence again now
 }
+
+// proofInterval is how often the panel judges the evidence of an open task again while nothing runs and nothing
+// changed.
+const proofInterval = 30 * time.Second
 
 func (m *panel) selected() *taskView {
 	for _, task := range m.tasks {
@@ -82,7 +89,11 @@ func (m *panel) refresh() {
 			gate := task.Gate
 			proofKey = digest([]any{task.Dir, gate.ID, gate.Step, gate.Pause, gate.Stage, len(gate.Revisions), gate.Checks, len(gate.Reviews), gate.Resolutions, gate.Dispositions})
 		}
-		verify := oldTask == nil || proofKey != m.proofKey || time.Since(m.proofAt) >= 5*time.Second
+		// The clock matters only for an open task the user may be editing around; a running operation verifies by
+		// itself, and a finished task changes only through its state.
+		periodic := !task.live() && task.Gate != nil && task.Gate.active() && time.Since(m.proofAt) >= proofInterval
+		verify := oldTask == nil || m.reverify || proofKey != m.proofKey || periodic
+		m.reverify = false
 		task.describeWithChecks(m.cfg, verify)
 		if verify {
 			m.proofAt, m.proofKey = time.Now(), proofKey
@@ -108,7 +119,7 @@ func (m *panel) refresh() {
 			m.view = nil // do not silently show a different worker in the same row
 		}
 	}
-	m.limits = limitsLine(filepath.Join(Root(), "accounts.json"))
+	m.accounts = savedAccounts(m.cfg)
 }
 
 // key applies one keypress and reports whether the panel should close.
@@ -183,6 +194,8 @@ func (m *panel) key(name string) bool {
 		m.focus = 0
 	case "a":
 		m.global, m.chosen, m.row, m.offset = !m.global, "", 0, 0
+	case "L":
+		m.noLimits = !m.noLimits
 	case "enter":
 		if m.focus == 0 {
 			m.focus = 1
@@ -192,7 +205,7 @@ func (m *panel) key(name string) bool {
 		}
 	}
 	if name == "r" || previous != m.chosen || global != m.global {
-		m.proofAt = time.Time{}
+		m.reverify = true
 		m.refresh()
 	}
 	return false

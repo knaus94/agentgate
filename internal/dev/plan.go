@@ -64,6 +64,7 @@ type Scenario struct {
 	Viewport string `json:"viewport"`
 	Role     string `json:"role"`
 	Expected string `json:"expected"`
+	Stage    string `json:"stage,omitempty"` // the stage that builds what it observes; default: the last one
 }
 
 // Visual opts in to browser verification on a local stand.
@@ -689,19 +690,22 @@ func (r *Resolved) validateUI() []string {
 	if plan.Visual != nil && plan.Visual.Enabled {
 		if plan.UI == nil || plan.UI.Skip != "" {
 			problems = append(problems, "browser verification needs an accepted ui contract")
-		} else if err := validateScenarios(plan.Visual.Scenarios); err != nil {
+		} else if err := validateScenarios(plan.Visual.Scenarios, plan.Stages); err != nil {
 			problems = append(problems, err.Error())
 		}
 	}
 	return problems
 }
 
-func validateScenarios(scenarios []Scenario) error {
+func validateScenarios(scenarios []Scenario, stages []Stage) error {
 	if len(scenarios) == 0 {
 		return errors.New("browser verification needs a bounded scenario matrix")
 	}
 	ids := map[string]bool{}
 	for _, row := range scenarios {
+		if row.Stage != "" && !slices.ContainsFunc(stages, func(stage Stage) bool { return stage.Name == row.Stage }) {
+			return fmt.Errorf("scenario %q names no stage of the plan: %q", row.ID, row.Stage)
+		}
 		for _, field := range []string{row.ID, row.Screen, row.State, row.Role, row.Expected} {
 			if strings.TrimSpace(field) == "" {
 				return errors.New("each scenario needs id, screen, state, viewport, role and expected")

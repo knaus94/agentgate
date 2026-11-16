@@ -3,6 +3,7 @@ package dev
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -600,6 +601,111 @@ func TestBrowserVerificationIsBoundToScenariosAndLoopback(t *testing.T) {
 	}
 }
 
+// browserPlan is a page change with browser verification opted in, run through a stand-in Playwright server.
+func browserPlan(t *testing.T, f *fixture, scenarios ...Scenario) *Plan {
+	t.Helper()
+	tool := filepath.Join(t.TempDir(), "cli.js")
+	write(t, tool, "")
+	f.cfg.PlaywrightMCP = tool
+	write(t, "view.tsx", "before\n")
+	plan := f.plan("-m rename the label", Stream{Name: "web", Domain: "frontend", Files: []string{"view.tsx"}})
+	plan.UI = &UI{Summary: "rename", Criteria: []string{"new copy"}, Preserve: []string{"the rest"}}
+	plan.Visual = &Visual{Enabled: true, Reason: "the user asked", Scenarios: scenarios}
+	return plan
+}
+
+func TestABrowserPassThatObservedIsRecordedWithWhatItCouldNotEstablish(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node is not installed")
+	}
+	f := newFixture(t)
+	observed := false
+	f.model = func(kind string, packet map[string]any, call provider.Call) (string, error) {
+		if kind != "visual" {
+			return "", nil
+		}
+		shots := packet["screenshots_dir"].(string)
+		_ = os.WriteFile(filepath.Join(shots, "shot.png"), []byte("png"), 0o600)
+		var coverage []map[string]any
+		for _, raw := range packet["scenarios"].([]any) {
+			row := raw.(map[string]any)
+			coverage = append(coverage, map[string]any{"scenario_id": row["id"], "screen": row["screen"], "state": row["state"],
+				"viewport": row["viewport"], "role": row["role"], "observed": observed, "screenshot": "shot.png", "note": "seen"})
+		}
+		raw, _ := json.Marshal(map[string]any{"status": "UNVERIFIED", "summary": "no defects in what was seen", "coverage": coverage, "findings": []any{},
+			"resolutions": []any{}, "console_errors": []any{}, "unverified": []string{"slow responses cannot be driven by the browser tools"}})
+		return string(raw), nil
+	}
+	f.start(browserPlan(t, f, Scenario{ID: "list", Screen: "List", State: "filled", Viewport: "1440x900", Role: "operator", Expected: "label"}))
+	stand := VisualInput{URL: "http://localhost:4200/list", Origins: []string{"http://localhost:4200"}}
+	_, err := Execute("run", func() (any, error) { return Run(f.cfg, Current(), RunInput{Visual: &stand}) })
+	if len(Current().VisualRuns) != 0 || !strings.Contains(fmt.Sprint(err)+Current().ReviewError, "could not verify the stand") {
+		t.Fatalf("a pass that observed nothing failed: %v / %q", err, Current().ReviewError)
+	}
+	observed = true
+	done := f.do("run", func() (any, error) { return Run(f.cfg, Current(), RunInput{Visual: &stand}) })
+	run := Current().VisualRuns[0]
+	receipt, _ := done["receipt"].(map[string]any)
+	if done["step"] != StepDone || run.Status != "PASS" || len(run.Limits) != 1 ||
+		!strings.Contains(fmt.Sprint(done["did"]), "not established: slow responses") || !strings.Contains(fmt.Sprint(receipt["browser"]), "not established") {
+		t.Fatalf("a pass that observed its scenarios is recorded, with what it could not establish beside it: %+v %v", run, done)
+	}
+}
+
+func TestBrowserScenariosAreDueAtTheirStage(t *testing.T) {
+	f := newFixture(t)
+	write(t, "view.tsx", "before\n")
+	plan := &Plan{Request: "-m add the endpoint, then the page", Brief: "An endpoint, then the page that shows it",
+		Assessment:   &Assessment{Size: "ordinary", Evidence: "two fixture files"},
+		Requirements: []Requirement{{ID: "R1", Text: "the endpoint serves the data"}, {ID: "R2", Text: "the page shows it"}},
+		Stages: []Stage{
+			{Name: "api", Goal: "Serve the data", Covers: []string{"R1"}, Streams: []Stream{{Name: "api", Domain: "backend", Files: []string{"a.txt"}}}},
+			{Name: "page", Goal: "Show the data", Covers: []string{"R2"}, Streams: []Stream{{Name: "web", Domain: "frontend", Files: []string{"view.tsx"}}}},
+		},
+		Checks: []Check{{Argv: []string{"true"}}},
+		UI:     &UI{Summary: "show the data", Criteria: []string{"a row per item"}, Preserve: []string{"the rest"}},
+		Visual: &Visual{Enabled: true, Reason: "the user asked", Scenarios: []Scenario{
+			{ID: "error", Screen: "List", State: "the endpoint fails", Viewport: "1440x900", Role: "operator", Expected: "a message", Stage: "api"},
+			{ID: "list", Screen: "List", State: "filled", Viewport: "1440x900", Role: "operator", Expected: "rows"}}}}
+	due := func() (ids []string) {
+		for _, row := range Current().dueScenarios() {
+			ids = append(ids, row.ID)
+		}
+		return ids
+	}
+	first := f.start(plan)
+	if !slices.Equal(needs(first), []string{"scenarios"}) || !slices.Equal(due(), []string{"error"}) {
+		t.Fatalf("the first stage owes only the scenario that names it: %v %v", needs(first), due())
+	}
+	f.do("visual", func() (any, error) {
+		return VisualPass(f.cfg, Current(), VisualInput{SkipReason: "no stand for the endpoint yet"})
+	})
+	second := f.proceed()
+	if Current().Stage != 1 || !slices.Equal(needs(second), []string{"scenarios"}) || !slices.Equal(due(), []string{"list"}) {
+		t.Fatalf("a skip of one stage does not cover the next, and a scenario without a stage is due at the last: %v %v", needs(second), due())
+	}
+}
+
+func TestASubstitutionSaysWhyAndABrowserReviewerWithNoRouteIsRefusedEarly(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node is not installed")
+	}
+	f := newFixture(t)
+	f.cfg.VisualReviewer = "opus:medium" // the model that writes medium
+	plan := browserPlan(t, f, Scenario{ID: "list", Screen: "List", State: "filled", Viewport: "1440x900", Role: "operator", Expected: "label"})
+	fallbacks := f.cfg.Fallbacks["opus"]
+	f.cfg.Fallbacks["opus"] = nil
+	f.fails("start", "visual_reviewer opus:medium", func() (any, error) { return Start(f.cfg, plan, "", false, RunInput{}) })
+	f.cfg.Fallbacks["opus"] = fallbacks
+	f.start(plan)
+	stand := VisualInput{URL: "http://localhost:4200/list", Origins: []string{"http://localhost:4200"}}
+	f.do("run", func() (any, error) { return Run(f.cfg, Current(), RunInput{Visual: &stand}) })
+	substitutions := Current().Substitutions
+	if len(substitutions) == 0 || !strings.Contains(substitutions[len(substitutions)-1].Reason, "wrote the code under review") {
+		t.Fatalf("a substitution by authorship says so, not that a limit ran out: %+v", substitutions)
+	}
+}
+
 func TestVisualChoiceAndSkipAreRecorded(t *testing.T) {
 	f := newFixture(t)
 	write(t, "view.tsx", "before\n")
@@ -629,6 +735,21 @@ func TestVisualChoiceAndSkipAreRecorded(t *testing.T) {
 	}
 }
 
+// inputsIn lists what input patterns name in the working tree as a task records it.
+func inputsIn(t *testing.T, patterns ...string) ([]string, error) {
+	t.Helper()
+	store := filepath.Join(t.TempDir(), "objects")
+	tree, err := snapshotTree(store, nil)
+	must(t, err)
+	entries, err := treeListing(store, tree)
+	must(t, err)
+	files, err := inputFiles(entries, patterns)
+	if err != nil {
+		return nil, err
+	}
+	return slices.Sorted(maps.Keys(files)), nil
+}
+
 func TestInputGlobs(t *testing.T) {
 	newFixture(t)
 	for _, path := range []string{"src/a.go", "src/deep/b.go", "src/deep/c.txt", "lib/d.go", "top.go"} {
@@ -644,14 +765,29 @@ func TestInputGlobs(t *testing.T) {
 		"missing/**":  nil,
 	}
 	for pattern, want := range cases {
-		got, err := inputFiles([]string{pattern})
+		got, err := inputsIn(t, pattern)
 		if err != nil || !slices.Equal(got, want) {
 			t.Errorf("%s: want %v, got %v (%v)", pattern, want, got, err)
 		}
 	}
-	must(t, os.Symlink("top.go", "src/link.go"))
-	if _, err := inputFiles([]string{"src/*.go"}); err == nil {
-		t.Fatal("a symlinked input must be reported")
+	// What git ignores is not an input of a pattern that only passes over it; a pattern pointing into it reads it.
+	write(t, ".gitignore", "src/cache/\nbuild/\n")
+	write(t, "src/cache/results.json", "{}")
+	write(t, "build/out.js", "out")
+	if got, _ := inputsIn(t, "src/**"); slices.Contains(got, "src/cache/results.json") {
+		t.Fatalf("a tool's cache that git ignores is an input of src/**: %v", got)
+	}
+	if got, _ := inputsIn(t, "build/**"); !slices.Equal(got, []string{"build/out.js"}) {
+		t.Fatalf("a pattern into an ignored directory counts its files: %v", got)
+	}
+	// A link counts with what it leads to; one leading outside the repository is refused.
+	must(t, os.Symlink("../top.go", "src/link.go"))
+	if got, err := inputsIn(t, "src/link.go"); err != nil || !slices.Equal(got, []string{"src/link.go", "top.go"}) {
+		t.Fatalf("a link counts with its target: %v (%v)", got, err)
+	}
+	must(t, os.Symlink("../../elsewhere", "src/out.go"))
+	if _, err := inputsIn(t, "src/*.go"); err == nil || !strings.Contains(err.Error(), "outside the repository") {
+		t.Fatalf("a link leading outside the repository must be refused: %v", err)
 	}
 }
 

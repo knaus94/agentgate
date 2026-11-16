@@ -88,7 +88,10 @@ plan. It is a correction of form, not a reason to change scope.
   contract, a module document.
 - `ui`: when UI files are in scope: `{summary, criteria, preserve}` for a local change, or `{skip}` when the
   edit is not visual.
-- `visual`: only when the user asked for browser verification.
+- `visual`: only when the user asked for browser verification. A scenario is what a user does on the page —
+  open, click, type, hover, press keys, resize, wait — and what then shows; slow or reordered responses, a
+  hidden tab and controlled time are proven by tests, not by a browser. `stage` names the stage that builds
+  what the scenario shows; null means the last stage.
 
 For a planning-only request, plan the future implementation in exactly the same form. Do not strip the
 stages or streams because nothing is written now, and do not change what the user asked for.

@@ -11,7 +11,9 @@ changes with `agentgate config validate`.
 
 1. A reviewer cannot use a model that authored any part of the change, including a failed partial writer,
    a fallback writer, or a writer in an earlier stage. Comparing actual model identities prevents aliases
-   from bypassing this rule.
+   from bypassing this rule. The browser reviewer (`visual_reviewer`) is a reviewer too: a plan with browser
+   verification that no configured route could run is refused at `start` and at `visual {choice}`, and
+   `agentgate config validate` and `agentgate modes` warn about such a mode.
 2. A fallback can spend only the accounts and aliases declared in configuration. Quota exhaustion may
    trigger an alternate; a successful answer mentioning a rate limit is not an exhaustion event.
 3. Continuing a worker keeps both its provider session identifier and its actual lane directory. Account
@@ -19,8 +21,10 @@ changes with `agentgate config validate`.
    Model substitution is disabled for a resumed session.
 4. The selected effort is explicit. A recheck can be cheaper because it sees a delta; escalation is tied to
    lack of progress rather than to an unsupported claim about a universal best model.
-5. The dashboard and receipts show the actual routes and substitutions. Model independence is mandatory;
-   vendor diversity depends on the configured profile and the available fallbacks.
+5. The dashboard and receipts show the actual routes and substitutions, each with its reason: the routed
+   model wrote the code under review, no account of the provider has room (and when one is back), or every
+   account is kept for the lead. Model independence is mandatory; vendor diversity depends on the configured
+   profile and the available fallbacks.
 
 ## Mixed-provider defaults
 

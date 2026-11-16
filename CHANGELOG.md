@@ -2,6 +2,79 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.19.0
+
+An account for the lead, the limits a model has of its own, and what the sessions on 0.18 showed: the tool's
+own load on the machine, browser evidence it threw away, refusals that left the lead no legal move. The
+configuration of an account, the saved accounts and the task's state gain fields; nothing is removed. Receipts
+of checks with declared inputs are bound differently: those checks run once more on the first verification.
+
+**Added**
+
+- `lead_only` on an account keeps it for the lead session: no worker runs on it, nor on another directory
+  logged in to the same subscription, also when every other account is exhausted — the worker goes to its
+  model's fallback. `agentgate accounts add … --lead-only`, `accounts reserve <name>` and
+  `accounts unreserve <name>` set it. `accounts` and `doctor` warn when every account of a provider that
+  workers are routed to is kept for the lead. A configuration with the field is not read by 0.18 and earlier.
+- `watch` shows LIMITS: per account its provider, name, plan and every limit by name (`all`, a model's name,
+  `5h`, `week`), the reset of a limit at 80% or more, and what the tool does with the account. `L` hides the
+  block; on a small terminal it gives way to the tasks. While the panel is open it reads again the limits of
+  an account whose reading is older than five minutes, one account at a time, in the background; it starts no
+  model. `--once` and `--json` print what is saved.
+- `watch --json` carries `accounts`: the configured accounts with their saved readings.
+- A running operation says what it is busy with: `status` under `running.now`, the panel under the task's
+  row, `watch --json` under `now`. Each line of `did` that names a phase ends with its duration.
+- The first answer after agentgate changed under an open task carries `notice`: read `agentgate guide` again.
+  The Stop hook repeats it.
+- Browser scenarios take `stage`: a scenario is due at the stage it names, at the last stage when it names
+  none, and in the pass over the whole change.
+- `config validate` and `modes` warn about a mode whose browser verification no configured route could run.
+
+**Changed**
+
+- Declared check inputs are read from the tree git records instead of a walk of the disk: what git ignores
+  — a tool's cache under `node_modules`, a build output — is an input only where a pattern points into it by
+  its literal prefix; a link counts with the files it leads to inside the repository. `status` and `show` on
+  a large repository took 7 s and now take a fraction of a second; a check whose own cache sat among its
+  inputs no longer invalidates itself.
+- A reading command takes one record of the working tree instead of one per part of its answer.
+- The panel reads a file again only when it changed and reads a worker's events on from where it stopped. It
+  judges the evidence on a change of state, on `r`, and every 30 seconds for an open task while no operation
+  runs: an open panel took 65% of a core on a running task and takes under 1%.
+- A browser pass that observed its scenarios is recorded even when the reviewer could not establish
+  everything: what it could not establish is kept beside it, in `did`, `show receipt` and the final report.
+  Only a pass that observed nothing fails.
+- A substitution says why the route was not used: its model wrote the code under review, no account has room
+  (and when one is back), or every account is kept for the lead. It said "usage limit" for every cause.
+- An opted-in browser verification whose reviewer and every fallback are the writing model is refused at
+  `start` and at `visual {choice}`, before the work.
+- The pass over the whole change takes additions to accepted stages: more files for a stream (`scope`, with
+  the `stage.stream` names it uses), a new requirement, a check.
+- The declared inputs of every check are looked at when the plan is accepted: a link leading outside the
+  repository is refused at `start` and `amend`; a pattern that matches nothing yet is said.
+- The need for failing checks names each one with its verdict line — for a layout check its
+  `layout measurements:` line — and the end of each log.
+- The Stop hook says that no command is running and how the last one ended, and frees the session before it
+  reads what the task needs: a command the lead starts meanwhile is no longer refused as "already running".
+- Whether the general weekly limit of a Claude subscription also caps a model that has a limit of its own
+  (Fable) is learned once per subscription instead of assumed. Until it is known the model's room is the worse
+  of the two limits, and at an exhausted general limit with the model's own limit free the call is tried. A
+  success records that the limits are separate: only the model's own counts from then on. A refusal for a
+  limit records that the general one caps the model and rests it until the general limit resets. `accounts`
+  says which was seen; `accounts reset` forgets it.
+- A refusal for a limit rests what the exhausted limit covers: a model's own limit rests that model, the
+  general limit rests the models without a limit of their own. Before, the general limit rested the whole
+  account, a model with free room of its own included.
+- A limit records its period, `session` or `week`, in `accounts --json` and the saved state.
+- The header of `watch` names each account's tightest limit ("main fable 72%") instead of a bare percentage.
+- The error "no account has room" names the accounts kept for the lead and when an account is back.
+
+**Fixed**
+
+- `agentgate figma node` failed in a writer's sandbox on the design kit's lock file; a complete kit is now
+  used without writing.
+- A sandboxed writer could not build Go: it gets a `GOCACHE` under the task.
+
 ## 0.18.0
 
 The quality of the result and the design work: the last part of the plan in

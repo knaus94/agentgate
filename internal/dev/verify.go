@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/knaus94/agentgate/internal/config"
 	"github.com/knaus94/agentgate/internal/ops"
@@ -199,12 +200,17 @@ func (g *Gate) verify(cfg *config.Config, input RunInput, did *[]string) error {
 	// Checks cost seconds and reviewers cost minutes and quota, so checks go first. Code that fails its own
 	// checks is going to change: reviewing it would be paid for twice. A read-only review has no writer to send
 	// the failure to, so there the checks only inform the reviewers.
+	started := time.Now()
 	ran, err := g.runOutstanding()
 	if err != nil {
 		return err
 	}
 	if failing := g.failing(); ran > 0 || len(failing) > 0 {
-		*did = append(*did, fmt.Sprintf("checks: %d of %d pass", len(g.checks())-len(g.outstanding()), len(g.checks())))
+		line := fmt.Sprintf("checks: %d of %d pass", len(g.checks())-len(g.outstanding()), len(g.checks()))
+		if ran > 0 {
+			line += " in " + since(started)
+		}
+		*did = append(*did, line)
 	}
 	if g.Request.Writes() && len(g.failing()) > 0 {
 		return g.save()
@@ -223,10 +229,11 @@ func (g *Gate) verify(cfg *config.Config, input RunInput, did *[]string) error {
 	}
 	// Acceptance claims may cite this browser pass. Collect it before its reviewer reads the evidence.
 	if quality != nil && input.Visual != nil {
+		started := time.Now()
 		if err := g.observe(cfg, *input.Visual, now, key); err != nil {
 			return err
 		}
-		*did = append(*did, "browser scenarios observed")
+		*did = append(*did, g.observed(since(started)))
 		if quality, err = g.qualityInputs(cfg); err != nil {
 			return err
 		}
@@ -382,6 +389,15 @@ func (g *Gate) verify(cfg *config.Config, input RunInput, did *[]string) error {
 			return err
 		}
 	}
+	var reviewers []string
+	for _, spec := range specs {
+		reviewers = append(reviewers, strings.Join(spec.Axes, "+")+" ("+spec.Route.String()+")")
+	}
+	if browser != nil {
+		reviewers = append(reviewers, "browser pass ("+cfg.VisualReviewer+")")
+	}
+	ops.Doing("review: %s", strings.Join(reviewers, ", "))
+	started = time.Now()
 	lanes := make([]LaneRun, len(specs))
 	jobs := []func() error{}
 	for index, spec := range specs {
@@ -447,7 +463,10 @@ func (g *Gate) verify(cfg *config.Config, input RunInput, did *[]string) error {
 			}
 		}
 	}
-	*did = append(*did, fmt.Sprintf("review by %s: %d findings, %d blocking", laneRoutes(lanes), open, blocking))
+	*did = append(*did, fmt.Sprintf("review by %s: %d findings, %d blocking, in %s", laneRoutes(lanes), open, blocking, since(started)))
+	if browser != nil && g.ReviewError == "" {
+		*did = append(*did, g.observed(""))
+	}
 	return g.save()
 }
 

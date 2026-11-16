@@ -172,11 +172,17 @@ func TestExhaustedLimitMovesToTheNextPermittedAlternate(t *testing.T) {
 	}
 	// sol -> sonnet: the declared alternate on another provider
 	result, used, err := RunRouted(cfg, Call{Route: cfg.MustRoute("sol:high"), Prompt: "p", Dir: filepath.Join(root, "state", "b"), Timeout: 20 * time.Second}, nil)
-	if err != nil || used.Alias != "sonnet" || used.SubstitutedFrom != "sol:high" || used.Effort != "high" || result.Session != "claude-1" {
+	if err != nil || used.Alias != "sonnet" || used.SubstitutedFrom != "sol:high" || used.Effort != "high" || result.Session != "claude-1" ||
+		!strings.Contains(result.Why, "codex CLI reported its usage limit") {
 		t.Fatalf("the first working alternate answers: %+v %+v %v", result, used, err)
 	}
 	_, _, err = RunRouted(cfg, Call{Route: cfg.MustRoute("sol:high"), Prompt: "p", Dir: filepath.Join(root, "state", "c"), Timeout: 20 * time.Second},
-		func(route config.Route) bool { return route.Provider == "claude" })
+		func(route config.Route) string {
+			if route.Provider == "claude" {
+				return "forbidden"
+			}
+			return ""
+		})
 	if !errors.Is(err, ErrLimit) || !strings.Contains(err.Error(), "no permitted alternate") {
 		t.Fatalf("a forbidden alternate is never used, got %v", err)
 	}

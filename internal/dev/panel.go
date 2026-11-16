@@ -2,13 +2,20 @@ package dev
 
 import (
 	"fmt"
-	"github.com/knaus94/agentgate/internal/config"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/knaus94/agentgate/internal/accounts"
+	"github.com/knaus94/agentgate/internal/config"
 )
+
+// limitsAge is how old a reading of an account's limits may be before the open panel reads it again.
+const limitsAge = 5 * time.Minute
 
 // runPanel is the interactive loop: redraw every second and on every key.
 func runPanel(cfg *config.Config, global, color bool) {
@@ -40,6 +47,19 @@ func runPanel(cfg *config.Config, global, color bool) {
 		<-escape.C
 	}
 	defer escape.Stop()
+	// The limits of one account at a time are read again in the background once their reading is older than
+	// limitsAge; the redraw only ever reads what is saved.
+	var probing atomic.Bool
+	readLimits := func() {
+		if len(cfg.Accounts) == 0 || !probing.CompareAndSwap(false, true) {
+			return
+		}
+		go func() {
+			defer probing.Store(false)
+			_, _ = accounts.New(cfg.Accounts, filepath.Join(Root(), "accounts.json")).Refresh(int64(limitsAge.Seconds()))
+		}()
+	}
+	readLimits()
 	m.refresh()
 	for {
 		m.width, m.height = termSize(int(os.Stdout.Fd()))
@@ -83,6 +103,7 @@ func runPanel(cfg *config.Config, global, color bool) {
 				return
 			}
 		case <-ticker.C:
+			readLimits()
 			m.refresh()
 		}
 	}

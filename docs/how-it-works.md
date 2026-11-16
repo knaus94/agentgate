@@ -195,8 +195,10 @@ file at any time, also for one that a generator adds later
 
 - A **review** is bound to the exact change of the stage's files, to the files it was pointed at and to the
   contract it judged. Edit a file, or change the brief, and the review no longer counts.
-- A **check** result is bound to the files it declared as inputs. With no declared inputs it is bound to the
-  whole tree it ran against, so an edited sibling dependency invalidates it. Checks run before reviewers; a
+- A **check** result is bound to the files it declared as inputs, as git records them: what git ignores — a
+  tool's cache under `node_modules`, a build output — is not an input unless a pattern points into it by its
+  literal prefix (`dist/**`), and a link counts with what it leads to inside the repository. With no declared
+  inputs it is bound to the whole tree it ran against, so an edited sibling dependency invalidates it. Checks run before reviewers; a
   failing check sends the task back to its writers without a review. A failure observed before the task is
   recorded for diagnosis; it does not waive the requirement for a passing check.
 - **Findings** keep their ids across rounds. A defect that comes back reopens under the same id; it cannot be

@@ -20,7 +20,7 @@ Every command about the task answers with one object. Read it as it is; do not p
 | `step` | `write` → `verify` → (`decide`) → the next stage … → `done`; or `cancelled` |
 | `stage` | where a task of several stages is |
 | `paused` | `{kind, reason}`: `user` (only `resume` lifts it, on the user's word), `decision`, `step` |
-| `did` | what this call changed |
+| `did` | what this call changed; a phase that ran ends with its duration |
 | `writers` | the latest writer of each stream. A running one adds `running_s`, `quiet_s` (seconds since its last event) and `last_event` |
 | `needs` | what only a person can settle: the `needs` page |
 | `checks` | the declared checks of the present position; `failing` names them by a short label |
@@ -31,7 +31,8 @@ Every command about the task answers with one object. Read it as it is; do not p
 | `result` | what the command has of its own |
 | `refused` | `{action, because}`: the command is not legal now; nothing changed; exit 1 |
 | `error` | the command could not do what it was asked; the object shows the task as it is now; exit 1 |
-| `running` | only in `status`: `{action, since, running_s}` while another call works on the task |
+| `running` | only in `status`: `{action, since, running_s, now, now_s}` while another call works on the task; `now` is what it is busy with |
+| `notice` | agentgate changed since this task's last command: read `agentgate guide` in full before the next command |
 | `last` | only in `status`: `{action, state, error?}` of the last call that ended — read it when you are unsure whether a command ran |
 | `actions` | what is legal now, the action that moves the task first |
 | `next` | one sentence |

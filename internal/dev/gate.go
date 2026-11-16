@@ -56,9 +56,35 @@ func (g *Gate) context() []string {
 	return slices.Compact(out)
 }
 
-// snapshot records the working tree as it is now.
+// pinned is the working tree a reading looks at, recorded when it is first needed.
+type pinned struct {
+	tree string
+	err  error
+	done bool
+}
+
+// snapshot records the working tree as it is now, or returns the one the present reading pinned.
 func (g *Gate) snapshot() (string, error) {
-	return snapshotTree(g.objects(), exactPaths(g.Plan.Files()))
+	if g.pin == nil {
+		return snapshotTree(g.objects(), exactPaths(g.Plan.Files()))
+	}
+	if !g.pin.done {
+		g.pin.tree, g.pin.err = snapshotTree(g.objects(), exactPaths(g.Plan.Files()))
+		g.pin.done = true
+	}
+	return g.pin.tree, g.pin.err
+}
+
+// reading runs what only looks at the task against one record of the working tree: an answer speaks of one
+// moment, and the tree is taken once instead of once for every part of the answer.
+func (g *Gate) reading(view func()) {
+	if g.pin != nil {
+		view()
+		return
+	}
+	g.pin = &pinned{}
+	defer func() { g.pin = nil }()
+	view()
 }
 
 // changes splits everything that differs between the origin and a tree into what the present position owns

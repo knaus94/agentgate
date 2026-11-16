@@ -193,12 +193,12 @@ func (a arguments) validatePositionals() error {
 		if len(a.rest) > 0 {
 			action = a.rest[0]
 		}
-		count, ok := map[string]int{"list": 1, "limits": 1, "discover": 1, "add": 4, "remove": 2, "reset": 2}[action]
+		count, ok := map[string]int{"list": 1, "limits": 1, "discover": 1, "add": 4, "remove": 2, "reset": 2, "reserve": 2, "unreserve": 2}[action]
 		if !ok || (len(a.rest) != count && !(action == "list" && len(a.rest) == 0)) {
 			return fail()
 		}
 		for flag := range a.flags {
-			valid := flag == "json" && (action == "list" || action == "limits") || flag == "save" && action == "discover" || flag == "paid" && action == "add"
+			valid := flag == "json" && (action == "list" || action == "limits") || flag == "save" && action == "discover" || (flag == "paid" || flag == "lead-only") && action == "add"
 			if !valid {
 				return fmt.Errorf("--%s does not apply to accounts %s", flag, action)
 			}

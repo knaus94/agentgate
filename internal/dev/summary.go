@@ -13,6 +13,7 @@ import (
 
 	"github.com/knaus94/agentgate/internal/config"
 	"github.com/knaus94/agentgate/internal/ops"
+	"github.com/knaus94/agentgate/internal/update"
 )
 
 // Every command that touches a task answers with the same compact picture: where the task is, what this call
@@ -261,8 +262,12 @@ func (g *Gate) receipt() map[string]any {
 			add(&writers, name+" "+record.Writers[name].Route.String())
 		}
 		add(&reviewers, record.Reviewers...)
-		stages = append(stages, map[string]any{"name": record.Name, "mode": record.Mode, "correction_rounds": record.Rounds, "findings": record.Findings,
-			"notes": len(record.Notes), "minutes": minutes(record.AcceptedAt - start)})
+		stage := map[string]any{"name": record.Name, "mode": record.Mode, "correction_rounds": record.Rounds, "findings": record.Findings,
+			"notes": len(record.Notes), "minutes": minutes(record.AcceptedAt - start)}
+		if record.Browser != "" {
+			stage["browser"] = record.Browser
+		}
+		stages = append(stages, stage)
 		start = record.AcceptedAt
 	}
 	for name, writer := range g.latest() {
@@ -286,6 +291,9 @@ func (g *Gate) receipt() map[string]any {
 	if len(g.Substitutions) > 0 {
 		out["substitutions"] = g.Substitutions
 	}
+	if line := g.browserLine(); line != "" {
+		out["browser"] = line
+	}
 	if g.Worktree != "" {
 		out["isolated"] = g.landing()
 	}
@@ -293,8 +301,18 @@ func (g *Gate) receipt() map[string]any {
 }
 
 // report is the compact answer of a command: did is what this call changed.
-func (g *Gate) report(cfg *config.Config, did []string) map[string]any {
+func (g *Gate) report(cfg *config.Config, did []string) (out map[string]any) {
+	g.reading(func() { out = g.picture(cfg, did) })
+	return out
+}
+
+// picture is the compact answer as one record of the working tree shows the task.
+func (g *Gate) picture(cfg *config.Config, did []string) map[string]any {
 	out := map[string]any{"task": g.ID[:8], "action": g.Request.Action, "mode": g.Mode, "step": g.Step}
+	if g.toolBefore != "" {
+		out["notice"] = fmt.Sprintf("agentgate was %s at this task's last command and is %s now: read `agentgate guide` in full before the next command.",
+			g.toolBefore, update.Version)
+	}
 	if position := g.position(); position != nil {
 		out["stage"] = position
 	}
@@ -625,14 +643,19 @@ func Status(cfg *config.Config, gate *Gate, what string) (any, error) {
 		return out, nil
 	}
 	var out map[string]any
-	if what == "" {
-		out = gate.report(cfg, nil)
-	} else {
-		value, err := Show(cfg, gate, what)
-		if err != nil {
-			return nil, err
+	var err error
+	gate.reading(func() {
+		if what == "" {
+			out = gate.report(cfg, nil)
+			return
 		}
-		out = value.(map[string]any)
+		var value any
+		if value, err = Show(cfg, gate, what); err == nil {
+			out = value.(map[string]any)
+		}
+	})
+	if err != nil {
+		return nil, err
 	}
 	gate.operation(out)
 	return out, nil
@@ -646,7 +669,11 @@ func (g *Gate) operation(out map[string]any) {
 	}
 	since := time.Unix(int64(record.StartedAt), 0)
 	if record.Live && record.PID != os.Getpid() {
-		out["running"] = map[string]any{"action": record.Action, "since": since.Format(time.RFC3339), "running_s": int64(time.Since(since).Seconds())}
+		running := map[string]any{"action": record.Action, "since": since.Format(time.RFC3339), "running_s": int64(time.Since(since).Seconds())}
+		if record.Doing != "" {
+			running["now"], running["now_s"] = record.Doing, int64(time.Since(time.Unix(int64(record.DoingSince), 0)).Seconds())
+		}
+		out["running"] = running
 		out["next"] = "`" + record.Action + "` is running; its answer comes when it ends. Meanwhile `tell` leaves the writers a note and `stop` ends it."
 		return
 	}

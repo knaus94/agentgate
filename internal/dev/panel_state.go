@@ -6,18 +6,83 @@ import (
 	"github.com/knaus94/agentgate/internal/accounts"
 	"github.com/knaus94/agentgate/internal/config"
 	"github.com/knaus94/agentgate/internal/ops"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
 // The panel is the interactive `agentgate watch`: every task of the checkout (or of every checkout), the
 // stages each went through with their timings, its workers, checks and findings, and — one keypress deeper —
 // what a worker is doing right now. It only reads state; the owning lead session drives the task.
+
+// The panel redraws every second, from files that rarely change. Each is read again only when its identity,
+// size or time changed: between changes a redraw reads no content.
+type keptFile struct {
+	info  os.FileInfo
+	value any
+}
+
+var keptFiles = struct {
+	sync.Mutex
+	files map[string]keptFile
+}{files: map[string]keptFile{}}
+
+// readKept is what parse made of a file, read again only when the file changed; ok is false when it cannot be
+// read.
+func readKept[T any](path string, parse func([]byte) T) (value T, ok bool) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return value, false
+	}
+	key := path + "\x00" + fmt.Sprintf("%T", value) // one file may be read into different shapes
+	keptFiles.Lock()
+	entry, known := keptFiles.files[key]
+	keptFiles.Unlock()
+	if known && os.SameFile(entry.info, info) && entry.info.Size() == info.Size() && entry.info.ModTime().Equal(info.ModTime()) {
+		return entry.value.(T), true
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return value, false
+	}
+	value = parse(raw)
+	keptFiles.Lock()
+	if len(keptFiles.files) >= 4096 {
+		clear(keptFiles.files)
+	}
+	keptFiles.files[key] = keptFile{info, value}
+	keptFiles.Unlock()
+	return value, true
+}
+
+// operationOf is the last operation of a session directory and whether its process still runs.
+func operationOf(dir string) *ops.Record {
+	parsed, ok := readKept(filepath.Join(dir, "operation.json"), parseOperation)
+	if !ok || parsed == nil {
+		return nil
+	}
+	record := *parsed
+	record.Live = ops.Alive(&record)
+	return &record
+}
+
+func parseOperation(raw []byte) *ops.Record {
+	record := &ops.Record{}
+	if json.Unmarshal(raw, record) != nil {
+		return nil
+	}
+	return record
+}
+
+// keptGate is a task as its state file was last read.
+type keptGate struct {
+	gate *Gate
+	err  error
+}
 
 // laneView is one worker process of a task.
 type laneView struct {
@@ -114,8 +179,12 @@ func loadTasks(global bool) []*taskView {
 		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 			continue
 		}
-		task := &taskView{Dir: dir, Op: ops.Status(dir)}
-		switch gate, err := loadGateFile(filepath.Join(dir, "state.json")); {
+		task := &taskView{Dir: dir, Op: operationOf(dir)}
+		state, _ := readKept(filepath.Join(dir, "state.json"), func(raw []byte) keptGate {
+			gate, err := parseGate(raw)
+			return keptGate{gate, err}
+		})
+		switch gate, err := state.gate, state.err; {
 		case err != nil:
 			task.Warning = "Task state cannot be read. Preserve state.json and restore its last good copy: " + err.Error()
 		case gate != nil && sessionDir(gate.Cwd, gate.Session) != dir:
@@ -165,24 +234,33 @@ func created(t *taskView) int64 {
 	return 0
 }
 
+// processReceipt is what a worker's process.json says of its present run.
+type processReceipt struct {
+	State    string `json:"state"`
+	PID      int    `json:"pid"`
+	Identity string `json:"process_identity"`
+	Route    struct {
+		Alias, Effort string
+	} `json:"route"`
+	Account    string `json:"account"`
+	StartedAt  int64  `json:"started_at"`
+	ObservedAt int64  `json:"observed_at"`
+	ReturnCode *int   `json:"returncode"`
+}
+
 // readLane reads the receipt of a worker's present run.
 func readLane(dir string) (laneView, bool) {
-	var receipt struct {
-		State    string `json:"state"`
-		PID      int    `json:"pid"`
-		Identity string `json:"process_identity"`
-		Route    struct {
-			Alias, Effort string
-		} `json:"route"`
-		Account    string `json:"account"`
-		StartedAt  int64  `json:"started_at"`
-		ObservedAt int64  `json:"observed_at"`
-		ReturnCode *int   `json:"returncode"`
-	}
-	raw, err := os.ReadFile(filepath.Join(dir, "process.json"))
-	if err != nil || json.Unmarshal(raw, &receipt) != nil {
+	parsed, ok := readKept(filepath.Join(dir, "process.json"), func(raw []byte) *processReceipt {
+		receipt := &processReceipt{}
+		if json.Unmarshal(raw, receipt) != nil {
+			return nil
+		}
+		return receipt
+	})
+	if !ok || parsed == nil {
 		return laneView{}, false
 	}
+	receipt := *parsed
 	lane := laneView{Dir: dir, Route: receipt.Route.Alias + ":" + receipt.Route.Effort, Started: receipt.StartedAt, Status: "done"}
 	if receipt.Account != "" {
 		lane.Route += " @" + receipt.Account
@@ -203,35 +281,28 @@ func readLane(dir string) (laneView, bool) {
 			lane.Status = "FAILED"
 		}
 	}
-	if history, err := os.ReadFile(filepath.Join(dir, "runs.jsonl")); err == nil {
-		lane.Runs = strings.Count(string(history), "\n")
+	if runs, ok := readKept(filepath.Join(dir, "runs.jsonl"), func(raw []byte) int { return strings.Count(string(raw), "\n") }); ok {
+		lane.Runs = runs
 	}
 	return lane, true
 }
 
-// findLanes walks a directory for worker receipts, skipping the bulky directories that never hold one.
-func findLanes(root string) []laneView {
+// findLanes reads the worker receipts at the places the tool puts workers, given as patterns below a root.
+func findLanes(root string, places ...string) []laneView {
 	var out []laneView
-	_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if entry.IsDir() {
-			switch entry.Name() {
-			case "home", "evidence", "delta", "checks", "board", "screenshots", "review-cache", "cache", "worktrees":
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if entry.Name() == "process.json" {
-			if lane, ok := readLane(filepath.Dir(path)); ok {
+	for _, place := range places {
+		dirs, _ := filepath.Glob(filepath.Join(root, place))
+		for _, dir := range dirs {
+			if lane, ok := readLane(dir); ok {
 				out = append(out, lane)
 			}
 		}
-		return nil
-	})
+	}
 	return out
 }
+
+// The places a task's workers run: writers, review lanes and their alternates, browser reviewers.
+var taskLanes = []string{"writers/*", "review-*/lane-*/run*", "visual-*/reviewer*"}
 
 func routeText(route config.Route) string {
 	if route.Account != "" {
@@ -241,23 +312,17 @@ func routeText(route config.Route) string {
 }
 
 // commandText is a check as a person names it: without the environment assignments in front.
-func commandText(argv []string) string {
-	if len(argv) > 1 && argv[0] == "env" {
-		argv = argv[1:]
-		for len(argv) > 1 && strings.Contains(argv[0], "=") && !strings.HasPrefix(argv[0], "-") {
-			argv = argv[1:]
-		}
-	}
-	return strings.Join(argv, " ")
-}
+func commandText(argv []string) string { return strings.Join(commandArgv(argv), " ") }
 
 func axesOf(laneDir string) string {
-	var packet struct {
-		Axes []string `json:"axes"`
-	}
-	raw, _ := os.ReadFile(filepath.Join(filepath.Dir(laneDir), "packet.json"))
-	_ = json.Unmarshal(raw, &packet)
-	return strings.Join(packet.Axes, "+")
+	axes, _ := readKept(filepath.Join(filepath.Dir(laneDir), "packet.json"), func(raw []byte) string {
+		var packet struct {
+			Axes []string `json:"axes"`
+		}
+		_ = json.Unmarshal(raw, &packet)
+		return strings.Join(packet.Axes, "+")
+	})
+	return axes
 }
 
 // describe fills in the parts of a task that only the selected one needs.
@@ -275,8 +340,8 @@ func (t *taskView) describeWithChecks(cfg *config.Config, verify bool) {
 	paths, _ := filepath.Glob(filepath.Join(t.Dir, "operations", "*.json"))
 	sort.Strings(paths)
 	for _, path := range paths {
-		record := ops.Record{}
-		if raw, err := os.ReadFile(path); err == nil && json.Unmarshal(raw, &record) == nil && record.GateID == gateID {
+		if parsed, ok := readKept(path, parseOperation); ok && parsed != nil && parsed.GateID == gateID {
+			record := *parsed
 			// Bookkeeping that ran no model and no check (a triage, a hold, a review call that only recorded
 			// the lead's reading) is not a stage worth a place in the chain.
 			if record.DurationS < 1 && record.State == "complete" && slices.Contains([]string{"triage", "hold", "resume", "review", "finish"}, record.Action) {
@@ -290,7 +355,7 @@ func (t *taskView) describeWithChecks(cfg *config.Config, verify bool) {
 	}
 	var lanes []laneView
 	if t.Gate != nil {
-		lanes = findLanes(t.Gate.dir())
+		lanes = findLanes(t.Gate.dir(), taskLanes...)
 		// Every writer and every lane of the last review is listed, also one whose process left no receipt.
 		known := map[string]bool{}
 		for _, lane := range lanes {
@@ -312,11 +377,10 @@ func (t *taskView) describeWithChecks(cfg *config.Config, verify bool) {
 	if t.live() {
 		// Scouts, architects and consultants work outside the task's own directory.
 		checkout := filepath.Dir(t.Dir)
-		for _, shared := range []string{filepath.Join(checkout, "scout"), filepath.Join(checkout, "designs"), filepath.Join(t.Dir, "consults")} {
-			for _, lane := range findLanes(shared) {
-				if lane.Live {
-					lanes = append(lanes, lane)
-				}
+		shared := append(findLanes(checkout, "scout/*", "scout/*/*", "designs/*/*"), findLanes(t.Dir, "consults/*/*/run*")...)
+		for _, lane := range shared {
+			if lane.Live {
+				lanes = append(lanes, lane)
 			}
 		}
 	}
@@ -445,6 +509,12 @@ func (t *taskView) describeWithChecks(cfg *config.Config, verify bool) {
 	if !verify {
 		return
 	}
+	gate.reading(func() { t.verifyChecks(cfg) })
+}
+
+// verifyChecks judges the declared checks of the task and what it needs, against one record of its files.
+func (t *taskView) verifyChecks(cfg *config.Config) {
+	gate := t.Gate
 	// Check receipts are judged against the files of the task, so the files must be where the process is.
 	here, _ := os.Getwd()
 	where := gate.Cwd
@@ -522,8 +592,8 @@ func (t *taskView) tidy() *strings.Replacer {
 
 // runsLine lists how long each run of a lane took, when it ran more than once.
 func runsLine(dir string) string {
-	raw, err := os.ReadFile(filepath.Join(dir, "runs.jsonl"))
-	if err != nil {
+	raw, ok := readKept(filepath.Join(dir, "runs.jsonl"), func(raw []byte) []byte { return raw })
+	if !ok {
 		return ""
 	}
 	var parts []string
@@ -547,32 +617,37 @@ func runsLine(dir string) string {
 	return "   runs: " + strings.Join(parts, ", ")
 }
 
-// limitsLine is the last known use of each subscription, from the readings `agentgate accounts` and the
-// workers leave behind. The panel itself never asks a provider.
-func limitsLine(path string) string {
-	var saved struct {
+// savedAccounts are the configured accounts as the last readings left them, in the order of the configuration.
+// The configuration, not the saved reading, says what an account may do. The panel itself asks no provider
+// here: readings come from `agentgate accounts`, worker calls and the panel's own background refresh.
+func savedAccounts(cfg *config.Config) []accounts.Status {
+	type file struct {
 		Accounts map[string]accounts.Status `json:"accounts"`
 	}
-	raw, err := os.ReadFile(path)
-	if err != nil || json.Unmarshal(raw, &saved) != nil {
-		return ""
+	saved, _ := readKept(filepath.Join(Root(), "accounts.json"), func(raw []byte) file {
+		var saved file
+		_ = json.Unmarshal(raw, &saved)
+		return saved
+	})
+	out := []accounts.Status{}
+	for _, account := range cfg.Accounts {
+		status := saved.Accounts[account.Name]
+		if status.Home != account.Home || status.Provider != account.Provider {
+			status = accounts.Status{} // a reading of another directory under this name
+		}
+		status.Account, status.Configured = account, true
+		out = append(out, status)
 	}
-	names := make([]string, 0, len(saved.Accounts))
-	for name := range saved.Accounts {
-		names = append(names, name)
-	}
-	sort.Strings(names)
+	return out
+}
+
+// limitsLine is the header's figure: per account its tightest limit, by name.
+func limitsLine(statuses []accounts.Status) string {
 	var parts []string
-	for _, name := range names {
-		status := saved.Accounts[name]
-		if !status.Configured || len(status.Windows) == 0 {
-			continue
+	for _, status := range statuses {
+		if window, ok := status.Tightest(); ok {
+			parts = append(parts, fmt.Sprintf("%s %s %.0f%%", status.Name, status.Label(window, true), window.Used))
 		}
-		worst := 0.0
-		for _, window := range status.Windows {
-			worst = max(worst, window.Used)
-		}
-		parts = append(parts, fmt.Sprintf("%s %.0f%%", name, worst))
 	}
 	return strings.Join(parts, " · ")
 }

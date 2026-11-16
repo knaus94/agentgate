@@ -32,18 +32,20 @@ func (g *Gate) receiptsFor(checks []*Check) map[string]*CheckReceipt {
 		if receipt == nil || !passed(receipt) && receipt.Iteration < g.Iteration {
 			continue
 		}
-		if len(check.Inputs) > 0 {
-			key, err := inputKey(check)
-			if err == nil && receipt.InputKey == key {
-				current[id] = receipt
-			}
-			continue
-		}
 		if !measured {
 			measured = true
 			tree, _ = g.snapshot()
 		}
-		if tree != "" && receipt.Tree == tree {
+		if tree == "" {
+			continue
+		}
+		if len(check.Inputs) > 0 {
+			if key, err := g.inputKey(check, tree); err == nil && receipt.InputKey == key {
+				current[id] = receipt
+			}
+			continue
+		}
+		if receipt.Tree == tree {
 			current[id] = receipt
 		}
 	}

@@ -2,6 +2,7 @@ package dev
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/knaus94/agentgate/internal/config"
 	"github.com/knaus94/agentgate/internal/ops"
+	"github.com/knaus94/agentgate/internal/update"
 )
 
 // PauseInput parks the task with the true reason: a missing decision, an authorization, or the end of it.
@@ -98,7 +100,14 @@ func StopHook(cwd, sessionID string) map[string]any {
 	if err != nil {
 		return map[string]any{} // the operation owner reports its own completion
 	}
-	defer unlock()
+	locked := true
+	release := func() {
+		if locked {
+			locked = false
+			unlock()
+		}
+	}
+	defer release()
 	gate, err = loadGate(cwd, sessionID)
 	if err != nil {
 		return map[string]any{"decision": "block", "reason": "AgentGate cannot verify the saved task: " + err.Error()}
@@ -139,10 +148,21 @@ func StopHook(cwd, sessionID string) map[string]any {
 	if record != nil && record.Live {
 		return map[string]any{}
 	}
+	// What the task needs is read from the state as it was loaded. A command the lead starts meanwhile must find
+	// the session free, not refused as "already running" by this hook.
+	release()
 	reason := "/dev task is at " + gate.Step + "."
-	// The lead often believes a command is still running when it was refused within a second.
-	if record != nil && record.State == "failed" && record.Error != "" {
-		reason += " Your last command, `" + record.Action + "`, was refused: " + clipText(oneLine(record.Error), 400) + "."
+	// The lead often believes a command is still running when it ended, or was refused, within a second.
+	if record != nil {
+		reason += fmt.Sprintf(" No agentgate command is running; `%s` ended %s ago: %s.", record.Action,
+			clock(time.Since(time.Unix(int64(record.EndedAt), 0)).Seconds()), record.State)
+		if record.State == "failed" && record.Error != "" {
+			reason += " It was refused: " + clipText(oneLine(record.Error), 400) + "."
+		}
+	}
+	if gate.toolBefore != "" {
+		reason += fmt.Sprintf(" agentgate was %s at this task's last command and is %s now: read `agentgate guide` in full before the next command.",
+			gate.toolBefore, update.Version)
 	}
 	if kinds := gate.needKinds(cwd); len(kinds) > 0 {
 		reason += " It needs: " + strings.Join(kinds, ", ") + "."

@@ -10,6 +10,13 @@ import (
 // worker output. OSC (including clipboard/title commands), CSI, DCS and C1
 // controls must never reach the user's terminal through a read-only dashboard.
 func terminalText(text string) string {
+	plain := true
+	for index := 0; index < len(text) && plain; index++ {
+		plain = text[index] >= 0x20 && text[index] < 0x7f
+	}
+	if plain {
+		return text // printable ASCII has nothing to remove
+	}
 	var out strings.Builder
 	for index := 0; index < len(text); {
 		if text[index] == 0x1b {
@@ -72,6 +79,11 @@ func terminalText(text string) string {
 // cellWidth covers combining marks, East Asian wide characters and common emoji.
 // Joined emoji may be overestimated, which clips early rather than overflowing.
 func runeCells(r rune) int {
+	// Latin, Cyrillic and the arrows, box drawing and symbols the panel draws with hold no combining mark, format
+	// character or wide character, but for the soft hyphen, the Cyrillic combining marks and two angle brackets.
+	if r < 0x300 && r != 0xad || r >= 0x400 && r <= 0x52f && (r < 0x483 || r > 0x489) || r >= 0x2190 && r <= 0x2bff && r != 0x2329 && r != 0x232a {
+		return 1
+	}
 	if unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Me, r) || unicode.Is(unicode.Cf, r) {
 		return 0
 	}

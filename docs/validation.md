@@ -4,6 +4,77 @@ This record distinguishes live integrations from controlled provider fixtures an
 model quality, arbitrary specification size or every possible execution environment. It has two parts: what
 was run for the 0.16.0 source, and the release validation of 0.14.0, which is kept as it was written.
 
+## 0.19.0
+
+Checked on 2026-11-16 against the source based on `4497e12` (0.18.0). The work came from two plans: an account
+for the lead with the limits a model has of its own, and what the lead sessions on 0.18.0 showed (two sessions,
+88 operations, the morning of 2026-11-16).
+
+### Automated checks
+
+| Check | Actual result |
+|---|---|
+| `make check`: `gofmt`, `go vet ./...`, `go test -race ./...`, Node core suite | PASS |
+| Go tests | 227 top-level tests (`go test -list`), six of them new; zero failures |
+| Node core suite | PASS: 19 tests |
+| Dry run: the real binary and sandbox, workers replaying recorded answers | 109 of 109 promises in 11 scenarios |
+
+`make design-browser` was not run: the checker and the browser tools did not change; the design kit's Go
+extraction did, and its tests ran.
+
+New tests: an account kept for the lead takes no worker, under either directory of its subscription; a general
+weekly limit at 100% beside a Fable limit at 50% in the three states of what is known, with a five-hour window
+stopping both; the pass over the whole change takes a file for the stream of an accepted stage and a new
+requirement and refuses any other change to it; a browser pass that observed its scenarios is recorded with what
+it could not establish, and one that observed nothing fails; scenarios are due at their stage and a skip covers
+one stage; a substitution by authorship says so, and a browser reviewer with no permitted route refuses
+`start`. The input test now covers what git ignores, a pattern into an ignored directory, a link inside the
+repository and one leading outside. Existing tests were adapted where wording or a contract changed: the input
+tests, the Stop hook's sentence, the panel's header and the provider's skip function.
+
+The dry run gained the scenario `whole` (three stages, the pass over the whole change finds a file no stream
+owns, `amend` gives it and a requirement, the writer finishes). On 0.18.0 that scenario holds 3 of 4: the
+amendment is refused. The dry run also found a defect the unit test had missed — a stream's files are sorted
+when the plan is resolved, so an added file that sorted first was refused — fixed, and the unit test now adds
+such a file.
+
+### Measured on the user's machine
+
+| What | 0.18.0 | 0.19.0 |
+|---|---|---|
+| An open panel on the running task of a large repository | 65% of a core, 10.7 MB read per second | about 0.5% of a core, no file content read between changes |
+| An open panel on a finished task | 6.7% of a core | 0.9% of a core |
+| One frame with verification (`watch --once`) | 6.7 s, 184 369 directories opened | one tree record: about 0.2 s of input work |
+| The declared inputs of five checks of the skinhole task | 1.66 s, 5 786 files (with `node_modules`) | 0.21 s with the tree record, 1 418 files |
+
+The first two rows were sampled from `/proc` over 20–60 seconds; the input row with a throwaway test on the
+task's worktree, deleted afterwards. A direct before/after of `status` on the same task was not possible: by the
+time the build was ready the task had moved on and had no receipts.
+
+### By hand
+
+- `agentgate figma node` under `bwrap --ro-bind / /`: 0.18.0 fails on `.extract.lock: read-only file system`;
+  0.19.0 answers.
+- `go build` in a writer-like sandbox: fails on `~/.cache/go-build` without `GOCACHE`, passes with it in a
+  writable task directory.
+- `config validate` and `modes` on the user's configuration name heavy and ultra: `visual_reviewer` is
+  `astra-v:high` with no fallback while those modes write on the same model.
+- With a build of this source, a copy of the user's configuration and a state directory of its own:
+  `accounts` printed "week 50% · week, fable 74%" and "fable: not yet known whether the general limit caps it";
+  `accounts reserve claude` added "kept for the lead: workers do not use it" and the warning that every Claude
+  account is kept for the lead, which `doctor` reported too; `watch --once` showed the tightest limit per
+  account and the LIMITS block; the interactive panel read both accounts in the background. These requests read
+  limits; no model was started.
+
+### Not done
+
+- No run on a real model: the browser reviewer's new instruction about `UNVERIFIED`, and scenarios with
+  `stage` written by a real preparation worker, are covered by scripted answers only. The tool no longer
+  depends on the reviewer's status word: a pass that observed scenarios is recorded either way.
+- Which of the two readings of Claude's limits is true is still not known: the first week in which a general
+  limit runs out settles it on a real subscription.
+- Two Claude subscriptions on one machine, one of them kept for the lead, were exercised only in the tests.
+
 ## 0.18.0
 
 Checked on 2026-11-16 against the source based on `23bd9d1` (0.17.0); the plan is groups D and E of the

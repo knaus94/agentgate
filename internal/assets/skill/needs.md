@@ -85,7 +85,8 @@ evidence: make it available and `run`, or `pause` when it cannot be had.
 
 ## stall — a correction made no verified progress
 
-Do not repeat it. Diagnose — `agentgate consult` can investigate — and give the writers the new diagnosis:
+When checks still fail, `what` names each with its verdict line — for a layout check, its
+`layout measurements:` line — and `detail` holds the end of each log. Do not repeat the correction. Diagnose — `agentgate consult` can investigate — and give the writers the new diagnosis:
 
 ```json
 {"work": [{"stream": "api", "note": "The failure is the cache key, not the handler: key the cache by account id."}]}
@@ -109,7 +110,11 @@ is what is wrong.
 ## scenarios — opted-in browser scenarios were not observed
 
 `run {"visual": {"url": "http://localhost:4200", "origins": ["http://localhost:4200"]}}`, or
-`visual {"skip_reason": "<why>"}`.
+`visual {"skip_reason": "<why>"}`. Only the scenarios of this stage are due — those whose `stage` names it, the
+last stage's without one, every scenario in the pass over the whole change — and a skip covers this stage
+only. A pass that observed its scenarios is recorded even where the reviewer could not establish everything:
+`did` and the receipt say what was not established. What a browser cannot do — slow or reordered responses, a
+hidden tab, controlled time — is a test's to prove, not a scenario's.
 
 ## scope — an isolated task changed files no stream owns
 

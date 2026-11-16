@@ -40,7 +40,7 @@ func workerEnvironment(call Call, extra ...string) []string {
 		}
 		env = filtered
 	}
-	return append(env, extra...)
+	return append(append(env, call.Env...), extra...)
 }
 
 func sortedKeys[V any](values map[string]V) []string {

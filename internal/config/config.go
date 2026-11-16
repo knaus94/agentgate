@@ -54,6 +54,9 @@ type Account struct {
 	Provider string `json:"provider"` // claude or codex
 	Home     string `json:"home"`
 	Paid     bool   `json:"paid,omitempty"` // an API-key profile bills per token; it is used only when this is set
+	// LeadOnly keeps the account for the lead session: no worker runs on it, nor on another directory of its
+	// subscription.
+	LeadOnly bool `json:"lead_only,omitempty"`
 }
 
 // WorkerMCP is an MCP server handed to workers of chosen roles. Workers otherwise run without any.

@@ -87,7 +87,7 @@ rename it and sync its parent directory. A failed persistence operation is retur
 | Evidence | Bound to | Invalidated by |
 |---|---|---|
 | Code review | The exact change of the stage's files between two trees, the content of declared context, the code contract and the criteria | Changed scoped bytes, a changed contract; a changed criterion alone has the criteria reassessed without re-reading the code |
-| Check with explicit `inputs` | Its command, declared patterns and matched contents | Input content/set changes, command changes or inability to fingerprint inputs |
+| Check with explicit `inputs` | Its command, declared patterns and the object ids git recorded for the matched files; files git ignores only under a pattern's literal prefix, read from disk; a link and its target | Input content/set changes, command changes, a link leading outside the repository |
 | Check without `inputs` | The tree of the whole working tree it ran against | Any change of the working tree; a commit of the same bytes changes nothing |
 | Before-image of any file | The tree recorded when the task opened and at each stage boundary | Nothing: a file admitted later is read from the same tree |
 | Design package | Actual manifest and inventoried file bytes | Missing/corrupt inventory, changed spec/assets/images/brief |

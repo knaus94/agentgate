@@ -1,6 +1,7 @@
 package dev
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -15,6 +16,7 @@ import (
 	"github.com/knaus94/agentgate/internal/config"
 	"github.com/knaus94/agentgate/internal/ops"
 	"github.com/knaus94/agentgate/internal/provider"
+	"github.com/knaus94/agentgate/internal/update"
 )
 
 // AdoptLegacy brings over what an installation under the tool's earlier name left: its state and its settings
@@ -146,13 +148,18 @@ func loadGateFile(path string) (*Gate, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read task state: %w", err)
 	}
+	return parseGate(raw)
+}
+
+// parseGate reads one task from the content of its state file.
+func parseGate(raw []byte) (*Gate, error) {
 	var probe struct {
 		Version int `json:"version"`
 	}
 	if err := json.Unmarshal(raw, &probe); err != nil {
 		return nil, fmt.Errorf("task state is corrupt; preserve state.json and restore its last good copy: %w", err)
 	}
-	gate := &Gate{}
+	gate, err := &Gate{}, error(nil)
 	switch {
 	case probe.Version > stateVersion:
 		return nil, fmt.Errorf("task state was written by a newer agentgate (format %d); update the tool", probe.Version)
@@ -184,6 +191,9 @@ func loadGateFile(path string) (*Gate, error) {
 	if gate.Disputes == nil {
 		gate.Disputes = map[string]Dispute{}
 	}
+	if gate.Tool != update.Version {
+		gate.toolBefore = cmp.Or(gate.Tool, "an earlier version")
+	}
 	return gate, nil
 }
 
@@ -195,6 +205,7 @@ func Current() *Gate { return readGate("", session()) }
 func LoadCurrent() (*Gate, error) { return loadGate("", session()) }
 
 func (g *Gate) save() error {
+	g.Tool = update.Version
 	dir := sessionDir(g.Cwd, g.Session)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -364,6 +375,11 @@ func begin(resolved *Resolved, name string) (gate *Gate, err error) {
 		}
 	}
 	if gate.BaseTree, err = gate.snapshot(); err != nil {
+		return nil, err
+	}
+	// The declared inputs of every check are looked at before any work, not after a writer's round.
+	if gate.said, err = gate.inspectInputs(plan.checksFor(-1), gate.BaseTree); err != nil {
+		_ = os.RemoveAll(gate.dir())
 		return nil, err
 	}
 	if resolved.Request.ReviewFirst() {

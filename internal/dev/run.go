@@ -113,16 +113,15 @@ func permittedContinuation(cfg *config.Config, wanted, previous config.Route) bo
 	return false
 }
 
-// invoke runs one lane on its route or a declared alternate and records which one answered.
-func (s *substitutions) invoke(cfg *config.Config, call provider.Call, skip func(config.Route) bool) (provider.Result, config.Route, error) {
+// invoke runs one lane on its route or a declared alternate and records which one answered, and why.
+func (s *substitutions) invoke(cfg *config.Config, call provider.Call, skip func(config.Route) string) (provider.Result, config.Route, error) {
 	if err := ops.Checkpoint(); err != nil {
 		return provider.Result{}, call.Route, err
 	}
 	result, used, err := provider.RunRouted(cfg, call, skip)
 	if err == nil && used.SubstitutedFrom != "" {
 		s.mu.Lock()
-		s.list = append(s.list, provider.Substitution{Wanted: used.SubstitutedFrom, Used: used.String(),
-			Reason: "usage limit of the routed pool was exhausted"})
+		s.list = append(s.list, provider.Substitution{Wanted: used.SubstitutedFrom, Used: used.String(), Reason: result.Why})
 		s.mu.Unlock()
 	}
 	return result, used, err

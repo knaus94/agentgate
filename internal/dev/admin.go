@@ -83,6 +83,12 @@ func Modes(cfg *config.Config) string {
 		fmt.Fprintf(&out, "  %-8s %-7s %-22s pool %-7s fallback %s\n", alias, model.Provider, model.Model, model.Pool,
 			strings.Join(cfg.Fallbacks[alias], ", "))
 	}
+	if gaps := cfg.BrowserGaps(); len(gaps) > 0 {
+		fmt.Fprintf(&out, "\nwarnings\n")
+		for _, gap := range gaps {
+			fmt.Fprintf(&out, "  %s\n", gap)
+		}
+	}
 	return out.String()
 }
 
@@ -235,6 +241,9 @@ func Doctor() map[string]any {
 				why = "ready"
 			}
 			add("account "+status.Name, ok, false, status.Home+": "+why)
+		}
+		for _, warning := range accounts.Unserved(cfg) {
+			add("accounts for workers", false, false, warning)
 		}
 	}
 	healthy := true

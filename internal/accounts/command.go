@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,9 +16,11 @@ import (
 const commandUsage = `usage:
   agentgate accounts [--json]                       limits of the configured accounts
   agentgate accounts discover [--save]              find CLI profiles in the home directory; --save adds the usable ones
-  agentgate accounts add <name> <claude|codex> <home> [--paid]
+  agentgate accounts add <name> <claude|codex> <home> [--paid] [--lead-only]
   agentgate accounts remove <name>
-  agentgate accounts reset <name>                   forget that the account hit a limit`
+  agentgate accounts reserve <name>                 keep the account for the lead: no worker runs on it
+  agentgate accounts unreserve <name>               let workers use it again
+  agentgate accounts reset <name>                   forget that the account hit a limit and what was learned of its limits`
 
 // LoginHint is the command that logs a profile in. It is interactive, so the user runs it in a terminal.
 func LoginHint(account config.Account) string {
@@ -52,7 +55,11 @@ func Command(cfg *config.Config, manager *Manager, rest []string, flags map[stri
 		if flags["json"] {
 			return statuses, nil
 		}
-		return Render(statuses, nil, manager.leadHome), nil
+		text := Render(statuses, nil, manager.leadHome)
+		for _, warning := range Unserved(cfg) {
+			text += "\n" + warning + "\n"
+		}
+		return text, nil
 	case "discover":
 		found := Discover()
 		if !flags["save"] {
@@ -70,7 +77,7 @@ func Command(cfg *config.Config, manager *Manager, rest []string, flags map[stri
 		if len(rest) != 4 || strings.TrimSpace(rest[1]) == "" || (rest[2] != "claude" && rest[2] != "codex") {
 			return nil, errors.New(commandUsage)
 		}
-		account := config.Account{Name: rest[1], Provider: rest[2], Home: rest[3], Paid: flags["paid"]}
+		account := config.Account{Name: rest[1], Provider: rest[2], Home: rest[3], Paid: flags["paid"], LeadOnly: flags["lead-only"]}
 		if !filepath.IsAbs(Home(account)) {
 			absolute, err := filepath.Abs(Home(account))
 			if err != nil {
@@ -91,6 +98,25 @@ func Command(cfg *config.Config, manager *Manager, rest []string, flags map[stri
 		text := Render([]Status{status}, nil, manager.leadHome)
 		if !status.LoggedIn {
 			text += "\nLog it in from a terminal:  " + LoginHint(account) + "\n"
+		}
+		return text, nil
+	case "reserve", "unreserve":
+		position := -1
+		if len(rest) == 2 {
+			position = slices.IndexFunc(cfg.Accounts, func(other config.Account) bool { return other.Name == rest[1] })
+		}
+		if position < 0 {
+			return nil, fmt.Errorf("unknown account; %s", commandUsage)
+		}
+		list := slices.Clone(cfg.Accounts)
+		list[position].LeadOnly = action == "reserve"
+		if err := config.SetValue("accounts", list); err != nil {
+			return nil, err
+		}
+		cfg.Accounts = list
+		text := Render(New(list, manager.path).Statuses(false), nil, manager.leadHome)
+		for _, warning := range Unserved(cfg) {
+			text += "\n" + warning + "\n"
 		}
 		return text, nil
 	case "remove", "reset":
@@ -145,11 +171,11 @@ func Render(statuses []Status, at *int64, leadHome string) string {
 	if at != nil {
 		moment = *at
 	}
+	notes := Notes(statuses, moment, leadHome, false)
 	var out strings.Builder
 	for _, provider := range []string{"claude", "codex"} {
-		first := map[string]string{}
 		header := false
-		for _, status := range statuses {
+		for index, status := range statuses {
 			if status.Provider != provider {
 				continue
 			}
@@ -157,41 +183,13 @@ func Render(statuses []Status, at *int64, leadHome string) string {
 				fmt.Fprintf(&out, "%s\n", provider)
 				header = true
 			}
-			var notes []string
 			var windows []string
 			for _, window := range status.Windows {
-				text := fmt.Sprintf("%s %.0f%%", window.Label, window.Used)
+				text := fmt.Sprintf("%s %.0f%%", status.Label(window, false), window.Used)
 				if window.Used >= 100-minHeadroom && window.ResetsAt > moment {
 					text += " (back " + time.Unix(window.ResetsAt, 0).Format("Jan 2 15:04") + ")"
 				}
 				windows = append(windows, text)
-			}
-			switch original, duplicate := first[status.Identity]; {
-			case !status.LoggedIn:
-				notes = append(notes, "not logged in: "+LoginHint(status.Account))
-			case status.APIKey && !status.Paid:
-				notes = append(notes, "API key, billed per token: not used unless added with --paid")
-			case duplicate && status.Identity != "":
-				notes = append(notes, "same subscription as "+original+": adds no capacity")
-			default:
-				if status.Identity != "" {
-					first[status.Identity] = status.Name
-				}
-				for scope, until := range status.Cooling {
-					if until > moment {
-						what := "all models"
-						if scope != "*" {
-							what = scope
-						}
-						notes = append(notes, fmt.Sprintf("resting for %s until %s", what, time.Unix(until, 0).Format("Jan 2 15:04")))
-					}
-				}
-			}
-			if status.Note != "" {
-				notes = append(notes, status.Note)
-			}
-			if provider == config.Lead() && clean(status.Home) == leadHome {
-				notes = append(notes, "lead session runs here")
 			}
 			plan := status.Plan
 			if plan == "" {
@@ -202,7 +200,7 @@ func Render(statuses []Status, at *int64, leadHome string) string {
 				usage = "-"
 			}
 			fmt.Fprintf(&out, "  %-14s %-18s %-12s %s\n", status.Name, status.Home, plan, usage)
-			for _, note := range notes {
+			for _, note := range notes[index] {
 				fmt.Fprintf(&out, "  %-14s   %s\n", "", note)
 			}
 		}
@@ -211,4 +209,156 @@ func Render(statuses []Status, at *int64, leadHome string) string {
 		return "No CLI profiles found.\n"
 	}
 	return out.String()
+}
+
+// Label names a window as a person reads it. Long, for the table: the general weekly limit is "week, other
+// models" once the subscription's own limits are known to be apart from it. Short, for the panel: "all" for the
+// general weekly limit beside a model's own, the model's name for its own, "5h" for the session window.
+func (s Status) Label(window Window, short bool) string {
+	scoped := ""
+	for _, other := range s.Windows {
+		if other.Scope != "" && other.period() == window.period() {
+			scoped = other.Scope
+		}
+	}
+	general := s.Provider == "claude" && window.Scope == "" && window.period() == "week" && scoped != ""
+	caps, known := s.GeneralCaps[scoped]
+	switch {
+	case !short && general && known && !caps:
+		return "week, other models"
+	case !short:
+		return window.Label
+	case general:
+		return "all"
+	case s.Provider == "claude" && window.Scope != "":
+		return window.Scope
+	case window.Label == "5 hours":
+		return "5h"
+	}
+	return window.Label
+}
+
+// Notes says what the tool does with each account, by its position in statuses: kept for the lead, resting,
+// not logged in, the same subscription as another, and what is known of a model's own limit. short is the
+// wording for the panel, where one line holds them all.
+func Notes(statuses []Status, moment int64, leadHome string, short bool) [][]string {
+	out := make([][]string, len(statuses))
+	first, kept := map[string]string{}, map[string]string{}
+	for _, status := range statuses {
+		if status.LeadOnly && status.Identity != "" {
+			kept[status.Provider+status.Identity] = status.Name
+		}
+	}
+	for index, status := range statuses {
+		var notes []string
+		say := func(long, brief string) {
+			if short {
+				long = brief
+			}
+			notes = append(notes, long)
+		}
+		keeper := kept[status.Provider+status.Identity]
+		switch {
+		case status.LeadOnly:
+			say("kept for the lead: workers do not use it", "kept for the lead")
+		case keeper != "":
+			say("same subscription as "+keeper+", kept for the lead: workers do not use it", "kept for the lead, as "+keeper)
+		}
+		switch original, duplicate := first[status.Provider+status.Identity]; {
+		case !status.LoggedIn:
+			say("not logged in: "+LoginHint(status.Account), "not logged in")
+		case status.APIKey && !status.Paid:
+			say("API key, billed per token: not used unless added with --paid", "API key: not used")
+		case duplicate && status.Identity != "" && (keeper == "" || status.LeadOnly):
+			say("same subscription as "+original+": adds no capacity", "same subscription as "+original)
+		case duplicate && status.Identity != "":
+			// said above: its subscription is kept for the lead
+		default:
+			if status.Identity != "" {
+				first[status.Provider+status.Identity] = status.Name
+			}
+			scopes := make([]string, 0, len(status.Cooling))
+			for scope := range status.Cooling {
+				scopes = append(scopes, scope)
+			}
+			sort.Strings(scopes)
+			for _, scope := range scopes {
+				if until := status.Cooling[scope]; until > moment {
+					what, brief := scope, scope+" "
+					switch scope {
+					case "*":
+						what, brief = "all models", ""
+					case "all":
+						what = "the models without a limit of their own"
+					}
+					back := time.Unix(until, 0).Format("Jan 2 15:04")
+					say("resting for "+what+" until "+back, brief+"resting until "+back)
+				}
+			}
+		}
+		if status.Provider == "claude" {
+			seen := map[string]bool{}
+			for _, window := range status.Windows {
+				if window.Scope == "" || seen[window.Scope] {
+					continue
+				}
+				seen[window.Scope] = true
+				caps, known := status.GeneralCaps[window.Scope]
+				switch {
+				case !known:
+					say(window.Scope+": not yet known whether the general limit caps it", window.Scope+": unknown if all caps it")
+				case caps:
+					say(window.Scope+": also capped by the general limit (seen)", window.Scope+": capped by all too")
+				default:
+					say(window.Scope+": its own limit only (seen)", window.Scope+": own limit only")
+				}
+			}
+		}
+		if status.Note != "" {
+			notes = append(notes, status.Note)
+		}
+		if status.Provider == config.Lead() && clean(status.Home) == leadHome {
+			say("lead session runs here", "lead runs here")
+		}
+		out[index] = notes
+	}
+	return out
+}
+
+// Unserved warns about a provider whose every account is kept for the lead while workers are routed to it:
+// those workers will all run on fallback models.
+func Unserved(cfg *config.Config) []string {
+	used := map[string]bool{}
+	use := func(spec string) {
+		if route, err := cfg.Route(spec); err == nil {
+			used[route.Provider] = true
+		}
+	}
+	for _, mode := range cfg.Modes {
+		for _, spec := range append([]string{mode.Scout, mode.Backend, mode.Frontend}, mode.Architecture...) {
+			use(spec)
+		}
+		for _, lane := range mode.Review {
+			use(lane.Route)
+		}
+	}
+	for _, spec := range []string{cfg.UIDesigner, cfg.VisualReviewer, cfg.Consultant} {
+		use(spec)
+	}
+	var out []string
+	for _, provider := range []string{"claude", "codex"} {
+		count, kept := 0, 0
+		for _, account := range cfg.Accounts {
+			if account.Provider == provider {
+				count++
+				if account.LeadOnly {
+					kept++
+				}
+			}
+		}
+		if used[provider] && count > 0 && kept == count {
+			out = append(out, fmt.Sprintf("Every %s account is kept for the lead: %s workers will all run on fallback models.", provider, provider))
+		}
+	}
+	return out
 }

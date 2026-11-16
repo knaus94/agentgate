@@ -2,9 +2,11 @@ package dev
 
 import (
 	"fmt"
-	"github.com/knaus94/agentgate/internal/config"
 	"strings"
 	"time"
+
+	"github.com/knaus94/agentgate/internal/accounts"
+	"github.com/knaus94/agentgate/internal/config"
 )
 
 func span(started, ended, now int64) string {
@@ -46,8 +48,8 @@ func (m *panel) frame() []string {
 	}
 	left := " agentgate · " + scope
 	right := now.Format("15:04:05") + " "
-	if m.limits != "" {
-		right = m.limits + "  " + right
+	if limits := limitsLine(m.accounts); limits != "" {
+		right = limits + "  " + right
 	}
 	if width < 70 {
 		right = now.Format("15:04:05") + " "
@@ -57,7 +59,7 @@ func (m *panel) frame() []string {
 	}
 	head := p.bold(left) + strings.Repeat(" ", max(1, width-cells(left)-cells(right))) + p.dim(right)
 	if m.help {
-		lines := []string{head, rule, p.bold(" KEYBOARD"), "", " ↑ ↓ / j k      Select a task or row", " tab / ← →      Switch task list and details", " enter          Open selected row", " esc / h        Go back", " PgUp PgDn      Move by a page", " Home End / g G First / last row", " f              Follow worker activity", " a              Toggle every checkout", " r              Refresh now", " ?              Toggle this help", " q / Ctrl-C     Close dashboard"}
+		lines := []string{head, rule, p.bold(" KEYBOARD"), "", " ↑ ↓ / j k      Select a task or row", " tab / ← →      Switch task list and details", " enter          Open selected row", " esc / h        Go back", " PgUp PgDn      Move by a page", " Home End / g G First / last row", " f              Follow worker activity", " a              Toggle every checkout", " L              Show or hide the limits of the accounts", " r              Refresh now", " ?              Toggle this help", " q / Ctrl-C     Close dashboard"}
 		return m.finish(lines, "Any key returns · q quit")
 	}
 	if m.view != nil {
@@ -69,7 +71,7 @@ func (m *panel) frame() []string {
 		for _, line := range wrap("No /dev task here yet. Start in Claude Code with /dev <task> or in Codex with $dev <task>. Press a for every checkout.", width-2) {
 			lines = append(lines, "  "+p.dim(line))
 		}
-		return m.finish(lines, "a every checkout · q quit")
+		return m.finish(m.withLimits(lines, len(lines), width), "a every checkout · q quit")
 	}
 	// Task list: a window around the selection.
 	room := min(len(m.tasks), max(3, (m.height-6)/3))
@@ -116,6 +118,9 @@ func (m *panel) frame() []string {
 				meta += " · " + doing
 			}
 			lines = append(lines, "    "+p.dim(fit(meta, width-4)))
+			if now := m.nowLine(task); now != "" {
+				lines = append(lines, "    "+p.dim(fit(now, width-4)))
+			}
 			continue
 		}
 		fixed := 2 + 2 + 7 + 17 + 8 + repoWidth + 18
@@ -129,7 +134,11 @@ func (m *panel) frame() []string {
 			title = p.bold(title)
 		}
 		lines = append(lines, row+title+" "+p.cyan(fit(doing, 17)))
+		if now := m.nowLine(task); now != "" {
+			lines = append(lines, "    "+p.dim(fit(now, width-5)))
+		}
 	}
+	tasksEnd := len(lines)
 	lines = append(lines, rule)
 	task := m.selected()
 	gate := task.Gate
@@ -267,7 +276,96 @@ func (m *panel) frame() []string {
 			}
 		}
 	}
-	return m.finish(lines, "↑↓ move · tab switch list · enter open · a every checkout · ? help · q quit")
+	return m.finish(m.withLimits(lines, tasksEnd, width), "↑↓ move · tab switch list · enter open · a every checkout · ? help · q quit")
+}
+
+// withLimits puts the LIMITS block under the task list when there is room for it: the tasks and the selected
+// task come first, and below 24 rows the header's figure is all there is.
+func (m *panel) withLimits(lines []string, at, width int) []string {
+	block := m.limitsBlock(width)
+	if len(block) == 0 || m.noLimits || !m.unlimited && (m.height < 24 || len(lines)+len(block) > m.height-1) {
+		return lines
+	}
+	return append(append(append([]string{}, lines[:at]...), block...), lines[at:]...)
+}
+
+// limitsBlock is one line per account: every limit by name, when an exhausted one comes back, and what the tool
+// does with the account.
+func (m *panel) limitsBlock(width int) []string {
+	if len(m.accounts) == 0 {
+		return nil
+	}
+	p, now := m.paint, time.Now().Unix()
+	oldest := int64(0)
+	for _, status := range m.accounts {
+		// the age of the numbers: a reading that failed kept the ones before it
+		if read := status.ProbedAt; read > 0 && (oldest == 0 || read < oldest) {
+			oldest = read
+		}
+	}
+	age := "not read yet"
+	if oldest > 0 {
+		age = "read " + clock(float64(now-oldest)) + " ago"
+	}
+	title := " LIMITS"
+	out := []string{"", p.bold(title) + strings.Repeat(" ", max(1, width-cells(title)-cells(age)-1)) + p.dim(age)}
+	asked := append([]accounts.Status{}, m.accounts...)
+	for index := range asked {
+		// an account nobody has asked about yet is not known to be logged out
+		asked[index].LoggedIn = asked[index].LoggedIn || asked[index].CheckedAt == 0
+	}
+	notes := accounts.Notes(asked, now, "", true)
+	// What does not fit beside the limits moves, whole notes at a time, under them; on a narrow screen further left.
+	indent := 2 + 8 + 12 + 12
+	if width-indent-1 < 30 {
+		indent = 6
+	}
+	for index, status := range m.accounts {
+		var limits []string
+		for _, window := range status.Windows {
+			if !status.Current(window) {
+				continue
+			}
+			text := fmt.Sprintf("%s %.0f%%", status.Label(window, true), window.Used)
+			if window.Used >= 80 && window.ResetsAt > now {
+				text += " (back " + time.Unix(window.ResetsAt, 0).Format("Jan 2 15:04") + ")"
+			}
+			if window.Used >= 98 {
+				text = p.red(text)
+			} else if window.Used >= 80 {
+				text = p.yellow(text)
+			}
+			limits = append(limits, text)
+		}
+		usage := strings.Join(limits, " · ")
+		if usage == "" {
+			usage = p.dim("—")
+		}
+		plan := status.Plan
+		if plan == "" {
+			plan = "—"
+		}
+		left := "  " + fit(status.Provider, 8) + fit(status.Name, 12) + p.dim(fit(plan, 12)) + usage
+		rows, room := []string{""}, width-cells(terminalText(left))-3
+		for _, note := range notes[index] {
+			switch last := len(rows) - 1; {
+			case rows[last] == "" && cells(note) <= room:
+				rows[last] = note
+			case rows[last] != "" && cells(rows[last])+3+cells(note) <= room:
+				rows[last] += " · " + note
+			default:
+				rows, room = append(rows, note), max(0, width-indent-1)
+			}
+		}
+		if rows[0] != "" {
+			left += "  " + p.dim(rows[0])
+		}
+		out = append(out, left)
+		for _, row := range rows[1:] {
+			out = append(out, strings.Repeat(" ", indent)+p.dim(fit(row, max(0, width-indent-1))))
+		}
+	}
+	return out
 }
 
 // finish cuts the frame to the screen and puts the key hints on the last line.
@@ -499,4 +597,12 @@ func PanelText(cfg *config.Config, global, color bool, width, height int) string
 		}
 	}
 	return strings.Join(lines, "\n") + "\n"
+}
+
+// nowLine is what a running operation of the task is busy with, and for how long.
+func (m *panel) nowLine(task *taskView) string {
+	if !task.live() || task.Op.Doing == "" {
+		return ""
+	}
+	return "now: " + task.Op.Doing + " · " + clock(float64(time.Now().UnixNano())/1e9-task.Op.DoingSince)
 }

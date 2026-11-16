@@ -36,6 +36,44 @@ func (c *Config) Alternates(route Route) []Route {
 	return out
 }
 
+// ReviewerFor is the first route among a reviewer's route and its fallbacks that did not write the code and is
+// not kept from review; ok is false when there is none.
+func (c *Config) ReviewerFor(spec string, authors []string) (Route, bool) {
+	route, err := c.Route(spec)
+	if err != nil {
+		return Route{}, false
+	}
+	for _, candidate := range append([]Route{route}, c.Alternates(route)...) {
+		if !slices.Contains(authors, candidate.Model) && !slices.Contains(c.ReviewersExcluded, candidate.Alias) {
+			return candidate, true
+		}
+	}
+	return Route{}, false
+}
+
+// BrowserGaps names the modes whose browser verification cannot run: the visual reviewer and every fallback of
+// it are the model that writes code in that mode, or are kept from review.
+func (c *Config) BrowserGaps() []string {
+	route, err := c.Route(c.VisualReviewer)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, name := range ModeNames {
+		var authors []string
+		for _, spec := range []string{c.Modes[name].Backend, c.Modes[name].Frontend} {
+			if writer, err := c.Route(spec); err == nil {
+				authors = append(authors, writer.Model)
+			}
+		}
+		if _, ok := c.ReviewerFor(c.VisualReviewer, authors); !ok {
+			out = append(out, fmt.Sprintf("%s: browser verification cannot run — visual_reviewer %s and its fallbacks are the model that writes there (%s) "+
+				"or are kept from review; give %s a fallback on another model, or choose another visual_reviewer", name, c.VisualReviewer, route.Model, route.Alias))
+		}
+	}
+	return out
+}
+
 // Lower returns the effort one step down, never below medium: a recheck reads a delta, not the whole change.
 func Lower(effort string) string {
 	if index := slices.Index(Efforts, effort); index > 1 {

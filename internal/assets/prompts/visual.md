@@ -8,7 +8,10 @@ stand access and, on later passes, `recheck` findings. The scenario matrix defin
 screens by states, roles and viewports.
 
 1. Open the start URL. Use the disposable login when given, or the preloaded session. If the stand is
-   unreachable, blank or cannot authenticate, return `UNVERIFIED` with the concrete reason.
+   unreachable, blank or cannot authenticate, return `UNVERIFIED` with the concrete reason: `UNVERIFIED` means
+   nothing could be observed. When you observed scenarios and could not establish everything in them — a state
+   the stand's data does not reach, a timing the browser tools cannot drive — return `PASS` or `NEEDS_FIX` by
+   your findings and list what you could not establish in `unverified`.
 2. Execute only the listed scenarios, grouped by role and viewport. Each coverage row copies the scenario's id,
    screen, state, viewport and role. Set `observed` only after actually using that scenario.
 3. Take one representative screenshot per observed scenario with `browser_take_screenshot` (no filename) and

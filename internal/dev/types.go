@@ -167,6 +167,7 @@ type VisualRun struct {
 	Excluded  []Excluded `json:"excluded"`
 	Findings  []Finding  `json:"findings"`
 	Console   []string   `json:"console_errors"`
+	Limits    []string   `json:"limits,omitempty"` // what the pass observed but could not establish
 	Dir       string     `json:"dir"`
 }
 
@@ -203,6 +204,7 @@ type StageRecord struct {
 	Reviewers  []string             `json:"reviewers,omitempty"` // the routes that reviewed the stage
 	Checks     []string             `json:"checks,omitempty"`    // the declared checks and their results
 	Notes      []string             `json:"notes,omitempty"`     // findings left as notes, one line each
+	Browser    string               `json:"browser,omitempty"`   // what its browser verification came to
 	Archive    string               `json:"archive"`             // the stage's reviews, findings and receipts
 }
 
@@ -274,6 +276,12 @@ type Gate struct {
 	Dropped     bool     `json:"dropped,omitempty"`     // the files the task changed in the checkout were restored
 	Attachments []string `json:"attachments,omitempty"` // files the user gave with the request, copied into the task
 	CreatedAt   int64    `json:"created_at"`
+	Tool        string   `json:"tool_version,omitempty"` // the agentgate that last wrote the task
 
 	legacy *legacyState // a task of an earlier format whose origin trees are not built yet
+	pin    *pinned      // the working tree of the present reading
+	said   []string     // what an earlier part of this command found, for its answer
+	// toolBefore is the agentgate that wrote the task before this one read it, when that was another version:
+	// the protocol the lead learned may have changed.
+	toolBefore string
 }

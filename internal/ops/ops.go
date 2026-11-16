@@ -34,18 +34,21 @@ type Child struct {
 }
 
 type Record struct {
-	ID        string   `json:"id"`
-	Action    string   `json:"action"`
-	GateID    string   `json:"gate_id,omitempty"`
-	PID       int      `json:"pid"`
-	Identity  string   `json:"process_identity"`
-	State     string   `json:"state"`
-	StartedAt float64  `json:"started_at"`
-	EndedAt   float64  `json:"ended_at,omitempty"`
-	DurationS float64  `json:"duration_s,omitempty"`
-	Error     string   `json:"error,omitempty"`
-	Children  []*Child `json:"children"`
-	Live      bool     `json:"live"`
+	ID        string  `json:"id"`
+	Action    string  `json:"action"`
+	GateID    string  `json:"gate_id,omitempty"`
+	PID       int     `json:"pid"`
+	Identity  string  `json:"process_identity"`
+	State     string  `json:"state"`
+	StartedAt float64 `json:"started_at"`
+	EndedAt   float64 `json:"ended_at,omitempty"`
+	DurationS float64 `json:"duration_s,omitempty"`
+	Error     string  `json:"error,omitempty"`
+	// Doing is what the operation is busy with now, in a few words, and since when.
+	Doing      string   `json:"doing,omitempty"`
+	DoingSince float64  `json:"doing_since,omitempty"`
+	Children   []*Child `json:"children"`
+	Live       bool     `json:"live"`
 }
 
 var (
@@ -89,8 +92,13 @@ func Status(dir string) *Record {
 	if json.Unmarshal(raw, record) != nil {
 		return nil
 	}
-	record.Live = record.State == "running" && record.Identity != "" && identity(record.PID) == record.Identity
+	record.Live = Alive(record)
 	return record
+}
+
+// Alive says whether the process that owns a running operation is still the one that started it.
+func Alive(record *Record) bool {
+	return record.State == "running" && record.Identity != "" && identity(record.PID) == record.Identity
 }
 
 // RequestStop asks the live operation of a session directory to stop.
@@ -146,6 +154,18 @@ func Begin(dir, action, gateID string) error {
 	return nil
 }
 
+// Doing records what the running operation is busy with now, for `status` and the panel. Outside an operation
+// it does nothing.
+func Doing(format string, values ...any) {
+	mu.Lock()
+	defer mu.Unlock()
+	if active == nil {
+		return
+	}
+	active.Doing, active.DoingSince = fmt.Sprintf(format, values...), now()
+	_ = save()
+}
+
 // End closes the running operation with its outcome.
 func End(err error) error {
 	mu.Lock()
@@ -153,7 +173,7 @@ func End(err error) error {
 	if active == nil {
 		return nil
 	}
-	active.State = "complete"
+	active.State, active.Doing, active.DoingSince = "complete", "", 0
 	if err != nil {
 		active.State, active.Error = "failed", err.Error()
 		if IsCancelled(err) {

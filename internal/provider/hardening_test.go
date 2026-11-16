@@ -231,15 +231,20 @@ func TestRoutingSkipsDisallowedPrimaryAndReturnsActualSessionDirectory(t *testin
 	}
 	var calls []Call
 	Run = func(call Call) (Result, error) { calls = append(calls, call); return Result{Session: "s"}, nil }
-	result, route, err := RunRouted(cfg, Call{Route: cfg.MustRoute("sol:high"), Dir: base}, func(route config.Route) bool { return route.Alias == "sol" })
-	if err != nil || route.Alias != "sonnet" || len(calls) != 1 || result.Dir != base+"-alt1" {
+	result, route, err := RunRouted(cfg, Call{Route: cfg.MustRoute("sol:high"), Dir: base}, func(route config.Route) string {
+		if route.Alias == "sol" {
+			return "sol wrote the code under review"
+		}
+		return ""
+	})
+	if err != nil || route.Alias != "sonnet" || len(calls) != 1 || result.Dir != base+"-alt1" || result.Why != "sol wrote the code under review" {
 		t.Fatalf("a disallowed author route ran or the actual session directory was lost: %+v %+v %v", result, route, err)
 	}
 	if !reflect.DeepEqual(calls[0].ReadDirs, []string{base}) {
 		t.Fatal("alternate cannot read original assignment through /tmp isolation")
 	}
 	calls = nil
-	if _, _, err := RunRouted(cfg, Call{Route: cfg.MustRoute("sol:high"), Dir: base}, func(config.Route) bool { return true }); err == nil || len(calls) != 0 {
+	if _, _, err := RunRouted(cfg, Call{Route: cfg.MustRoute("sol:high"), Dir: base}, func(config.Route) string { return "forbidden" }); err == nil || len(calls) != 0 {
 		t.Fatal("all-disallowed routing must fail without invoking any provider")
 	}
 }

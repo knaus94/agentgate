@@ -10,10 +10,16 @@ frontend writers, the reviewer lanes, the severities that block and the effort c
   (`needs: review`).
 - **Limits.** A model whose limit is exhausted is replaced by its first configured fallback (`fallbacks`); the
   answer reports it in `substitutions`, and the `receipt` at the end lists every substitution. `agentgate
-  accounts` lists the CLI profiles and when an exhausted one returns. Never set `CLAUDE_CONFIG_DIR` or
+  accounts` lists the CLI profiles, each limit by name and when an exhausted one returns. An account "kept
+  for the lead" is the user's reservation: no worker runs on it, and a worker with no other account goes
+  to its fallback; `accounts unreserve` is theirs to run, not yours. Never set `CLAUDE_CONFIG_DIR` or
   `CODEX_HOME` yourself.
-- **Independence.** The model that wrote the code never reviews it: a lane whose model is an author moves to
-  its first independent fallback, and a plan without an independent reviewer is refused before it starts.
+- **Independence.** The model that wrote the code never reviews it, the browser reviewer included: a lane
+  whose model is an author moves to its first independent fallback, and a plan without an independent
+  reviewer, or with browser verification no configured route could run, is refused before it starts.
+  `agentgate config validate` and `modes` warn per mode.
+- **Substitutions say why**: the routed model wrote the code under review, no account of the provider has
+  room (and when one is back), or every account is kept for the lead. Tell the user the reason as it is.
 - **A started stream keeps its session and its model.** To move the rest of its work to another model, close
   the stream with `done: true` and add a new stream for the rest, in the complete plan through `amend`.
 - **Profiles.** `agentgate config profile codex` makes every worker a Codex model; `config profile default`

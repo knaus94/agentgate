@@ -75,7 +75,12 @@ authorized checks.
  "entry_points": [], "storage_state": "/path.json", "timeout_s": 1800, "exclusions": [{"id": "scenario", "reason": "..."}]}
 ```
 
-The first records the user's choice, the second a skip, the third runs a pass by itself. Usually the pass runs
+A scenario may carry `stage`: it is due at that stage, the last stage when it names none, and every scenario
+in the pass over the whole change. A scenario is what a user does — open, click, type, hover, press keys,
+resize, wait — and what then shows. Slow or reordered responses, a hidden tab and controlled time are not
+scenarios: a test proves them.
+
+The first records the user's choice, the second a skip of the present stage, the third runs a pass by itself. Usually the pass runs
 inside verification instead: `run {visual: {url, origins}}`. Only loopback stands are reachable. Starting a
 stand needs the user's approval of the exact commands. A layout or type check is not a browser observation.
 

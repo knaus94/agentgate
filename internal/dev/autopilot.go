@@ -137,7 +137,7 @@ func (g *Gate) classify(cfg *config.Config) (string, []Need, error) {
 		var out []Need
 		for _, failure := range failing {
 			out = append(out, Need{Kind: "setup", environment: true, Detail: lastLines(failure.Tail, 12), Command: "run",
-				What: lastLine(strings.TrimSpace(failure.Tail)) + " — check `" + checkLabel(failure.Argv) +
+				What: failureLine(failure.Tail) + " — check `" + checkLabel(commandArgv(failure.Argv)) +
 					"` passed on these same files before and fails now: the cause is outside the code (a service, a stand, the machine)",
 				Resolve: "Repair what its log names, then `run` runs the check again. If the code is at fault after all, decide {work} sends the failure to the writers you name."})
 		}
@@ -151,9 +151,19 @@ func (g *Gate) classify(cfg *config.Config) (string, []Need, error) {
 		// The same check failing again after a correction aimed at it is a stall, just like a finding that returns.
 		stalled := len(g.Corrections) > 0 && slices.ContainsFunc(g.Corrections[len(g.Corrections)-1].CheckIDs, func(id string) bool { return slices.Contains(ids, id) })
 		if stalled {
-			need := g.stall("check-still-failing", lastLines(failing[0].Tail, 12))
-			need.What = lastLine(strings.TrimSpace(failing[0].Tail)) + " — check `" + checkLabel(failing[0].Argv) + "` still fails after the correction aimed at it"
-			need.environment = true
+			need := g.stall("check-still-failing", "")
+			var lines []string
+			detail := map[string]string{}
+			for _, failure := range failing {
+				label := checkLabel(commandArgv(failure.Argv))
+				lines = append(lines, "`"+label+"` — "+failureLine(failure.Tail))
+				detail[label] = lastLines(failure.Tail, 12)
+			}
+			need.What = fmt.Sprintf("%d checks still fail after the correction aimed at them: %s", len(failing), strings.Join(lines, "; "))
+			if len(failing) == 1 {
+				need.What = "check " + lines[0] + " — still fails after the correction aimed at it"
+			}
+			need.Detail, need.environment = detail, true
 			need.Resolve += " If the cause was outside the code and you repaired it, `run` runs the failing checks again."
 			return verdictLead, []Need{need}, nil
 		}
@@ -295,6 +305,17 @@ func (g *Gate) unmet(report *QualityReport, quality *qualityInputs) []Need {
 			Command: "decide", Input: map[string]any{"work": []map[string]any{{"stream": g.oneOf(g.streamNames()), "requirement": result.ID, "note": "<what to change>"}}}})
 	}
 	return needs
+}
+
+// failureLine is the line of a failing check's output that says what failed: a layout check's verdict,
+// otherwise the last line.
+func failureLine(tail string) string {
+	for _, line := range strings.Split(tail, "\n") {
+		if line = strings.TrimSpace(line); strings.HasPrefix(line, "layout measurements:") {
+			return line
+		}
+	}
+	return lastLine(strings.TrimSpace(tail))
 }
 
 // oneOf is a value the lead picks: the only one, or the choice spelled out.
@@ -444,7 +465,34 @@ func (r *Resolved) independent() error {
 				stage.Name, lane.Route, r.Modes[index])
 		}
 	}
-	return nil
+	return browserReviewer(cfg, r.Plan, r.writerModels())
+}
+
+// writerModels are the models that write the plan's stages.
+func (r *Resolved) writerModels() []string {
+	var out []string
+	for index, stage := range r.Plan.Stages {
+		for _, stream := range stage.Streams {
+			out = append(out, writerRoute(r.Config, r.Modes[index], stream, 0).Model)
+		}
+	}
+	return out
+}
+
+// browserReviewer refuses an opted-in browser verification that no configured route could run: the visual
+// reviewer and every fallback of it wrote the code, or are kept from review. Found before the work, not after
+// it.
+func browserReviewer(cfg *config.Config, plan *Plan, authors []string) error {
+	if plan.Visual == nil || !plan.Visual.Enabled {
+		return nil
+	}
+	if _, ok := cfg.ReviewerFor(cfg.VisualReviewer, authors); ok {
+		return nil
+	}
+	route, _ := cfg.Route(cfg.VisualReviewer)
+	return fmt.Errorf("browser verification is opted in, but visual_reviewer %s and every fallback of it are the model that writes this plan (%s) "+
+		"or are kept from review; give %s a fallback on another model, or choose another visual_reviewer (`agentgate config set visual_reviewer …`) — "+
+		"the user's settings, on their word", cfg.VisualReviewer, route.Model, route.Alias)
 }
 
 // Run takes every determined step of the task and stops where a person is needed.
@@ -465,7 +513,8 @@ func Run(cfg *config.Config, gate *Gate, input RunInput) (any, error) {
 			}
 		}
 	}
-	did := []string{}
+	did := append([]string{}, gate.said...)
+	gate.said = nil
 	stale := 0
 	first := true
 	for {
@@ -482,12 +531,13 @@ func Run(cfg *config.Config, gate *Gate, input RunInput) (any, error) {
 					return nil, err
 				}
 			}
+			started := time.Now()
 			complete, ran, completed, err := gate.write(cfg)
 			if err != nil {
 				return nil, err
 			}
 			if ran > 0 {
-				did = append(did, fmt.Sprintf("writers: %d of %d streams completed (%s)", completed, ran, gate.Round.Batch))
+				did = append(did, fmt.Sprintf("writers: %d of %d streams completed (%s) in %s", completed, ran, gate.Round.Batch, since(started)))
 			}
 			if !complete {
 				return gate.report(cfg, did), gate.save()
@@ -737,7 +787,7 @@ func (g *Gate) accept(cfg *config.Config) (string, error) {
 	stage := g.stage()
 	record := StageRecord{Name: stage.Name, Mode: g.Mode, Summary: g.workSummary(), AcceptedAt: time.Now().Unix(),
 		Rounds: len(g.Corrections), Findings: len(g.Findings()), Tree: now, Handoffs: map[string]string{}, Writers: map[string]WriterRef{},
-		Reviewers: g.reviewers(), Checks: g.checkLines()}
+		Reviewers: g.reviewers(), Checks: g.checkLines(), Browser: g.browserLine()}
 	for _, finding := range g.leftNotes() {
 		record.Notes = append(record.Notes, noteLine(finding))
 	}

@@ -32,7 +32,8 @@ only on their word, with `resume`.
      `{"answers": {"<question id>": "<answer>"}}`. The same worker continues. Your own corrections go in
      `notes`; a different mode in `mode`.
    - `READY`: read the brief for scope and decisions. Tell the user the mode and why — `because` says when the
-     mode is below what the facts call for. Get the authorizations the plan needs: heavy checks, a stand, new
+     mode is below what the facts call for. The mode comes from the assessment; a flag is the user's to type.
+     Do not offer the user a choice of modes as a question. Get the authorizations the plan needs: heavy checks, a stand, new
      tests.
 2. **Design**, heavy and ultra only: `agentgate architecture --plan <name>`; the answer shows the designs,
    the blockers and the plan entry that accepts them.

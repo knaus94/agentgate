@@ -43,7 +43,7 @@ var planSchema = object(map[string]any{
 	"generated":     list(text),
 	"ui":            nullable(object(map[string]any{"summary": nullable(text), "criteria": list(text), "preserve": list(text), "skip": nullable(text)})),
 	"visual": nullable(object(map[string]any{"enabled": boolean, "reason": text,
-		"scenarios": items(map[string]any{"id": text, "screen": text, "state": text, "viewport": text, "role": text, "expected": text})})),
+		"scenarios": items(map[string]any{"id": text, "screen": text, "state": text, "viewport": text, "role": text, "expected": text, "stage": nullable(text)})})),
 	"design": items(map[string]any{"figma": nullable(text), "name": nullable(text), "screen": nullable(text), "url": nullable(text), "root": nullable(text),
 		"stream": text, "viewport": nullable(text), "device": nullable(enum("desktop", "mobile")), "locale": nullable(text),
 		"steps":   items(map[string]any{"click": nullable(text), "fill": nullable(text), "value": nullable(text), "wait": nullable(text)}),

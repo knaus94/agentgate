@@ -12,9 +12,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/knaus94/agentgate/internal/ops"
 	"github.com/knaus94/agentgate/internal/provider"
@@ -99,69 +99,121 @@ func (glob *fileGlob) MatchString(name string) bool {
 	return previous[len(parts)]
 }
 
-// inputFiles expands a check's input globs. A matched directory contributes everything below it.
-func inputFiles(patterns []string) ([]string, error) {
-	found := map[string]bool{}
+const symlinkMode = "120000"
+
+// inputFiles fingerprints the files a check's input patterns name: path -> mode and object of the recorded
+// tree, or the content of a file read from the disk. A matched directory contributes everything below it.
+func inputFiles(entries []treeFileEntry, patterns []string) (map[string]string, error) {
+	files := map[string]string{}
 	for _, pattern := range patterns {
-		pattern = filepath.ToSlash(filepath.Clean(pattern))
-		if filepath.IsAbs(pattern) || pattern == ".." || strings.HasPrefix(pattern, "../") || strings.ContainsRune(pattern, '\x00') {
-			return nil, fmt.Errorf("check input is outside the repository: %q", pattern)
-		}
-		root, matcher := pattern, (*fileGlob)(nil)
-		if location := globMeta.FindStringIndex(pattern); location != nil {
-			root = filepath.ToSlash(filepath.Dir(pattern[:location[0]] + "x"))
-			var err error
-			matcher, err = compileGlob(pattern)
-			if err != nil {
-				return nil, err
-			}
-		}
-		// WalkDir does not follow a symlink root, and cannot reveal a symlink in
-		// its ancestors. Check those explicitly instead of accepting an empty key.
-		for current := root; current != "." && current != "/"; current = filepath.Dir(current) {
-			info, err := os.Lstat(current)
-			if err != nil && !errors.Is(err, os.ErrNotExist) {
-				return nil, fmt.Errorf("inspect check input %s: %w", current, err)
-			}
-			if err == nil && info.Mode()&fs.ModeSymlink != 0 {
-				return nil, fmt.Errorf("check input %s is a symlink; declare the real dependency instead", current)
-			}
-		}
-		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
-			if err != nil {
-				if errors.Is(err, os.ErrNotExist) && path == root {
-					return nil // deleting an input changes the key
-				}
-				return fmt.Errorf("read check input %s: %w", path, err)
-			}
-			path = filepath.ToSlash(path)
-			if entry.IsDir() {
-				if entry.Name() == ".git" {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if entry.Type()&fs.ModeSymlink != 0 {
-				if matcher == nil || matcher.MatchString(path) || underMatched(matcher, path) {
-					return fmt.Errorf("check input %s is a symlink; declare the real dependency instead", path)
-				}
-				return nil
-			}
-			if matcher == nil || matcher.MatchString(path) || underMatched(matcher, path) {
-				found[path] = true
-			}
-			return nil
-		})
-		if err != nil {
+		if _, err := expandInput(entries, pattern, files); err != nil {
 			return nil, err
 		}
 	}
-	out := make([]string, 0, len(found))
-	for path := range found {
-		out = append(out, path)
+	return files, nil
+}
+
+// expandInput adds what one input pattern names to files and reports whether it named anything. The tree holds
+// every file git does not ignore, with the object id git computed for it, so these cost no read. What git
+// ignores counts only where the pattern's literal prefix points into it (`dist/**`): that part is read from
+// the disk. A link counts as the link and as the files it leads to.
+func expandInput(entries []treeFileEntry, pattern string, files map[string]string) (bool, error) {
+	pattern = filepath.ToSlash(filepath.Clean(pattern))
+	if filepath.IsAbs(pattern) || pattern == ".." || strings.HasPrefix(pattern, "../") || strings.ContainsRune(pattern, '\x00') {
+		return false, fmt.Errorf("check input is outside the repository: %q", pattern)
 	}
-	sort.Strings(out)
-	return out, nil
+	root, matcher := pattern, (*fileGlob)(nil)
+	if location := globMeta.FindStringIndex(pattern); location != nil {
+		root = filepath.ToSlash(filepath.Dir(pattern[:location[0]] + "x"))
+		var err error
+		if matcher, err = compileGlob(pattern); err != nil {
+			return false, err
+		}
+	}
+	// A link at the root or on the way to it stands for what it leads to.
+	for current := root; current != "." && current != "/"; current = path.Dir(current) {
+		if link := under(entries, current); len(link) == 1 && link[0].Path == current && link[0].Mode == symlinkMode {
+			return true, follow(entries, link[0], files)
+		}
+	}
+	recorded := under(entries, root)
+	found := false
+	for _, entry := range recorded {
+		if matcher != nil && !matcher.MatchString(entry.Path) && !underMatched(matcher, entry.Path) {
+			continue
+		}
+		found = true
+		files[entry.Path] = entry.Mode + ":" + entry.Object
+		if entry.Mode == symlinkMode {
+			if err := follow(entries, entry, files); err != nil {
+				return true, err
+			}
+		}
+	}
+	if len(recorded) > 0 {
+		return found, nil
+	}
+	// Git records nothing there: the pattern points into what git ignores, or at nothing yet.
+	return diskInputs(root, matcher, files)
+}
+
+// follow adds a link and the files it leads to inside the repository; a link leading outside is refused.
+func follow(entries []treeFileEntry, link treeFileEntry, files map[string]string) error {
+	files[link.Path] = link.Mode + ":" + link.Object
+	target, err := os.Readlink(link.Path)
+	if err != nil {
+		return fmt.Errorf("read the link %s: %w", link.Path, err)
+	}
+	resolved := path.Clean(path.Join(path.Dir(link.Path), filepath.ToSlash(target)))
+	if filepath.IsAbs(target) {
+		here, _ := os.Getwd()
+		relative, err := filepath.Rel(here, target)
+		if err != nil {
+			relative = ".."
+		}
+		resolved = filepath.ToSlash(relative)
+	}
+	if resolved == ".." || strings.HasPrefix(resolved, "../") {
+		return fmt.Errorf("check input %s is a link leading outside the repository (%s); declare what it leads to instead", link.Path, target)
+	}
+	if targets := under(entries, resolved); len(targets) > 0 {
+		for _, entry := range targets {
+			files[entry.Path] = entry.Mode + ":" + entry.Object
+		}
+		return nil
+	}
+	_, err = diskInputs(resolved, nil, files)
+	return err
+}
+
+// diskInputs fingerprints the files below a root git does not record, by their content.
+func diskInputs(root string, matcher *fileGlob, files map[string]string) (bool, error) {
+	found := false
+	err := filepath.WalkDir(root, func(name string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) && name == root {
+				return nil // deleting an input changes the key
+			}
+			return fmt.Errorf("read check input %s: %w", name, err)
+		}
+		name = filepath.ToSlash(name)
+		if entry.IsDir() {
+			if entry.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if matcher != nil && !matcher.MatchString(name) && !underMatched(matcher, name) {
+			return nil
+		}
+		value, err := fingerprint(name)
+		if err != nil {
+			return err
+		}
+		files[name], found = "disk:"+value, true
+		return nil
+	})
+	return found, err
 }
 
 func underMatched(matcher *fileGlob, path string) bool {
@@ -173,24 +225,49 @@ func underMatched(matcher *fileGlob, path string) bool {
 	return false
 }
 
-// inputKey fingerprints the declared inputs of a check, or returns "" when it declared none.
-func inputKey(check *Check) (string, error) {
+// inputKey fingerprints the declared inputs of a check as a recorded tree holds them, or returns "" when it
+// declared none.
+func (g *Gate) inputKey(check *Check, tree string) (string, error) {
 	if len(check.Inputs) == 0 {
 		return "", nil
 	}
-	files, err := inputFiles(check.Inputs)
+	entries, err := treeListing(g.objects(), tree)
 	if err != nil {
 		return "", err
 	}
-	entries := map[string]string{}
-	for _, file := range files {
-		value, err := fingerprint(file)
-		if err != nil {
-			return "", err
-		}
-		entries[file] = value
+	files, err := inputFiles(entries, check.Inputs)
+	if err != nil {
+		return "", err
 	}
-	return digest(map[string]any{"argv": check.Argv, "inputs": check.Inputs, "files": entries}), nil
+	return digest(map[string]any{"argv": check.Argv, "inputs": check.Inputs, "files": files}), nil
+}
+
+// inspectInputs looks at the declared inputs of every check of the plan when it is accepted: a link leading
+// outside the repository is refused now rather than after a writer's round, and a pattern that matches
+// nothing yet is said, since the task may create the file.
+func (g *Gate) inspectInputs(checks []Check, tree string) ([]string, error) {
+	entries, err := treeListing(g.objects(), tree)
+	if err != nil {
+		return nil, err
+	}
+	var notes []string
+	seen := map[string]bool{}
+	for _, check := range checks {
+		for _, pattern := range check.Inputs {
+			if seen[pattern] {
+				continue
+			}
+			seen[pattern] = true
+			found, err := expandInput(entries, pattern, map[string]string{})
+			if err != nil {
+				return nil, fmt.Errorf("check `%s`: %w", checkLabel(check.Argv), err)
+			}
+			if !found {
+				notes = append(notes, fmt.Sprintf("check input %s matches no file yet (check `%s`)", pattern, checkLabel(check.Argv)))
+			}
+		}
+	}
+	return notes, nil
 }
 
 func passed(receipt *CheckReceipt) bool {
@@ -242,6 +319,7 @@ func (g *Gate) baselineChecks() error {
 		if !check.Baseline {
 			continue
 		}
+		ops.Doing("check before writing: %s", checkLabel(commandArgv(check.Argv)))
 		code, _, err := g.execCheck(check, "baseline")
 		if err != nil {
 			return err
@@ -265,7 +343,7 @@ func (g *Gate) runCheck(check *Check) (CheckReceipt, error) {
 	if err != nil {
 		return CheckReceipt{}, err
 	}
-	key, err := inputKey(check)
+	key, err := g.inputKey(check, before)
 	if err != nil {
 		return CheckReceipt{}, err
 	}
@@ -273,16 +351,16 @@ func (g *Gate) runCheck(check *Check) (CheckReceipt, error) {
 	if err != nil {
 		return CheckReceipt{}, err
 	}
-	afterKey, err := inputKey(check)
+	after, err := g.snapshot()
+	if err != nil {
+		return CheckReceipt{}, err
+	}
+	afterKey, err := g.inputKey(check, after)
 	if err != nil {
 		return CheckReceipt{}, err
 	}
 	if afterKey != key {
 		return CheckReceipt{}, errors.New("check changed its declared inputs; its result is stale, run a non-mutating verification command")
-	}
-	after, err := g.snapshot()
-	if err != nil {
-		return CheckReceipt{}, err
 	}
 	if after != before {
 		owned, _, err := g.changesBetween(before, after)
@@ -309,8 +387,8 @@ func (g *Gate) runCheck(check *Check) (CheckReceipt, error) {
 // A failed attempt invalidates older successful receipts even when no child process could start. A repaired
 // tool must be run again before the task can go on.
 func (g *Gate) invalidateCheck(check *Check, failure error) error {
-	key, _ := inputKey(check)
 	tree, _ := g.snapshot()
+	key, _ := g.inputKey(check, tree)
 	g.Checks = append(g.Checks, CheckReceipt{Argv: slices.Clone(check.Argv), ReturnCode: 125, Tree: tree, InputKey: key, Error: failure.Error(), Iteration: g.Iteration})
 	return g.save()
 }
@@ -420,6 +498,7 @@ func (g *Gate) runOutstanding() (int, error) {
 		if !check.NoReuse && passed(current[checkID(check.Argv)]) {
 			continue
 		}
+		ops.Doing("check %d of %d: %s", index+1, len(checks), checkLabel(commandArgv(check.Argv)))
 		receipt, err := g.runCheck(check)
 		if err != nil {
 			return ran, errors.Join(err, g.invalidateCheck(check, err))
@@ -447,6 +526,20 @@ func (g *Gate) outstandingReceipts(receipts map[string]*CheckReceipt) []*Check {
 	}
 	return out
 }
+
+// commandArgv is a check's command without the environment assignments in front of it.
+func commandArgv(argv []string) []string {
+	if len(argv) > 1 && argv[0] == "env" {
+		argv = argv[1:]
+		for len(argv) > 1 && strings.Contains(argv[0], "=") && !strings.HasPrefix(argv[0], "-") {
+			argv = argv[1:]
+		}
+	}
+	return argv
+}
+
+// since is the time from a moment until now, as the panel writes it.
+func since(start time.Time) string { return clock(time.Since(start).Seconds()) }
 
 // checkLabel names a check in one short line.
 func checkLabel(argv []string) string {

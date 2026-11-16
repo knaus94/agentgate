@@ -13,6 +13,7 @@ import (
 
 	"github.com/knaus94/agentgate/internal/assets"
 	"github.com/knaus94/agentgate/internal/config"
+	"github.com/knaus94/agentgate/internal/ops"
 	"github.com/knaus94/agentgate/internal/provider"
 )
 
@@ -64,7 +65,26 @@ var visualSchema = object(map[string]any{"status": enum("PASS", "NEEDS_FIX", "UN
 const visualTimeout = 1800
 
 func (g *Gate) visualRequired() bool {
-	return g.Plan.Visual != nil && g.Plan.Visual.Enabled && g.VisualSkip == ""
+	return len(g.dueScenarios()) > 0 && g.VisualSkip == ""
+}
+
+// dueScenarios are the browser scenarios the present position must observe: those of the stage that builds what
+// they show — the last stage when a scenario names none — and all of them in the pass over the whole change.
+func (g *Gate) dueScenarios() []Scenario {
+	if g.Plan.Visual == nil || !g.Plan.Visual.Enabled {
+		return nil
+	}
+	index := g.stageIndex()
+	if index < 0 {
+		return g.Plan.Visual.Scenarios
+	}
+	var out []Scenario
+	for _, row := range g.Plan.Visual.Scenarios {
+		if row.Stage == g.Plan.Stages[index].Name || row.Stage == "" && index == len(g.Plan.Stages)-1 {
+			out = append(out, row)
+		}
+	}
+	return out
 }
 
 func (g *Gate) visualContract() string {
@@ -84,9 +104,9 @@ func (g *Gate) currentVisual(key string) *VisualRun {
 func (g *Gate) checkExclusions(values []Excluded) error {
 	seen := map[string]bool{}
 	for _, value := range values {
-		known := slices.ContainsFunc(g.Plan.Visual.Scenarios, func(row Scenario) bool { return row.ID == value.ID })
+		known := slices.ContainsFunc(g.dueScenarios(), func(row Scenario) bool { return row.ID == value.ID })
 		if !known || seen[value.ID] || strings.TrimSpace(value.Reason) == "" {
-			return errors.New("scenario exclusions need a known, unique id and a concrete reason")
+			return errors.New("scenario exclusions name a scenario due at this stage, once, with a concrete reason")
 		}
 		seen[value.ID] = true
 	}
@@ -95,7 +115,7 @@ func (g *Gate) checkExclusions(values []Excluded) error {
 
 func (g *Gate) unobserved(run *VisualRun, extra []Excluded) []string {
 	var out []string
-	for _, row := range g.Plan.Visual.Scenarios {
+	for _, row := range g.dueScenarios() {
 		observed := slices.ContainsFunc(run.Coverage, func(c Coverage) bool { return c.ScenarioID == row.ID && c.Observed })
 		excluded := slices.ContainsFunc(append(slices.Clone(run.Excluded), extra...), func(e Excluded) bool { return e.ID == row.ID })
 		if !observed && !excluded {
@@ -114,7 +134,8 @@ func (g *Gate) visualSummary() map[string]any {
 			reviewed = g.Reviews[len(g.Reviews)-1].Key
 		}
 		out["latest"] = map[string]any{"status": last.Status, "summary": last.Summary, "coverage": last.Coverage,
-			"console_errors": last.Console, "current": last.Key == reviewed && last.Contract == g.visualContract(), "dir": last.Dir}
+			"console_errors": last.Console, "current": last.Key == reviewed && last.Contract == g.visualContract(), "dir": last.Dir,
+			"limits": last.Limits}
 	}
 	return out
 }
@@ -153,8 +174,13 @@ type visualStage struct {
 }
 
 func (g *Gate) prepareVisual(cfg *config.Config, input VisualInput, now, key string) (*visualStage, error) {
-	if !g.visualRequired() {
+	switch {
+	case g.Plan.Visual == nil || !g.Plan.Visual.Enabled:
 		return nil, errors.New("browser verification is not opted in; record the user's choice first")
+	case len(g.dueScenarios()) == 0:
+		return nil, errors.New("no browser scenario is due at this stage: each is observed at the stage its `stage` names, the last one by default")
+	case g.VisualSkip != "":
+		return nil, errors.New("the browser pass of this stage is recorded as skipped (" + g.VisualSkip + "); record the choice again to observe it")
 	}
 	ui, err := loadUI(g.Plan)
 	if err != nil || ui == nil {
@@ -178,7 +204,7 @@ func (g *Gate) prepareVisual(cfg *config.Config, input VisualInput, now, key str
 	}
 	var active []Scenario
 	var viewports []string
-	for _, row := range g.Plan.Visual.Scenarios {
+	for _, row := range g.dueScenarios() {
 		if !slices.ContainsFunc(input.Exclusions, func(e Excluded) bool { return e.ID == row.ID }) {
 			active = append(active, row)
 			if !slices.Contains(viewports, row.Viewport) {
@@ -263,10 +289,7 @@ func (g *Gate) prepareVisual(cfg *config.Config, input VisualInput, now, key str
 		return filepath.Join(shots, name), nil
 	}
 	stage := &visualStage{}
-	authors := g.authors()
-	independent := func(route config.Route) bool {
-		return slices.Contains(authors, route.Model) || slices.Contains(cfg.ReviewersExcluded, route.Alias)
-	}
+	independent := g.reviewerSkip(cfg)
 	stage.run = func() error {
 		prompt := assets.Prompt("visual") + "\nRead the packet at " + path + ". Screenshots you take are saved in " + shots + ".\n"
 		result, _, err := subs.invoke(cfg, provider.Call{Route: cfg.MustRoute(cfg.VisualReviewer), Prompt: prompt, Dir: filepath.Join(dir, "reviewer"),
@@ -293,13 +316,10 @@ func (g *Gate) prepareVisual(cfg *config.Config, input VisualInput, now, key str
 		if err := decode(result.Answer, &report); err != nil {
 			return err
 		}
-		if report.Status == "UNVERIFIED" {
-			return fmt.Errorf("the browser pass could not verify the stand: %s %s", report.Summary, strings.Join(report.Unverified, "; "))
-		}
 		if report.Status == "NEEDS_FIX" && len(report.Findings) == 0 {
 			return errors.New("NEEDS_FIX without visual findings")
 		}
-		seen := map[string]bool{}
+		seen, observed := map[string]bool{}, 0
 		for index := range report.Coverage {
 			row := &report.Coverage[index]
 			planned := slices.IndexFunc(active, func(s Scenario) bool { return s.ID == row.ScenarioID })
@@ -310,6 +330,21 @@ func (g *Gate) prepareVisual(cfg *config.Config, input VisualInput, now, key str
 			seen[row.ScenarioID] = true
 			if row.Screenshot, err = shot(row.Screenshot, row.Observed); err != nil {
 				return err
+			}
+			if row.Observed {
+				observed++
+			}
+		}
+		// A reviewer that saw the scenarios and could not establish everything in them still saw them: what it
+		// observed is recorded, what it could not establish is kept beside it. Only a pass that observed nothing
+		// failed.
+		if report.Status == "UNVERIFIED" {
+			if observed == 0 {
+				return fmt.Errorf("the browser pass could not verify the stand: %s %s", report.Summary, strings.Join(report.Unverified, "; "))
+			}
+			report.Status = "PASS"
+			if len(report.Findings) > 0 {
+				report.Status = "NEEDS_FIX"
 			}
 		}
 		for _, raw := range report.Findings {
@@ -336,7 +371,7 @@ func (g *Gate) prepareVisual(cfg *config.Config, input VisualInput, now, key str
 				resolved[vote.ID] = vote.Evidence + " (" + path + ")"
 			}
 		}
-		run.Status, run.Summary, run.Coverage, run.Console = report.Status, report.Summary, report.Coverage, report.Console
+		run.Status, run.Summary, run.Coverage, run.Console, run.Limits = report.Status, report.Summary, report.Coverage, report.Console, report.Unverified
 		return nil
 	}
 	stage.apply = func() error {
@@ -367,6 +402,43 @@ func (g *Gate) prepareVisual(cfg *config.Config, input VisualInput, now, key str
 	return stage, nil
 }
 
+// browserLine is what the browser verification of the present position came to, in one line: "" when it was
+// not opted in.
+func (g *Gate) browserLine() string {
+	switch {
+	case g.Plan.Visual == nil || !g.Plan.Visual.Enabled:
+		return ""
+	case g.VisualSkip != "":
+		return "browser pass skipped: " + g.VisualSkip
+	case len(g.VisualRuns) == 0:
+		return "browser scenarios not observed"
+	}
+	return g.observed("")
+}
+
+// observed says what the last browser pass saw, how long it took when that is known, and what it could not
+// establish.
+func (g *Gate) observed(took string) string {
+	if len(g.VisualRuns) == 0 {
+		return "browser scenarios observed"
+	}
+	run := g.VisualRuns[len(g.VisualRuns)-1]
+	seen := 0
+	for _, row := range run.Coverage {
+		if row.Observed {
+			seen++
+		}
+	}
+	line := fmt.Sprintf("browser pass %s: %d of %d scenarios observed, %d findings", run.Status, seen, len(run.Coverage), len(run.Findings))
+	if took != "" {
+		line += ", in " + took
+	}
+	if len(run.Limits) > 0 {
+		line += "; not established: " + clipText(strings.Join(run.Limits, "; "), 600)
+	}
+	return line
+}
+
 func dirExists(path string) bool { info, err := os.Stat(path); return err == nil && info.IsDir() }
 
 func fileExists(path string) bool {
@@ -380,6 +452,7 @@ func (g *Gate) observe(cfg *config.Config, input VisualInput, now, key string) e
 	if err != nil {
 		return err
 	}
+	ops.Doing("browser pass (%s)", cfg.VisualReviewer)
 	if err := stage.run(); err != nil {
 		return err
 	}
@@ -401,7 +474,14 @@ func VisualPass(cfg *config.Config, gate *Gate, input VisualInput) (any, error) 
 			if ui, _ := loadUI(gate.Plan); ui == nil {
 				return nil, errors.New("browser verification needs an accepted ui contract")
 			}
-			if err := validateScenarios(input.Choice.Scenarios); err != nil {
+			if err := validateScenarios(input.Choice.Scenarios, gate.Plan.Stages); err != nil {
+				return nil, err
+			}
+			authors := gate.authors()
+			if resolved, err := gate.resolve(cfg); err == nil {
+				authors = append(authors, resolved.writerModels()...)
+			}
+			if err := browserReviewer(cfg, &Plan{Visual: input.Choice}, authors); err != nil {
 				return nil, err
 			}
 		}
@@ -423,7 +503,7 @@ func VisualPass(cfg *config.Config, gate *Gate, input VisualInput) (any, error) 
 		if err := gate.observe(cfg, input, now, key); err != nil {
 			return nil, err
 		}
-		did = append(did, "browser scenarios observed")
+		did = append(did, gate.observed(""))
 	}
 	if err := gate.save(); err != nil {
 		return nil, err

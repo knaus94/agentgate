@@ -161,11 +161,11 @@ func TestInputFingerprintErrorsCannotReusePassingReceipts(t *testing.T) {
 		t.Fatal("the check must have a current passing receipt first")
 	}
 	must(t, os.Remove("context.txt"))
-	must(t, os.Symlink("b.txt", "context.txt"))
+	must(t, os.Symlink("../outside.txt", "context.txt"))
 	if gate.currentReceipt(&gate.checks()[0]) != nil {
-		t.Fatal("an unreadable/symlinked input fell back to a passing task digest")
+		t.Fatal("an input leading outside the repository fell back to a passing task digest")
 	}
-	f.fails("run", "is a symlink", func() (any, error) { return Run(f.cfg, Current(), RunInput{}) })
+	f.fails("run", "outside the repository", func() (any, error) { return Run(f.cfg, Current(), RunInput{}) })
 	if Current().Step == StepDone {
 		t.Fatal("the task finished on a check whose inputs cannot be read")
 	}
@@ -185,21 +185,21 @@ func TestImplicitCheckInputsIncludeSiblingDependencies(t *testing.T) {
 	}
 }
 
-func TestInputGlobsSupportClassesAndRejectAncestorSymlinks(t *testing.T) {
+func TestInputGlobsSupportClassesAndFollowLinkedDirectories(t *testing.T) {
 	newFixture(t)
 	must(t, os.Mkdir("source", 0o755))
 	write(t, "source/a.go", "a")
 	write(t, "source/b.go", "b")
-	files, err := inputFiles([]string{"source/[ab].go"})
+	files, err := inputsIn(t, "source/[ab].go")
 	must(t, err)
 	if !slices.Equal(files, []string{"source/a.go", "source/b.go"}) {
 		t.Fatalf("character class did not match inputs: %v", files)
 	}
 	must(t, os.Symlink("source", "alias"))
-	if _, err := inputFiles([]string{"alias/**/*.go"}); err == nil {
-		t.Fatal("symlinked input root silently produced an empty fingerprint")
+	if files, err := inputsIn(t, "alias/**/*.go"); err != nil || !slices.Contains(files, "alias") || !slices.Contains(files, "source/a.go") {
+		t.Fatalf("a linked input root must count as the files it leads to, not as nothing: %v (%v)", files, err)
 	}
-	if _, err := inputFiles([]string{"source/[broken"}); err == nil {
+	if _, err := inputsIn(t, "source/[broken"); err == nil {
 		t.Fatal("malformed input glob was accepted")
 	}
 }

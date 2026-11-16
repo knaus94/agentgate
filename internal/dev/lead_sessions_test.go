@@ -338,7 +338,8 @@ func TestTheStopHookSaysWhatWasRefused(t *testing.T) {
 	})
 	hook := StopHook(Current().Cwd, "fixture-session")
 	reason, _ := hook["reason"].(string)
-	if hook["decision"] != "block" || !strings.Contains(reason, "`decide`, was refused: finding \"nope\" is not a finding of this task") || !strings.Contains(reason, "It needs: answer") {
+	if hook["decision"] != "block" || !strings.Contains(reason, "No agentgate command is running; `decide` ended") ||
+		!strings.Contains(reason, "It was refused: finding \"nope\" is not a finding of this task") || !strings.Contains(reason, "It needs: answer") {
 		t.Fatalf("the hook names the refusal the lead may have missed and what the task needs: %q", reason)
 	}
 }

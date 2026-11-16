@@ -33,22 +33,22 @@ func ParseClaudeUsage(body []byte) []Window {
 		return nil
 	}
 	var out []Window
-	add := func(label, scope string, value *bucket) {
+	add := func(label, scope, period string, value *bucket) {
 		if value != nil && value.Utilization != nil {
-			out = append(out, Window{Label: label, Scope: scope, Used: *value.Utilization, ResetsAt: parseTime(value.ResetsAt)})
+			out = append(out, Window{Label: label, Scope: scope, Period: period, Used: *value.Utilization, ResetsAt: parseTime(value.ResetsAt)})
 		}
 	}
-	add("5 hours", "", usage.FiveHour)
-	add("week", "", usage.Week)
-	add("week, opus", "opus", usage.Opus)
-	add("week, sonnet", "sonnet", usage.Sonnet)
+	add("5 hours", "", "session", usage.FiveHour)
+	add("week", "", "week", usage.Week)
+	add("week, opus", "opus", "week", usage.Opus)
+	add("week, sonnet", "sonnet", "week", usage.Sonnet)
 	seen := map[string]bool{"opus": usage.Opus != nil && usage.Opus.Utilization != nil, "sonnet": usage.Sonnet != nil && usage.Sonnet.Utilization != nil}
 	for _, limit := range usage.Limits {
 		if limit.Percent == nil {
 			continue
 		}
 		if limit.Kind == "weekly_all" && (usage.Week == nil || usage.Week.Utilization == nil) {
-			out = append(out, Window{Label: "week", Used: *limit.Percent, ResetsAt: parseTime(limit.ResetsAt)})
+			out = append(out, Window{Label: "week", Period: "week", Used: *limit.Percent, ResetsAt: parseTime(limit.ResetsAt)})
 		}
 		if limit.Kind != "weekly_scoped" || limit.Scope == nil || limit.Scope.Model == nil || limit.Scope.Model.Name == "" {
 			continue
@@ -60,7 +60,7 @@ func ParseClaudeUsage(body []byte) []Window {
 		scope := strings.ToLower(words[0])
 		if !seen[scope] {
 			seen[scope] = true
-			out = append(out, Window{Label: "week, " + scope, Scope: scope, Used: *limit.Percent, ResetsAt: parseTime(limit.ResetsAt)})
+			out = append(out, Window{Label: "week, " + scope, Scope: scope, Period: "week", Used: *limit.Percent, ResetsAt: parseTime(limit.ResetsAt)})
 		}
 	}
 	return out
@@ -140,7 +140,11 @@ func ParseCodexLimits(body []byte) ([]Window, string) {
 			if (reached == "primary" && index == 0) || (reached == "secondary" && index == 1) {
 				used = 100
 			}
-			out = append(out, Window{Label: label, Scope: scope, LimitID: item.ID, Used: used, ResetsAt: entry.ResetsAt})
+			period := "session"
+			if entry.Minutes >= 1440 {
+				period = "week"
+			}
+			out = append(out, Window{Label: label, Scope: scope, Period: period, LimitID: item.ID, Used: used, ResetsAt: entry.ResetsAt})
 		}
 		if reached != "" && reached != "primary" && reached != "secondary" {
 			out = append(out, Window{Label: "usage blocked: " + reached, Scope: scope, LimitID: item.ID, Used: 100})

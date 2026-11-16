@@ -223,6 +223,11 @@ func (g *Gate) write(cfg *config.Config) (bool, int, int, error) {
 		if err := g.save(); err != nil {
 			return false, ran, completed, err
 		}
+		names := make([]string, len(todo))
+		for index, stream := range todo {
+			names[index] = stream.Name + " (" + records[index].Route.String() + ")"
+		}
+		ops.Doing("writing: %s", strings.Join(names, ", "))
 		errs := parallel(len(todo), limit, func(index int) error {
 			return g.runWriter(cfg, todo[index], records[index], "", subs, &mu)
 		})
@@ -421,6 +426,23 @@ func (g *Gate) target(finding Finding) *Stream {
 	return nil
 }
 
+// writerCaches are the build caches a sandboxed writer gets in place of the ones in the user's home, which the
+// sandbox makes read-only: Go's, kept under the task so it is cold once per task, unless the inherited one is a
+// directory of the checkout the writer may write anyway.
+func (g *Gate) writerCaches() (env, dirs []string) {
+	if inherited := os.Getenv("GOCACHE"); inherited != "" {
+		here, _ := os.Getwd()
+		if relative, err := filepath.Rel(here, inherited); err == nil && relative != ".." && !strings.HasPrefix(relative, "../") {
+			return nil, nil
+		}
+	}
+	dir := filepath.Join(g.dir(), "cache", "go")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, nil
+	}
+	return []string{"GOCACHE=" + dir}, []string{dir}
+}
+
 func (g *Gate) runWriter(cfg *config.Config, stream Stream, record *Writer, answer string, subs *substitutions, mu *sync.Mutex) error {
 	fail := func(err error) error {
 		mu.Lock()
@@ -465,9 +487,10 @@ func (g *Gate) runWriter(cfg *config.Config, stream Stream, record *Writer, answ
 	timeout, _ := timeoutSeconds(g.Plan.WriterTimeoutS, cfg.Modes[g.Mode].WriterTimeoutS, writerCeiling)
 	tools, toolDirs, toolNote := workerTools(cfg, "writer")
 	reads := append(append(append(packDirs(g.ContextPack), filepath.Join(g.dir(), "checks")), g.designReadDirs(stream.Name)...), g.attachmentDirs()...)
+	env, caches := g.writerCaches()
 	result, used, err := subs.invoke(cfg, provider.Call{Route: record.Route, Prompt: prompt + toolNote, Dir: record.Dir,
 		Schema: writerSchema, Timeout: seconds(timeout), Idle: writerIdle, Writer: true, Persist: true, Resume: record.Session, MCP: tools,
-		Writable: append([]string{g.board()}, toolDirs...), ReadDirs: reads}, nil)
+		Writable: append(append([]string{g.board()}, toolDirs...), caches...), ReadDirs: reads, Env: env}, nil)
 	if used.Model != "" {
 		mu.Lock()
 		g.AuthorModels = append(g.AuthorModels, record.Route.Model, used.Model)

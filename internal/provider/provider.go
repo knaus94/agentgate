@@ -39,6 +39,7 @@ type Call struct {
 	ReadDirs []string             // directories outside the checkout the process must be able to read
 	MCP      map[string]MCPServer // Codex only
 	Account  config.Account       // profile to run under; empty means the CLI's default profile
+	Env      []string             // extra environment of the process, NAME=value
 }
 
 type Result struct {
@@ -46,6 +47,7 @@ type Result struct {
 	Session string
 	Dir     string // actual lane directory, including a successful alternate's session home
 	Account string // name of the configured account the call ran under, if any
+	Why     string // a call that ran on an alternate: why the route itself was not used
 }
 
 // Accounts chooses the profile each call runs under. Nil, or no account for a provider, means its default profile.
