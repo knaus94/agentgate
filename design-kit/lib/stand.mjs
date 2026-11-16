@@ -28,12 +28,51 @@ export function projectDesign(from) {
   const design = config.design;
   if (!design?.stand) throw new Error(`no design.stand is configured for ${root}: declare command and ready in ${file}`);
   const stand = design.stand;
-  if (!Array.isArray(stand.command) || !stand.command.length || !stand.command.every((part) => typeof part === 'string' && part.length)) {
-    throw new Error('design.stand.command must be a nonempty array of arguments');
-  }
+  const command = (value, name) => {
+    if (!Array.isArray(value) || !value.length || !value.every((part) => typeof part === 'string' && part.length)) {
+      throw new Error(`${name} must be a nonempty array of arguments`);
+    }
+  };
+  command(stand.command, 'design.stand.command');
   httpURL(stand.ready, 'design.stand.ready');
   if (stand.ready_timeout_s !== undefined) numberOption(stand.ready_timeout_s, 'ready_timeout_s', { min: 1, max: 3600, integer: true });
+  if (stand.services !== undefined && !Array.isArray(stand.services)) throw new Error('design.stand.services is a list of {command, ready}');
+  for (const [index, service] of (stand.services || []).entries()) {
+    const name = `design.stand.services[${index}]`;
+    command(service?.command, `${name}.command`);
+    httpURL(service.ready, `${name}.ready`);
+    if (service.ready_timeout_s !== undefined) numberOption(service.ready_timeout_s, `${name}.ready_timeout_s`, { min: 1, max: 3600, integer: true });
+  }
+  if (stand.session !== undefined) {
+    command(stand.session?.command, 'design.stand.session.command');
+    if (stand.session.timeout_s !== undefined) numberOption(stand.session.timeout_s, 'design.stand.session.timeout_s', { min: 1, max: 600, integer: true });
+  }
   return design;
+}
+
+// sessionState runs the stand's session command and turns the cookies it prints into a browser session. It
+// prints a JSON array of cookies, or a session as Playwright saves it ({cookies, origins}).
+export function sessionState(dir) {
+  const { stand, url } = readScreen(dir);
+  const root = repository(dir);
+  const env = { ...process.env, ...envFile(stand.env_file && path.resolve(root, stand.env_file)), ...(stand.env || {}) };
+  const [command, ...args] = stand.session.command;
+  let printed;
+  try {
+    printed = execFileSync(command, args, { cwd: root, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: (stand.session.timeout_s ?? 60) * 1000 });
+  } catch (error) {
+    const said = String(error.stderr || '').trim().split('\n').filter(Boolean).pop() || error.message;
+    throw new Error(`design.stand.session did not give a session: ${said}`);
+  }
+  let parsed;
+  try { parsed = JSON.parse(printed); } catch { throw new Error('design.stand.session must print JSON: an array of cookies, or {cookies, origins}'); }
+  const cookies = Array.isArray(parsed) ? parsed : parsed?.cookies;
+  if (!Array.isArray(cookies) || !cookies.every((cookie) => typeof cookie?.name === 'string' && cookie.name && typeof cookie.value === 'string')) {
+    throw new Error('design.stand.session printed no cookies with a name and a value');
+  }
+  const page = new URL(url);
+  return { cookies: cookies.map((cookie) => ({ domain: page.hostname, path: '/', expires: -1, httpOnly: false, secure: page.protocol === 'https:',
+    sameSite: 'Lax', ...cookie })), origins: Array.isArray(parsed?.origins) ? parsed.origins : [] };
 }
 
 export function readScreen(dir) {
@@ -164,8 +203,10 @@ export async function ensureStand(dir, { record, keep = false, log = () => {} } 
   if (existing !== null) {
     if (record !== undefined) throw new Error('the stand already runs; stop it before --record so its backend can be configured');
     if (existing >= 400) throw new Error(`the existing stand responds HTTP ${existing} at ${stand.ready}; fix it or choose a healthy ready URL`);
-    log(`using the existing stand at ${stand.ready}`);
-    return async () => {};
+    if (!stand.services?.length) {
+      log(`using the existing stand at ${stand.ready}`);
+      return async () => {};
+    }
   }
   const root = repository(dir);
   const env = { ...process.env, ...envFile(stand.env_file && path.resolve(root, stand.env_file)), ...(stand.env || {}) };
@@ -205,27 +246,45 @@ export async function ensureStand(dir, { record, keep = false, log = () => {} } 
     log(`stand kept running (PIDs ${children.map((child) => child.pid).join(', ')}); log: ${logFile}`);
   };
   process.once('exit', onExit); process.once('SIGTERM', onTerm); process.once('SIGINT', onInt);
-  try {
-    if (recorded || record) {
-      const port = await fixtureProcess(fixtures, record, new URL(stand.ready).origin, children, fd);
-      for (const name of stand.graphql_env) env[name] = `http://127.0.0.1:${port}/graphql`;
-    }
-    log(`starting the stand: ${stand.command.join(' ')}`);
-    const child = own(spawn(stand.command[0], stand.command.slice(1), { cwd: root, env, detached: true, stdio: ['ignore', fd, fd] }));
+  // A process of the stand runs until its ready URL answers; one that already answers is used as it is.
+  const start = async (name, command, ready, timeout, extra = {}) => {
+    log(`starting ${name}: ${command.join(' ')}`);
+    const child = own(spawn(command[0], command.slice(1), { cwd: root, env: { ...env, ...extra }, detached: true, stdio: ['ignore', fd, fd] }));
     children.push(child);
     let spawnError;
     child.once('error', (error) => { spawnError = error; });
     let lastStatus;
-    for (const deadline = Date.now() + (stand.ready_timeout_s ?? 240) * 1000; Date.now() < deadline;) {
+    for (const deadline = Date.now() + (timeout ?? 240) * 1000; Date.now() < deadline;) {
       if (spawnError) throw spawnError;
       if (child.exitCode !== null || child.signalCode !== null) break;
-      lastStatus = await status(stand.ready);
-      if (lastStatus !== null && lastStatus < 400) return stop;
+      lastStatus = await status(ready);
+      if (lastStatus !== null && lastStatus < 400) return;
       await pause(150);
     }
     if (spawnError) throw spawnError;
     const tail = fs.readFileSync(logFile, 'utf8').slice(-6000);
-    throw new Error(`stand did not become ready at ${stand.ready}${lastStatus ? ` (HTTP ${lastStatus})` : ''}: ${stand.command.join(' ')}\n${tail}`);
+    throw new Error(`${name} did not become ready at ${ready}${lastStatus ? ` (HTTP ${lastStatus})` : ''}: ${command.join(' ')}\n${tail}`);
+  };
+  try {
+    for (const [index, service] of (stand.services || []).entries()) {
+      const running = await status(service.ready);
+      if (running !== null && running < 400) {
+        log(`using the running service at ${service.ready}`);
+        continue;
+      }
+      if (running !== null) throw new Error(`service ${index + 1} responds HTTP ${running} at ${service.ready}; fix it or choose a healthy ready URL`);
+      await start(`service ${index + 1}`, service.command, service.ready, service.ready_timeout_s, service.env);
+    }
+    if (existing !== null) {
+      log(`using the existing stand at ${stand.ready}`);
+      return stop;
+    }
+    if (recorded || record) {
+      const port = await fixtureProcess(fixtures, record, new URL(stand.ready).origin, children, fd);
+      for (const name of stand.graphql_env) env[name] = `http://127.0.0.1:${port}/graphql`;
+    }
+    await start('the stand', stand.command, stand.ready, stand.ready_timeout_s);
+    return stop;
   } catch (error) {
     await stop();
     throw error;

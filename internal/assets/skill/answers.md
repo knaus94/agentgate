@@ -26,6 +26,7 @@ Every command about the task answers with one object. Read it as it is; do not p
 | `checks` | the declared checks of the present position; `failing` names them by a short label |
 | `findings` | open findings, how many block, how many are notes |
 | `isolated` | `{worktree, branch, landed?, ready_since?}` of an isolated task |
+| `unchecked_tests` | test files the task added or changed that no declared check runs: nothing here shows they pass — `amend {checks}` adds one, or tell the user |
 | `summary`, `receipt`, `notes` | at `done`: what was done; who did it on which model, the checks, substitutions, time per stage; the notes left, one line each (the `finished` page) |
 | `result` | what the command has of its own |
 | `refused` | `{action, because}`: the command is not legal now; nothing changed; exit 1 |

@@ -2,6 +2,37 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.18.0
+
+The quality of the result and the design work: the last part of the plan in
+[docs/briefs/0.17-lead-experience.md](docs/briefs/0.17-lead-experience.md). The plan and `.agentgate.json`
+gain fields; nothing is removed.
+
+**Added**
+
+- Designs of one page that differ by state carry `steps` (`click`, `fill` with `value`, `wait`, each a CSS
+  selector) run before measuring, or `compare: "review"` for a state judged from its pictures only. Two
+  entries that would measure one page in one state are refused. `agentgate layout` takes `--steps <json>`
+  and `--review`.
+- `design.stand.services` (each `{command, ready}`) start before the front end and stop after the check, or are
+  reused when already healthy; `design.stand.session` (`{command}`) prints the cookies of a signed-in user as
+  JSON for every check.
+- A preparation worker that needs more of a Figma file returns `design_requests: [{node, depth}]`; the tool
+  reads the nodes and continues the same conversation, up to three times per call.
+- Test files the task added or changed that no declared check runs are named under `unchecked_tests`, in the
+  answer and in the reviewer's packet.
+
+**Changed**
+
+- When a design stage opens, the stand is started and every design's page is opened before the writers
+  start: a page that is not built yet is fine, and so is one that sends the browser up its own path, but a
+  redirect elsewhere — usually to a login — is a `setup` need then, not after the work. A step that cannot be
+  done on a page that opened where it was asked to is a defect of the code (exit 3), for the writer.
+- The preparation worker plans the tests that reference what the plan changes and a typecheck of every project
+  whose shared types change, proposing the heavy ones as authorizations.
+- The reviewer is told what verifies a requirement proven by a check — a current passing declared check that
+  exercises the changed code — and that a wish for more proof is not a gap.
+
 ## 0.17.0
 
 What a lead was missing in real sessions, and the answers it had to work around. The lead protocol changes:

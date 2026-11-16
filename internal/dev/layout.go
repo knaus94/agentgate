@@ -2,9 +2,11 @@ package dev
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	"os/exec"
@@ -33,6 +35,18 @@ type DesignRef struct {
 	Locale       string `json:"locale,omitempty"`
 	Viewport     string `json:"viewport,omitempty"`
 	Device       string `json:"device,omitempty"` // desktop (default) or mobile; tablets use mobile with their viewport
+	// Steps bring the page to the state the design shows before anything is measured: a dialog opened, a tab
+	// chosen, a field filled. Designs that share a page need them, or Compare "review".
+	Steps   []DesignStep `json:"steps,omitempty"`
+	Compare string       `json:"compare,omitempty"` // measure (default) or review: the state is judged from the pictures, not measured
+}
+
+// DesignStep is one action on the page: exactly one of click, fill (with value) or wait, each a CSS selector.
+type DesignStep struct {
+	Click string `json:"click,omitempty"`
+	Fill  string `json:"fill,omitempty"`
+	Value string `json:"value,omitempty"`
+	Wait  string `json:"wait,omitempty"`
 }
 
 const layoutTimeout = 300
@@ -59,7 +73,7 @@ func (d DesignRef) digest() string {
 		exceptions = append(exceptions, screen...)
 	}
 	return digest(map[string]any{"package": manifest.Digest, "package_files": d.packageEvidence(), "map": string(exceptions), "url": d.URL, "root": d.Root, "viewport": d.Viewport, "device": d.Device,
-		"evidence": d.reviewSnapshot()})
+		"steps": d.Steps, "compare": d.Compare, "evidence": d.reviewSnapshot()})
 }
 
 func (d DesignRef) reviewFiles() map[string]string {
@@ -91,8 +105,11 @@ func (d DesignRef) reviewSnapshot() map[string]string {
 // dir is where the measurements of one design in one checkout are kept: what was there before the task, and
 // the pictures of the last check.
 func (d DesignRef) dir() string {
-	return filepath.Join(checkoutDir(""), "layout", digest(map[string]any{"package": d.Package, "figma": d.Figma,
-		"url": d.URL, "root": d.Root, "viewport": d.Viewport, "locale": d.Locale, "device": d.Device})[:16])
+	key := map[string]any{"package": d.Package, "figma": d.Figma, "url": d.URL, "root": d.Root, "viewport": d.Viewport, "locale": d.Locale, "device": d.Device}
+	if len(d.Steps) > 0 {
+		key["steps"] = d.Steps // two states of one page are two measurements
+	}
+	return filepath.Join(checkoutDir(""), "layout", digest(key)[:16])
 }
 
 func (d DesignRef) argv(extra ...string) []string {
@@ -101,12 +118,22 @@ func (d DesignRef) argv(extra ...string) []string {
 		target = d.Screen
 	}
 	out := []string{layoutCommand(), "layout", target}
-	for flag, value := range map[string]string{"--url": d.URL, "--root": d.Root, "--map": d.Map, "--storage-state": d.StorageState, "--locale": d.Locale, "--viewport": d.Viewport, "--device": d.Device} {
+	steps := ""
+	if len(d.Steps) > 0 {
+		raw, _ := json.Marshal(d.Steps)
+		steps = string(raw)
+	}
+	for flag, value := range map[string]string{"--url": d.URL, "--root": d.Root, "--map": d.Map, "--storage-state": d.StorageState, "--locale": d.Locale,
+		"--viewport": d.Viewport, "--device": d.Device, "--steps": steps} {
 		if value != "" {
 			out = append(out, flag, value)
 		}
 	}
-	return append(pairsSorted(out[:3], out[3:]), extra...)
+	out = pairsSorted(out[:3], out[3:])
+	if d.Compare == "review" {
+		out = append(out, "--review")
+	}
+	return append(out, extra...)
 }
 
 // pairsSorted keeps the argv of a check the same from run to run: a map does not.
@@ -189,6 +216,15 @@ func (r *Resolved) validateDesign() []string {
 			add("design device is desktop or mobile: %q", design.Device)
 			continue
 		}
+		if design.Compare != "" && design.Compare != "measure" && design.Compare != "review" {
+			add("design compare is measure or review: %q", design.Compare)
+			continue
+		}
+		for _, step := range design.Steps {
+			if count := len(slices.DeleteFunc([]string{step.Click, step.Fill, step.Wait}, func(selector string) bool { return strings.TrimSpace(selector) == "" })); count != 1 {
+				add("a design step is one of {click: <css>}, {fill: <css>, value}, {wait: <css>}: %+v", step)
+			}
+		}
 		if design.Figma != "" && design.Screen == "" {
 			name := design.Name
 			if name == "" {
@@ -253,7 +289,37 @@ func (r *Resolved) validateDesign() []string {
 			}
 		}
 	}
+	// Designs that open the same page measure the same state unless they say how each reaches its own; one of
+	// them may be the page as it opens.
+	pages := map[string][]string{}
+	for _, design := range plan.Design {
+		if page := design.page(); page != "" && len(design.Steps) == 0 && design.Compare != "review" {
+			pages[page] = append(pages[page], cmp.Or(design.Name, design.Screen, design.Figma, design.Package))
+		}
+	}
+	for _, page := range slices.Sorted(maps.Keys(pages)) {
+		if names := pages[page]; len(names) > 1 {
+			slices.Sort(names)
+			add("designs %s open the same page %s in the same state: give all but one of them the steps that bring the page to its state, or compare: review",
+				strings.Join(names, ", "), page)
+		}
+	}
 	return problems
+}
+
+// page is where a design is shown — its page, device and viewport — or "" when the plan does not say.
+func (d DesignRef) page() string {
+	where := d.URL
+	if where == "" && d.Screen != "" {
+		var screen struct{ URL string }
+		raw, _ := os.ReadFile(filepath.Join(d.Screen, "screen.json"))
+		_ = json.Unmarshal(raw, &screen)
+		where = screen.URL
+	}
+	if where == "" {
+		return ""
+	}
+	return where + " (" + cmp.Or(d.Device, "desktop") + " " + d.Viewport + ")"
 }
 
 // screens is the directory where the repository keeps its design screens.

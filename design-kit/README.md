@@ -52,10 +52,17 @@ asset Figma does not render is listed under `missing_assets` and does not stop t
 Exports preserve the previous package when generation fails. Failed and concurrent exports cannot publish
 a partial package over it.
 
+`--steps '[{"click":"<css>"},{"fill":"<css>","value":"…"},{"wait":"<css>"}]'` brings the page to the design's
+state before measuring; `--review` takes the pictures of a state for a reviewer and measures nothing. A stand
+may declare `services` (each `{command, ready}`, started first and stopped after the check, reused when
+already healthy) and `session` (`{command}` printing cookies as JSON, run for every check).
+
 Measurement output includes cropped/whole-page screenshots, pixel difference and structured findings.
 Exit 0 means measured properties passed, exit 1 means differences, exit 2 means verification could not run
-(the page did not open, or it ended at another path), and exit 3 means the page opened where it was asked to
-and does not show the root: a defect of the code. Independent visual and behavioral review remain necessary. Baselines waive only identical initial
+(the stand did not start, the page did not open, or it ended at another path), and exit 3 means the page
+opened where it was asked to and does not show the root, or a step cannot be done there: a defect of the code.
+Before the work (`--write-baseline`) a page that is not built yet, or that sends the browser up its own path, is
+recorded as not built; a redirect elsewhere still exits 2. Independent visual and behavioral review remain necessary. Baselines waive only identical initial
 discrepancies under the exact same measurement contract.
 
 Fixtures are keyed by operation and canonical variables. Only a deliberately supplied plain operation file

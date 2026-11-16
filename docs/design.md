@@ -105,11 +105,21 @@ Example project configuration (merge into `.agentgate.json`):
       "command": ["npm", "run", "dev", "--", "--host", "127.0.0.1"],
       "ready": "http://127.0.0.1:5173",
       "ready_timeout_s": 120,
-      "graphql_env": ["VITE_GRAPHQL_URL"]
+      "graphql_env": ["VITE_GRAPHQL_URL"],
+      "services": [
+        {"command": ["docker", "compose", "up", "api"], "ready": "http://127.0.0.1:3000/health", "ready_timeout_s": 180}
+      ],
+      "session": {"command": ["node", "scripts/dev-session.mjs"]}
     }
   }
 }
 ```
+
+`services` are what the page needs besides the front end — a backend, a database with its data — each started
+before the front end and stopped after the check, or reused when its `ready` URL already answers. `session` is
+a command that prints the cookies of a signed-in user as JSON (an array of cookies, or a Playwright session
+`{cookies, origins}`); it runs for every check, after the stand is up, and replaces cookies written once in
+`screen.json`.
 
 Example `screen.json`:
 
@@ -188,17 +198,35 @@ agentgate layout screens/home/package --url http://127.0.0.1:5173/home --root ma
 measurement contract. A local `file:` page is also accepted for static fixtures. Output includes
 `report.json`, `report.md`, `actual.png`, full-page `page.png`, `marked.png` and `diff.png`.
 
+## States a URL does not reach
+
+Designs of one page often differ by state: a dialog, a tab, a filled form. `--steps` brings the page there
+before anything is measured, `--review` takes the pictures of a state for the reviewer without measuring it:
+
+```sh
+agentgate layout screens/home --steps '[{"click":"[data-open-withdraw]"},{"fill":"#amount","value":"120"},{"wait":"[data-state=confirm]"}]'
+agentgate layout screens/home --review --out artifacts/home-error
+```
+
+In a plan the same is `steps` and `compare: "review"` on the design entry. Two entries that would measure one
+page in one state are refused; one of them may be the page as it opens.
+
 | Exit | Meaning |
 |---|---|
 | 0 | Measured properties pass under the declared contract |
 | 1 | Measured differences or pixel threshold exceeded |
-| 2 | Verification could not run; repair setup/input before assigning CSS fixes |
+| 2 | Verification could not run — the stand did not start, the page did not open or ended at another path; repair setup/input before assigning CSS fixes |
+| 3 | The page opened where it was asked to and does not show the root, or a step cannot be done there: a defect of the code |
 
 ## Gate integration and baseline
 
 A plan can bind `design: [{"screen":"screens/home","stream":"frontend"}]`. Preparation selects the intended
-nodes and measurements. The gate captures the initial measurement before writers start, runs the same
-check afterwards, and gives the independent reviewer reference/actual/context images. Mandatory design
+nodes and measurements; when a node is deeper than the catalogue it was given, the preparation worker asks
+for it (`design_requests`) and the tool reads it into the same conversation, up to three times per call. The
+gate captures the initial measurement before writers start — which starts the stand and opens every design's
+page, so a missing session or service is a `setup` need then, not after the work: a page that is not built
+yet is fine, and so is one that sends the browser up its own path, but a redirect elsewhere is not — runs the
+same check afterwards, and gives the independent reviewer reference/actual/context images. Mandatory design
 criteria cover appearance/cropping, placement in the application shell, control semantics and declared
 width/state coverage. A numerical PASS does not waive those criteria.
 

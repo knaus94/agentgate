@@ -19,6 +19,7 @@ they name. Do not read secrets or the contents of environment files.
   `id`, two to four concrete options, and the one you recommend with its reason in the question. Empty when
   READY.
 - `setup`: exact commands or prerequisites the lead must get authorized or repaired. Naming one grants nothing.
+- `design_requests`: empty, unless a design is part of the task and you need more of its Figma file (below).
 - `plan`: the complete plan (below), or null when BLOCKED.
 - `context_pack`: your map of the area (below). When you revise a plan and the map still holds, null.
 
@@ -69,6 +70,11 @@ plan. It is a correction of form, not a reason to change scope.
   `done` is false unless the stream's work already exists and only its ownership is being kept.
 - `generated`: patterns of generator output inside the scope (migrations a tool writes, generated clients). A
   writer runs the repository's producer; nobody edits such output by hand, and reviewers judge its provenance.
+- `checks` cover what the change touches, not only what it names: the tests that reference the changed code
+  (the test beside a changed file, the tests that import a changed module or call a changed endpoint) and a
+  typecheck of every project whose shared types or generated clients the change alters, including projects
+  outside the write scope that consume them. A check that is heavy — a whole suite, a database, a build — goes
+  into `setup` as an authorization to ask for, with what it would catch, rather than being left out.
 - `checks`: exact commands that already exist in the repository, narrow and fast, each
   `{argv, kind, inputs, timeout_s, baseline, no_reuse}`; `kind` is test, typecheck, lint, build, measurement,
   runtime or command. `inputs` are globs of the files that decide its result, empty when it depends on the

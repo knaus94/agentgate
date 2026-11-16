@@ -311,6 +311,10 @@ func (g *Gate) verify(cfg *config.Config, input RunInput, did *[]string) error {
 	if len(g.Reviews) > 0 {
 		packet["open_notes"] = g.openNotes(cfg)
 	}
+	if unchecked := g.uncheckedTests(now); len(unchecked) > 0 {
+		packet["unchecked_tests"] = map[string]any{"files": unchecked,
+			"note": "Test files this task added or changed that no declared check runs: nothing here shows they pass."}
+	}
 	if len(g.Attachments) > 0 {
 		packet["attachments"] = g.Attachments
 	}

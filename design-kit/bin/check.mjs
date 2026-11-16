@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { openBrowser } from '../lib/browser.mjs';
 import { compare, defaults, summary } from '../lib/compare.mjs';
 import { diffImages, readPage, still } from '../lib/page-read.mjs';
-import { ensureStand, readScreen } from '../lib/stand.mjs';
+import { ensureStand, readScreen, sessionState } from '../lib/stand.mjs';
 import { pageURL, numberOption, parseArgs, wantsHelp } from '../lib/cli.mjs';
 import { writeJSON } from '../lib/files.mjs';
 import { verifyPackage } from '../lib/package.mjs';
@@ -22,6 +22,9 @@ const usage = `usage:
         --root <css>            the element that implements the pulled node (default: the whole document)
         [--storage-state <f>]   a browser session for the stand, as Playwright saves it
         [--wait <css>]          an element that must be there before anything is measured
+        [--steps <json>]        actions that bring the page to the design's state first:
+                                [{"click": "<css>"}, {"fill": "<css>", "value": "…"}, {"wait": "<css>"}]
+        [--review]              take the pictures of this state for a reviewer to judge; measure nothing
         [--locale ru-RU]        the language the page is opened in
         [--viewport 1920x1080]  default: the size of the screen the node was drawn in
         [--device mobile]      mobile/touch Chromium (also for tablets); default desktop, even at narrow widths
@@ -45,13 +48,22 @@ async function main() {
     console.log(usage);
     return;
   }
-  const { flags, rest } = parseArgs(argv, { booleans: ['keep'],
-    values: ['url', 'root', 'storage-state', 'wait', 'locale', 'viewport', 'device', 'map', 'tolerance', 'max-pixel-diff', 'out', 'write-baseline', 'baseline'],
+  const { flags, rest } = parseArgs(argv, { booleans: ['keep', 'review'],
+    values: ['url', 'root', 'storage-state', 'wait', 'steps', 'locale', 'viewport', 'device', 'map', 'tolerance', 'max-pixel-diff', 'out', 'write-baseline', 'baseline'],
     optional: { record: (value) => /^https?:\/\//.test(value) } });
   if (flags['write-baseline'] && flags.baseline) fail('--write-baseline and --baseline cannot be combined');
   if (flags.tolerance !== undefined) flags.tolerance = numberOption(flags.tolerance, 'tolerance', { min: 0, max: 100 });
   if (flags['max-pixel-diff'] !== undefined) flags['max-pixel-diff'] = numberOption(flags['max-pixel-diff'], 'max-pixel-diff', { min: 0, max: 1 });
   if (flags.viewport && !/^[1-9][0-9]*x[1-9][0-9]*$/.test(flags.viewport)) fail('viewport must be WIDTHxHEIGHT in pixels');
+  let steps = [];
+  try {
+    steps = flags.steps ? JSON.parse(flags.steps) : [];
+  } catch {
+    fail('--steps is a JSON array of {click}, {fill, value} or {wait} with CSS selectors');
+  }
+  if (!Array.isArray(steps) || !steps.every((step) => step && ['click', 'fill', 'wait'].filter((action) => typeof step[action] === 'string' && step[action].trim()).length === 1)) {
+    fail('--steps is a JSON array of {click}, {fill, value} or {wait} with CSS selectors');
+  }
   if (rest[0] === 'new') {
     // A screen is made in one go: the design and where it is shown.
     const [, target, figma] = rest;
@@ -123,7 +135,7 @@ async function main() {
   numberOption(width, 'viewport width', { min: 1, max: 16384, integer: true });
   numberOption(height, 'viewport height', { min: 1, max: 16384, integer: true });
   const contract = crypto.createHash('sha256').update(JSON.stringify({ package: manifest.digest,
-    url: flags.url, root: flags.root || '', viewport: [width, height], device, locale: flags.locale, map, limits })).digest('hex');
+    url: flags.url, root: flags.root || '', viewport: [width, height], device, locale: flags.locale, map, limits, steps, review: Boolean(flags.review) })).digest('hex');
 
   let stopStand = async () => {};
   if (screen) {
@@ -132,31 +144,53 @@ async function main() {
   let browser;
   let code = 0;
   try {
+    // A session the stand hands out, fresh for this check, wins over cookies written down once.
+    const session = screen?.stand.session ? sessionState(rest[0]) : undefined;
     browser = await openBrowser();
     const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1, reducedMotion: 'reduce',
       isMobile: device === 'mobile', hasTouch: device === 'mobile',
-      locale: flags.locale, storageState: flags['storage-state'] || screen?.storageState });
+      locale: flags.locale, storageState: flags['storage-state'] || session || screen?.storageState });
     const page = await context.newPage();
     await page.goto(flags.url, { waitUntil: 'load', timeout: 60000 }).catch((error) => fail(`the page did not open: ${String(error).split('\n')[0]}`));
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    const trim = (value) => value.replace(/\/+$/, '') || '/';
+    const asked = trim(new URL(flags.url).pathname);
+    // A page that ended at another path did not open: a redirect, usually to a login. Before the work, a page
+    // that is not built yet may send the browser up its own path, to a section or to the start page.
+    const redirected = () => {
+      const landed = trim(new URL(page.url()).pathname);
+      const upward = flags['write-baseline'] && asked.startsWith(landed === '/' ? '/' : `${landed}/`);
+      if (asked !== landed && !upward) fail(`the page ended at ${landed} instead of ${asked}: a redirect, usually to a login; the stand needs a session or data`);
+    };
+    const notYet = (what) => {
+      // The page, its root or its state is not there before the work: it is what the task builds.
+      writeJSON(flags['write-baseline'], { contract, known: [] });
+      console.log(`design baseline: ${page.url()} does not show “${spec.frame.name}” yet (${what})`);
+    };
     if (flags.wait) await page.waitForSelector(flags.wait, { timeout: 30000 }).catch(() => fail(`${flags.wait} never appeared at ${page.url()}`));
+    for (const [index, step] of steps.entries()) {
+      const what = step.click ? `click ${step.click}` : step.fill ? `fill ${step.fill}` : `wait for ${step.wait}`;
+      try {
+        if (step.click) await page.locator(step.click).first().click({ timeout: 15000 });
+        else if (step.fill) await page.locator(step.fill).first().fill(String(step.value ?? ''), { timeout: 15000 });
+        else await page.waitForSelector(step.wait, { timeout: 30000 });
+      } catch (error) {
+        redirected();
+        if (flags['write-baseline']) return notYet(`step ${index + 1}, ${what}, cannot be done yet`);
+        // The page is there and its state cannot be reached: the control is not built, or is named differently.
+        fail(`step ${index + 1} (${what}) could not be done at ${page.url()}: ${String(error.message || error).split('\n')[0]}`, 3);
+      }
+      await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+    }
     await page.addStyleTag({ content: still });
     await page.evaluate(() => document.fonts.ready);
     await page.waitForTimeout(400);
 
     const seen = await page.evaluate(readPage, { root: flags.root || '', select: map.select });
-    if (seen.missingRoot && flags['write-baseline']) {
-      // The page or its root is not there before the work: it is what the task builds.
-      writeJSON(flags['write-baseline'], { contract, known: [] });
-      console.log(`design baseline: ${page.url()} does not show “${spec.frame.name}” yet`);
-      return;
-    }
+    if (seen.missingRoot) redirected(); // a login page has no root either: that is the stand, not the code
+    if (seen.missingRoot && flags['write-baseline']) return notYet('no root');
     if (seen.error) {
-      const asked = new URL(flags.url).pathname;
-      const landed = new URL(page.url()).pathname;
-      if (asked !== landed) {
-        fail(`the page ended at ${landed} instead of ${asked}: a redirect, usually to a login; the stand needs a session or data`);
-      }
+      redirected();
       if (seen.missingRoot) {
         // The page is there and the element is not: the writer named it differently or did not build it.
         const carried = await page.evaluate(() => [...new Set([...document.querySelectorAll('*')].flatMap((element) =>
@@ -169,6 +203,27 @@ async function main() {
       horizontalOverflow: seen.horizontalOverflow, root: { selector: flags.root || 'html', ...seen.root } };
     const measurementLine = `measurement: ${device} ${width}x${height}; document width ${measurement.documentWidth}; root ${measurement.root.selector} ${seen.root.width}x${seen.root.height} at ${seen.root.x},${seen.root.y}; padding ${seen.root.padding.join('/')}; horizontal overflow ${measurement.horizontalOverflow}`;
     console.log(measurementLine);
+    if (flags.review) {
+      // A state judged from the pictures: the reviewer is given them, and nothing is measured against the design.
+      if (flags['write-baseline']) return notYet('judged from the pictures');
+      const contextShot = await page.screenshot({ fullPage: true });
+      const shot = flags.root ? await page.locator(flags.root).first().screenshot() : contextShot;
+      const blank = await context.newPage();
+      const data = (bytes) => `data:image/png;base64,${bytes.toString('base64')}`;
+      const pictures = await blank.evaluate(diffImages, { design: data(fs.readFileSync(path.join(dir, 'frame.png'))), actual: data(shot),
+        crop: { x: 0, y: 0, width: spec.frame.width, height: spec.frame.height }, marks: [] });
+      const text = `${measurementLine}\ncompare: review — this state is judged from the pictures; nothing was measured against the design (${(pictures.ratio * 100).toFixed(1)}% of the pixels differ)\n`;
+      if (flags.out) {
+        fs.mkdirSync(flags.out, { recursive: true });
+        fs.writeFileSync(path.join(flags.out, 'diff.png'), Buffer.from(pictures.diff.split(',')[1], 'base64'));
+        fs.writeFileSync(path.join(flags.out, 'actual.png'), shot);
+        fs.writeFileSync(path.join(flags.out, 'page.png'), contextShot);
+        fs.writeFileSync(path.join(flags.out, 'report.json'), JSON.stringify({ url: page.url(), package: manifest.digest, measurement, pixels: pictures.ratio, compare: 'review', issues: [] }, null, 1));
+        fs.writeFileSync(path.join(flags.out, 'report.md'), text);
+      }
+      process.stdout.write(text.slice(measurementLine.length + 1));
+      return;
+    }
     const result = compare(spec, seen, map, limits);
     if (result.contentCompared === 0 && flags['write-baseline']) {
       // Nothing is built yet: every difference the finished screen has will be a new one.

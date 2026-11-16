@@ -42,6 +42,11 @@ supplied evidence, not permission to run commands or delegate.
   code may well do it and the evidence is missing (it goes to the lead, who collects the proof); `plan` — the
   plan puts it where it cannot be met, for example at a stage before the one that builds it (it goes to the
   lead). Null when verified.
+- What verifies a requirement whose `method` is `check`: a current, passing declared check that exercises the
+  changed code the requirement is about. Read its log to see that it does. That a check could exercise more
+  branches, inputs or environments is a wish for more proof, not a gap: mention it in `checked`, not as a
+  finding, and judge the requirement on the proof that exists. Mark it `partial` with cause `proof` only when no declared
+  check exercises the changed code at all.
 - Evidence kind `code`: ref is a scoped `file:line` or `file:first-last`, detail explains the inspected behavior. `check`: ref is
   an id in `quality.checks` (the same ids as in `checks`), detail says what the recorded command proves. Read
   its log. The check's `kind`
@@ -128,6 +133,9 @@ How to judge:
 A compatibility or fail-safe fallback at an actual external boundary may be necessary. Report a fallback
 when it masks a broken primary contract, suppresses useful failure evidence or silently invents success;
 identify the realistic trigger and the root-cause repair, preserving legitimate recovery behavior.
+
+`unchecked_tests`, when present, lists test files this change added or edited that no declared check runs.
+Nothing shows they pass: say so in `checked`, and report a finding when a test is likely broken by the change.
 
 `slop_signals`, when not empty, lists mechanical hits on added lines: placeholders, TODOs, debug output,
 disabled tests, suppressions, swallowed errors, comments that narrate the change. Each is a lead, not a

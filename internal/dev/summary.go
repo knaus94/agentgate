@@ -335,6 +335,11 @@ func (g *Gate) report(cfg *config.Config, did []string) map[string]any {
 	if g.Worktree != "" {
 		out["isolated"] = g.landing()
 	}
+	if tree := g.presentTree(); tree != "" {
+		if unchecked := g.uncheckedTests(tree); len(unchecked) > 0 {
+			out["unchecked_tests"] = unchecked
+		}
+	}
 	if g.Final != nil {
 		out["summary"] = clipText(g.Final.Summary, 1500)
 		out["receipt"] = g.receipt()
@@ -353,6 +358,19 @@ func (g *Gate) report(cfg *config.Config, did []string) map[string]any {
 	}
 	out["actions"], out["next"] = actions, g.next(needs)
 	return out
+}
+
+// presentTree is the working tree the answer speaks of: the one a finished task was completed at, or the one
+// there is now once the writers of the round have reported. "" while writers work.
+func (g *Gate) presentTree() string {
+	switch {
+	case g.Final != nil:
+		return g.Final.Tree
+	case g.Step == StepVerify || g.Step == StepDecide:
+		tree, _ := g.snapshot()
+		return tree
+	}
+	return ""
 }
 
 // respond is the answer of a command that has data of its own: the common object, that data under result.

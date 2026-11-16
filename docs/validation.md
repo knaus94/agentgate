@@ -4,6 +4,48 @@ This record distinguishes live integrations from controlled provider fixtures an
 model quality, arbitrary specification size or every possible execution environment. It has two parts: what
 was run for the 0.16.0 source, and the release validation of 0.14.0, which is kept as it was written.
 
+## 0.18.0
+
+Checked on 2026-11-16 against the source based on `23bd9d1` (0.17.0); the plan is groups D and E of the
+[brief](briefs/0.17-lead-experience.md).
+
+### Automated checks
+
+| Check | Actual result |
+|---|---|
+| `make check`: `gofmt`, `go vet ./...`, `go test -race ./...`, Node core suite | PASS |
+| `go test -count=1 -json ./...` | PASS: 221 top-level tests, zero failures |
+| Node core suite | PASS: 19 tests |
+| `make design-browser`: Chromium workflow | PASS: 8 tests; the changed checker keeps its behaviour |
+
+No permanent test was added: the brief limits new tests to one per defect of group A and scenarios of B1, B2,
+B5 and B6. The new behaviour was checked once with throwaway tests that were deleted afterwards:
+
+- Go, with the scripted model and a stand-in `figma frames`: a preparation that asks for a node
+  (`design_requests`, depth 9) gets it read with `--node` at depth 6 and continues in the same session; which
+  test files a declared check runs, over ten command shapes (a named file, `./...`, a package directory, an nx
+  project, a bare runner, `true`, `sh -c`); a task whose writer adds a test no check runs names it in the
+  answer and in the reviewer's packet; two designs of one page in one state are refused, `steps` or
+  `compare: "review"` make them valid and reach the layout command.
+- Chromium, through `check.mjs` with a local stand: steps bring the page to the state and the comparison
+  passes; without them the root is missing (exit 3); a step that cannot be done is exit 3, and before the work
+  it is recorded as not built; `--review` writes the pictures and measures nothing; before the work a redirect
+  up the page's own path is "not built", a redirect to `/login` without a session is exit 2; the `session`
+  command's cookie opens the protected page; a declared service and the stand are started and both are stopped
+  after every check.
+
+### Dry run
+
+The harness of 0.17.0 with one scenario added: a writer changes two test files and the declared check runs one
+of them. 0.18.0 held 102 of 102 promises; on 0.17.0 the new scenario holds 2 of 4 (no `unchecked_tests`). The
+design changes need a browser and Figma and are not part of the dry run.
+
+### Not done
+
+- No run on a real model, and no real Figma file: what a real preparation worker asks for in
+  `design_requests`, and the steps it writes, are covered only by the prompts.
+- The checker's new paths were exercised once, not kept as a test.
+
 ## 0.17.0
 
 Checked on 2026-11-16 against the source based on `e5ef01f` (0.16.2). What changed and why is in

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -222,11 +223,17 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 		packet["design_source"] = "Reuse the selected packages and design_context of this task. No Figma browser was started; refresh_designs is needed only when the design selection itself must be rediscovered."
 	}
 	if len(links) > 0 || designed {
+		type process struct {
+			Command []string `json:"command"`
+			Ready   string   `json:"ready,omitempty"`
+		}
 		var stand struct {
-			Command    []string `json:"command"`
-			Ready      string   `json:"ready"`
-			EnvFile    string   `json:"env_file"`
-			GraphQLEnv []string `json:"graphql_env"`
+			Command    []string  `json:"command"`
+			Ready      string    `json:"ready"`
+			EnvFile    string    `json:"env_file"`
+			GraphQLEnv []string  `json:"graphql_env"`
+			Services   []process `json:"services"`
+			Session    *process  `json:"session"`
 		}
 		if len(cfg.Design.Stand) > 0 {
 			if err := json.Unmarshal(cfg.Design.Stand, &stand); err != nil {
@@ -267,7 +274,17 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 	tools, toolDirs, toolNote := workerTools(cfg, "scout")
 	subs := &substitutions{}
 	var problems PlanProblems
-	for attempt := 0; attempt <= corrections; attempt++ {
+	// The Figma files a node the worker asks for is read from: the request's links, then the plan's designs.
+	files := figmaURL.FindAllString(input.Request, -1)
+	if revising {
+		for _, design := range gate.Plan.Design {
+			if design.Figma != "" {
+				files = append(files, design.Figma)
+			}
+		}
+	}
+	reads := 0
+	for attempt := 0; attempt <= corrections; {
 		preparation.Rounds++
 		path := filepath.Join(root, fmt.Sprintf("packet-%d.json", preparation.Rounds))
 		if err := writePacket(path, packet); err != nil {
@@ -275,8 +292,9 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 		}
 		prompt := instructions + "\nRead " + path + ".\n" + toolNote
 		if preparation.Session != "" {
-			prompt = "New input for the preparation you are working on is at " + path + ": answers to your questions, notes of the lead or problems the " +
-				"host validator found. You already read the repository; read again only what the new input makes necessary. Return the same JSON schema.\n" + toolNote
+			prompt = "New input for the preparation you are working on is at " + path + ": answers to your questions, notes of the lead, the parts of " +
+				"the design you asked for or problems the host validator found. You already read the repository; read again only what the new input makes " +
+				"necessary. Return the same JSON schema.\n" + toolNote
 		}
 		result, used, err := subs.invoke(cfg, provider.Call{Route: preparation.Route, Prompt: prompt, Dir: preparation.Dir, Schema: prepareSchema,
 			Timeout: seconds(prepareTimeout), Persist: true, Resume: preparation.Session, MCP: tools, Writable: toolDirs, ReadDirs: []string{root}, Images: images}, nil)
@@ -298,6 +316,7 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 			Summary   string          `json:"summary"`
 			Questions []Question      `json:"questions"`
 			Setup     []string        `json:"setup"`
+			Requests  []designRequest `json:"design_requests"`
 			Plan      json.RawMessage `json:"plan"`
 			Pack      *contextPack    `json:"context_pack"`
 		}
@@ -306,6 +325,14 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 		}
 		if err := preparation.remember(gate); err != nil {
 			return nil, err
+		}
+		// A worker that needs more of the design than its catalogue asks for it, and continues with it: reading a
+		// node is the tool's work, not the lead's.
+		if answer.Status == "BLOCKED" && len(answer.Questions) == 0 && len(answer.Requests) > 0 && reads < designReads {
+			reads++
+			packet = map[string]any{"design_catalogues": readDesignRequests(answer.Requests, files),
+				"rule": "The parts of the design you asked for. Continue the preparation; ask again only for what is still missing."}
+			continue
 		}
 		if answer.Status == "BLOCKED" && strings.TrimSpace(answer.Summary) != "" {
 			preparation.Status, preparation.Questions = "BLOCKED", answer.Questions
@@ -317,8 +344,12 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 			if len(answer.Questions) == 0 {
 				next = "The worker reports a prerequisite it cannot resolve itself (see summary and setup). Resolve it, then `prepare` again with notes: the same worker continues."
 			}
+			if len(answer.Questions) == 0 && len(answer.Requests) > 0 {
+				next = fmt.Sprintf("The worker asked for more of the design than %d readings of the file gave it (design_requests). Tell the user; a narrower "+
+					"link to the frame in the request, or `prepare` with notes that name the frame, lets it continue.", designReads)
+			}
 			return map[string]any{"status": "BLOCKED", "summary": answer.Summary, "questions": answer.Questions, "setup": answer.Setup,
-				"preparation": preparation.ID, "route": used, "substitutions": subs.list, "next": next}, nil
+				"design_requests": answer.Requests, "preparation": preparation.ID, "route": used, "substitutions": subs.list, "next": next}, nil
 		}
 		plan := &Plan{}
 		problems = nil
@@ -353,6 +384,7 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 		if problems != nil {
 			packet = map[string]any{"validation_problems": problems,
 				"rule": "Correct every problem in the plan you returned and return the complete plan again. Keep its scope and decisions; this is a correction of form, not a new investigation."}
+			attempt++
 			continue
 		}
 		rules, err := loadReviewRules(cfg, resolved.Plan.Files())
@@ -554,6 +586,51 @@ func copyAttachments(paths []string, dir string) []string {
 		target := filepath.Join(dir, filepath.Base(path))
 		if os.MkdirAll(dir, 0o700) == nil && os.WriteFile(target, raw, 0o600) == nil {
 			out = append(out, target)
+		}
+	}
+	return out
+}
+
+// designRequest is a part of a Figma file a preparation worker asks to see: a node — its id in the file of the
+// request, or its own link — and how deep to list it.
+type designRequest struct {
+	Node  string `json:"node"`
+	Depth int    `json:"depth"`
+}
+
+// designReads is how many times one preparation call reads the design for its worker.
+const designReads = 3
+
+// readDesignRequests lists the nodes a worker asked for. A node that cannot be read is answered with why,
+// so the worker can go on without it.
+func readDesignRequests(requests []designRequest, files []string) []map[string]any {
+	out := []map[string]any{}
+	for _, request := range requests[:min(len(requests), 5)] {
+		depth := min(max(request.Depth, 1), 6)
+		item := map[string]any{"node": request.Node, "depth": depth}
+		out = append(out, item)
+		link, node := strings.TrimRight(request.Node, ").,;"), ""
+		if !strings.HasPrefix(link, "https://") {
+			if len(files) == 0 {
+				item["error"] = "no Figma link in the request to read this node from: name it by its own link"
+				continue
+			}
+			link, node = strings.TrimRight(files[0], ").,;"), request.Node
+		}
+		argv := []string{"figma", "frames", link, "--json", "--depth", strconv.Itoa(depth)}
+		if node != "" {
+			argv = append(argv, "--node", node)
+		}
+		var stdout, stderr bytes.Buffer
+		cmd := exec.Command(layoutCommand(), argv...)
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		switch err := ops.Run(cmd, seconds(layoutTimeout)); {
+		case err != nil:
+			item["error"] = toolMessage(stderr.String() + "\n" + err.Error())
+		case !json.Valid(stdout.Bytes()):
+			item["error"] = "figma frames returned no JSON catalogue"
+		default:
+			item["catalogue"] = json.RawMessage(stdout.Bytes())
 		}
 	}
 	return out

@@ -45,19 +45,23 @@ var planSchema = object(map[string]any{
 	"visual": nullable(object(map[string]any{"enabled": boolean, "reason": text,
 		"scenarios": items(map[string]any{"id": text, "screen": text, "state": text, "viewport": text, "role": text, "expected": text})})),
 	"design": items(map[string]any{"figma": nullable(text), "name": nullable(text), "screen": nullable(text), "url": nullable(text), "root": nullable(text),
-		"stream": text, "viewport": nullable(text), "device": nullable(enum("desktop", "mobile")), "locale": nullable(text)}),
+		"stream": text, "viewport": nullable(text), "device": nullable(enum("desktop", "mobile")), "locale": nullable(text),
+		"steps":   items(map[string]any{"click": nullable(text), "fill": nullable(text), "value": nullable(text), "wait": nullable(text)}),
+		"compare": nullable(enum("measure", "review"))}),
 	"update": nullable(text),
 	"rework": list(text),
 })
 
 var prepareSchema = object(map[string]any{
-	"status":       enum("READY", "BLOCKED"),
-	"name":         nullable(text),
-	"summary":      text,
-	"questions":    items(map[string]any{"id": text, "question": text, "options": list(text), "recommended": text}),
-	"setup":        list(text),
-	"plan":         nullable(planSchema),
-	"context_pack": nullable(contextPackSchema),
+	"status":    enum("READY", "BLOCKED"),
+	"name":      nullable(text),
+	"summary":   text,
+	"questions": items(map[string]any{"id": text, "question": text, "options": list(text), "recommended": text}),
+	"setup":     list(text),
+	// A preparation that needs more of a Figma file than the catalogue it was given asks for it; the tool reads it.
+	"design_requests": items(map[string]any{"node": text, "depth": integer}),
+	"plan":            nullable(planSchema),
+	"context_pack":    nullable(contextPackSchema),
 })
 
 type packFile struct {

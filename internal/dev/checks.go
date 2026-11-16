@@ -456,3 +456,68 @@ func checkLabel(argv []string) string {
 	}
 	return label
 }
+
+// testFile recognises the test files of the common ecosystems by their paths.
+var testFile = regexp.MustCompile(`(^|/)(__tests__|tests?|specs?)/|(^|/)(test_[^/]+\.py|[^/]+_test\.(go|py|rb|exs)|[^/]+\.(test|spec)\.[A-Za-z]+|[^/]+(Test|Tests|Spec)\.(java|kt|cs|swift|scala))$`)
+
+// runnerWords are the words of a test command that name its runner, not what it runs.
+var runnerWords = []string{"test", "tests", "run", "exec", "npx", "yarn", "npm", "pnpm", "bun", "deno", "node", "go", "pytest", "python", "python3",
+	"jest", "vitest", "mocha", "cargo", "make", "mvn", "gradle", "gradlew", "dotnet", "nx", "turbo", "rspec", "bundle", "mix"}
+
+// runsTests says whether a check may run tests at all: a test, or a command of unknown kind.
+func (c Check) runsTests() bool { return c.Kind == "" || c.Kind == "test" || c.Kind == "command" }
+
+// covers says whether a check runs a test file, as far as its declaration shows: its inputs match the file, or
+// its command names the file, a directory above it or a project it lies in, or names nothing but its runner.
+func (c Check) covers(path string) bool {
+	for _, input := range c.Inputs {
+		if glob, err := compileGlob(input); err == nil && glob.MatchString(path) {
+			return true
+		}
+	}
+	dirs := strings.Split(path, "/")
+	dirs = dirs[:len(dirs)-1]
+	named := !slices.Contains(runnerWords, filepath.Base(c.Argv[0]))
+	for _, arg := range c.Argv[1:] {
+		token := strings.TrimSuffix(strings.TrimPrefix(arg, "./"), "/")
+		switch {
+		case strings.HasPrefix(arg, "-"):
+		case token == "...":
+			if strings.HasSuffix(path, ".go") {
+				return true
+			}
+			named = true
+		case strings.HasSuffix(token, "/..."):
+			if strings.HasPrefix(path, strings.TrimSuffix(token, "...")) {
+				return true
+			}
+			named = true
+		case token == path, strings.HasPrefix(path, token+"/"), slices.Contains(dirs, token):
+			return true
+		case !slices.Contains(runnerWords, token):
+			named = true
+		}
+	}
+	return !named
+}
+
+// uncheckedTests are the test files the task added or changed that no declared check runs: tests that run
+// nowhere here fail later, in somebody's pipeline.
+func (g *Gate) uncheckedTests(tree string) []string {
+	changes, err := diffTrees(g.objects(), g.BaseTree, tree)
+	if err != nil {
+		return nil
+	}
+	scope := compilePatterns(g.Plan.Files())
+	checks := g.Plan.checksFor(-1)
+	var out []string
+	for _, change := range changes {
+		if change.Status == "D" || !testFile.MatchString(change.Path) || !matchAny(scope, change.Path) {
+			continue
+		}
+		if !slices.ContainsFunc(checks, func(check Check) bool { return check.runsTests() && check.covers(change.Path) }) {
+			out = append(out, change.Path)
+		}
+	}
+	return out
+}
