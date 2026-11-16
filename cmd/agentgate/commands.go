@@ -222,7 +222,11 @@ func run(args arguments) (any, int, error) {
 			return value, 0, err
 		}
 		if gate == nil || args.flags["all"] {
-			return dev.Overview(), 0, nil
+			out := dev.Overview()
+			if gate == nil && args.action == "status" {
+				dev.AddPreparation(nil, out)
+			}
+			return out, 0, nil
 		}
 		what := ""
 		if args.action == "show" {

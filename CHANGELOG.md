@@ -2,6 +2,20 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.19.2
+
+A lead that loses the answer of `prepare` no longer has to run the preparation worker again.
+
+**Fixed**
+
+- `status` shows the answer of a preparation that waits on the lead (`BLOCKED`: questions for the user or a
+  prerequisite) under `preparation`, with its `next`, also when an earlier task of the session is done. Before,
+  it showed only the finished task and its "Done", and the questions could be read only by asking the worker
+  to repeat them.
+- The guide says that `prepare` and the other commands before a task answer without `result`, and that an
+  answer is read whole: a lead filtered the answer of `prepare` for `.result.questions`, got `null` and lost
+  the questions.
+
 ## 0.19.1
 
 The model table the user settled on becomes the built-in one, and the rule that refused a task when a reviewer

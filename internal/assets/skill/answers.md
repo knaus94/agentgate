@@ -58,7 +58,8 @@ Every command about the task answers with one object. Read it as it is; do not p
 Commands before a task answer in their own shape: `prepare` (`status`, `summary`, `plan`, `brief`, `mode`,
 `because`, `stages`, `checks`, `setup`, `questions`, `next`), `architecture` (what `show architecture`
 prints), `route`, `modes`, `preview`, `consult`, `design`. `forget` answers `{forgot, task, removed}`. Errors
-without a task go to stderr.
+without a task go to stderr. While a preparation waits on you (`BLOCKED`), `status` carries its answer under
+`preparation` and its `next`, also when an earlier task of the session is done.
 
 ## Waiting
 

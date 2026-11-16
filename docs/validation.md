@@ -4,6 +4,19 @@ This record distinguishes live integrations from controlled provider fixtures an
 model quality, arbitrary specification size or every possible execution environment. It has two parts: what
 was run for the 0.16.0 source, and the release validation of 0.14.0, which is kept as it was written.
 
+## 0.19.2
+
+Checked on 2026-11-16 against `feade44` (0.19.1).
+
+| Check | Actual result |
+|---|---|
+| `make check`: `gofmt`, `go vet ./...`, `go test -race ./...`, Node core suite | PASS |
+| Dry run | 114 of 114 promises in 11 scenarios; the `prepare` scenario now loses an answer twice, before any task and after a done one, and reads it from `status` |
+| The same `prepare` scenario on 0.19.1 | 20 of 22: `status` shows neither the open questions nor where to go after a done task |
+
+`TestAnswersGoToTheSameWorker` also asserts that `status` shows the questions of a blocked preparation. No
+model was run.
+
 ## 0.19.1
 
 Checked on 2026-11-16 against `fc7db9f` (0.19.0).

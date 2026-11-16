@@ -15,7 +15,7 @@
 После распаковки:
 
 ```sh
-cd agentgate-0.19.1
+cd agentgate-0.19.2
 sh scripts/install-local.sh --lead both
 agentgate setup doctor
 agentgate config validate

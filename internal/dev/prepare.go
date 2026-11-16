@@ -47,18 +47,19 @@ type Question struct {
 
 // Preparation is what is kept of the conversation between calls.
 type Preparation struct {
-	ID          string       `json:"id"`
-	Request     string       `json:"request"`
-	Name        string       `json:"name,omitempty"`
-	Mode        string       `json:"mode,omitempty"`        // the lead's choice, kept in every plan this preparation returns
-	Attachments []string     `json:"attachments,omitempty"` // copies of the files the user gave
-	Route       config.Route `json:"route"`
-	Session     string       `json:"session"`
-	Dir         string       `json:"dir"` // the worker's lane, which holds its session
-	Status      string       `json:"status"`
-	Questions   []Question   `json:"questions,omitempty"`
-	Rounds      int          `json:"rounds"`
-	UpdatedAt   int64        `json:"updated_at"`
+	ID          string         `json:"id"`
+	Request     string         `json:"request"`
+	Name        string         `json:"name,omitempty"`
+	Mode        string         `json:"mode,omitempty"`        // the lead's choice, kept in every plan this preparation returns
+	Attachments []string       `json:"attachments,omitempty"` // copies of the files the user gave
+	Route       config.Route   `json:"route"`
+	Session     string         `json:"session"`
+	Dir         string         `json:"dir"` // the worker's lane, which holds its session
+	Status      string         `json:"status"`
+	Questions   []Question     `json:"questions,omitempty"`
+	Rounds      int            `json:"rounds"`
+	UpdatedAt   int64          `json:"updated_at"`
+	Answer      map[string]any `json:"answer,omitempty"` // what the last call returned, for `status`
 }
 
 // corrections is how many times one call sends validation problems back into the worker's session.
@@ -87,6 +88,29 @@ func loadPreparation(id string) *Preparation {
 func (p *Preparation) save() error {
 	p.UpdatedAt = time.Now().Unix()
 	return writePacket(preparationFile(p.ID), p)
+}
+
+// answered keeps what a call returns: a lead that lost the answer reads it with `status` instead of running the
+// worker again.
+func (p *Preparation) answered(out map[string]any) (map[string]any, error) {
+	p.Answer = out
+	if err := p.save(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// AddPreparation shows the answer of this session's preparation while it waits on the lead: questions for the
+// user, or a prerequisite to resolve. Nothing else says so once an earlier task of the session is done.
+func AddPreparation(gate *Gate, out map[string]any) {
+	preparation := openPreparation(gate)
+	if preparation == nil || preparation.Answer["status"] != "BLOCKED" {
+		return
+	}
+	out["preparation"] = preparation.Answer
+	if gate == nil || !gate.active() {
+		out["next"] = preparation.Answer["next"]
+	}
 }
 
 // openPreparation is the conversation a call continues: the one that prepared the active task's plan, or the
@@ -163,6 +187,7 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 		preparation = &Preparation{ID: id, Request: input.Request, Route: cfg.MustRoute(spec),
 			Dir: filepath.Join(checkoutDir(""), "preparations", id, "worker")}
 	}
+	preparation.Answer = nil
 	if input.Name != "" {
 		preparation.Name = input.Name
 	}
@@ -336,9 +361,6 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 		}
 		if answer.Status == "BLOCKED" && strings.TrimSpace(answer.Summary) != "" {
 			preparation.Status, preparation.Questions = "BLOCKED", answer.Questions
-			if err := preparation.save(); err != nil {
-				return nil, err
-			}
 			next := "The worker is missing these decisions. Ask the user with your client's question tool, then `prepare` again with answers {id: answer}: " +
 				"the same worker continues, it does not explore again. Never infer consent from an empty result."
 			if len(answer.Questions) == 0 {
@@ -348,8 +370,8 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 				next = fmt.Sprintf("The worker asked for more of the design than %d readings of the file gave it (design_requests). Tell the user; a narrower "+
 					"link to the frame in the request, or `prepare` with notes that name the frame, lets it continue.", designReads)
 			}
-			return map[string]any{"status": "BLOCKED", "summary": answer.Summary, "questions": answer.Questions, "setup": answer.Setup,
-				"design_requests": answer.Requests, "preparation": preparation.ID, "route": used, "substitutions": subs.list, "next": next}, nil
+			return preparation.answered(map[string]any{"status": "BLOCKED", "summary": answer.Summary, "questions": answer.Questions, "setup": answer.Setup,
+				"design_requests": answer.Requests, "preparation": preparation.ID, "route": used, "substitutions": subs.list, "next": next})
 		}
 		plan := &Plan{}
 		problems = nil
@@ -389,13 +411,10 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 		}
 		rules, err := loadReviewRules(cfg, resolved.Plan.Files())
 		if err != nil {
-			if saveErr := preparation.save(); saveErr != nil {
-				return nil, saveErr
-			}
-			return map[string]any{"status": "BLOCKED", "summary": err.Error(), "questions": []Question{},
+			return preparation.answered(map[string]any{"status": "BLOCKED", "summary": err.Error(), "questions": []Question{},
 				"setup":        []string{"Make the named project instructions readable, then `prepare` again."},
 				"review_rules": reviewRuleSummary(cfg, rules), "preparation": preparation.ID, "route": used,
-				"next": "Required project instructions are unavailable. Restore the named files; no plan was saved."}, nil
+				"next": "Required project instructions are unavailable. Restore the named files; no plan was saved."})
 		}
 		name := preparation.Name
 		if name == "" && revising {
@@ -423,9 +442,6 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 		if err := proposal.save(); err != nil {
 			return nil, err
 		}
-		if err := preparation.save(); err != nil {
-			return nil, err
-		}
 		out := map[string]any{"status": "READY", "summary": answer.Summary, "plan": saved.Name, "brief": saved.Brief, "mode": resolved.Mode,
 			"because": resolved.Decision.Because, "stages": outline(resolved), "requirements": len(resolved.Plan.Requirements),
 			"checks": checkLines(resolved.Plan), "setup": answer.Setup, "preparation": preparation.ID, "route": used}
@@ -444,14 +460,11 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 		default:
 			out["next"] = "Check the brief for scope and decisions, tell the user the mode and why, get the authorizations the checks or the stand need, then `start --plan " + saved.Name + "`."
 		}
-		return out, nil
+		return preparation.answered(out)
 	}
-	if err := preparation.save(); err != nil {
-		return nil, err
-	}
-	return map[string]any{"status": "BLOCKED", "reason": "invalid_plan", "summary": "The preparation worker could not produce a valid plan in this call.",
+	return preparation.answered(map[string]any{"status": "BLOCKED", "reason": "invalid_plan", "summary": "The preparation worker could not produce a valid plan in this call.",
 		"problems": []string(problems), "questions": []Question{}, "setup": []string{}, "preparation": preparation.ID,
-		"next": "Report the problems. No plan was saved. `prepare` again with notes continues the same worker; do not reconstruct the technical plan yourself."}, nil
+		"next": "Report the problems. No plan was saved. `prepare` again with notes continues the same worker; do not reconstruct the technical plan yourself."})
 }
 
 // remember makes this preparation the one the lead session, or the active task, continues.

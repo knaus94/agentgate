@@ -657,6 +657,9 @@ func Status(cfg *config.Config, gate *Gate, what string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if what == "" || what == "all" {
+		AddPreparation(gate, out)
+	}
 	gate.operation(out)
 	return out, nil
 }

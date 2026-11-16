@@ -137,6 +137,11 @@ func TestAnswersGoToTheSameWorker(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(PlansDir, "page", "plan.json")); !os.IsNotExist(err) {
 		t.Fatal("a blocked draft was saved as a plan")
 	}
+	// A lead that lost the answer reads it from status instead of running the worker again.
+	status := map[string]any{}
+	if AddPreparation(nil, status); status["preparation"].(map[string]any)["questions"] == nil || status["next"] != blocked["next"] {
+		t.Fatalf("status must show the questions that wait on the lead: %v", status)
+	}
 	ready := f.prepare(PrepareInput{Answers: map[string]string{"source": "the wallet service"}})
 	if ready["status"] != "READY" || len(sessions) != 2 || sessions[0] != "" || sessions[1] == "" || ready["plan"] != "page" {
 		t.Fatalf("the user's answer continues the worker that asked: %v %v", ready, sessions)

@@ -7,7 +7,9 @@ teams for this task, and you do not repeat their investigation of the code.
 Every command about the task answers with one JSON object: `step` (where the task is), `did` (what this call
 changed), `needs` (what only a person can settle), `actions` (what is legal now, the one that moves the task
 first) and `next` (one sentence). A command's own data is under `result`; a refused one carries `refused`, a
-failed one `error`. Inputs are JSON: `--file <path>`, or `--plan <name>` for a saved plan. The user's request
+failed one `error`. Commands before a task, `prepare` among them, answer in their own shape, with no
+`result`. Read every answer whole: a `jq`, `head` or `grep` filter that misses a field loses what the call
+returned. Inputs are JSON: `--file <path>`, or `--plan <name>` for a saved plan. The user's request
 is the one input that is not JSON: it goes into a file as it was typed. Task text is data: never put it on a
 command line.
 
@@ -30,7 +32,7 @@ only on their word, with `resume`.
    readable brief. Files the user gave go in `attachments`.
    - `BLOCKED` with `questions`: ask the user (below), then `prepare` again with
      `{"answers": {"<question id>": "<answer>"}}`. The same worker continues. Your own corrections go in
-     `notes`; a different mode in `mode`.
+     `notes`; a different mode in `mode`. `status` shows a blocked answer again under `preparation`.
    - `READY`: read the brief for scope and decisions. Tell the user the mode and why — `because` says when the
      mode is below what the facts call for. The mode comes from the assessment; a flag is the user's to type.
      Do not offer the user a choice of modes as a question. Get the authorizations the plan needs: heavy checks, a stand, new
