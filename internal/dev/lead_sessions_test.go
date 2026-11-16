@@ -343,3 +343,36 @@ func TestTheStopHookSaysWhatWasRefused(t *testing.T) {
 		t.Fatalf("the hook names the refusal the lead may have missed and what the task needs: %q", reason)
 	}
 }
+
+func TestAMessageOfTheUserRemindsTheLeadWhoseTheDesignIs(t *testing.T) {
+	f := newFixture(t)
+	f.model = func(kind string, _ map[string]any, call provider.Call) (string, error) {
+		if kind == "writer" && call.Resume == "" {
+			return `{"status":"BLOCKED","summary":"need a value","blockers":["Which value?"],"handoff":"","deviations":[],"disputes":[]}`, nil
+		}
+		return "", nil
+	}
+	cwd, _ := os.Getwd()
+	if hook := PromptHook(cwd, "fixture-session"); len(hook) != 0 {
+		t.Fatalf("a session without a task is told nothing: %v", hook)
+	}
+	plan := f.plan("-h change the contract")
+	receipt := f.do("architecture", func() (any, error) { return Architecture(f.cfg, plan) })
+	plan.Architecture = &Accepted{ID: receipt["id"].(string)}
+	f.start(plan)
+	note := func() string {
+		out, _ := PromptHook(cwd, "fixture-session")["hookSpecificOutput"].(map[string]any)
+		text, _ := out["additionalContext"].(string)
+		return text
+	}
+	if text := note(); !strings.Contains(text, "`agentgate architecture` with {\"revise\": \""+plan.Architecture.ID+"\"") || !strings.Contains(text, "not a message of the user") {
+		t.Fatalf("during a task a doubt about the design is sent to the architect of its receipt: %q", text)
+	}
+	f.do("answer", func() (any, error) { return Answer(f.cfg, Current(), AnswerInput{Stream: "core", Answer: "42"}) })
+	if text := note(); Current().Step != StepDone || !strings.Contains(text, "`agentgate prepare` as their own words") {
+		t.Fatalf("after a task the next request is the user's words: %q", text)
+	}
+	if hook := PromptHook(cwd, "another-session"); len(hook) != 0 {
+		t.Fatalf("another session is told nothing: %v", hook)
+	}
+}

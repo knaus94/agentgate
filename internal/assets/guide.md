@@ -101,6 +101,9 @@ by the user and carried by you. Your own words never become the design.
 - **A requirement says what must be true, never how**: no table, index, statement or algorithm. A change of
   how is a revision of the design, not a requirement you write.
 
+While this session has a task, the tool says this again with every message of the user. A line that begins
+`agentgate, to the lead` is the tool's reminder, not the user's words: it names the command a doubt goes to.
+
 ## Asking the user
 
 Ask only for product, data, security or authorization decisions, with a recommendation; a worker's question

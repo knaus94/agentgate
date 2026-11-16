@@ -4,6 +4,21 @@ This record distinguishes live integrations from controlled provider fixtures an
 model quality, arbitrary specification size or every possible execution environment. It has two parts: what
 was run for the 0.16.0 source, and the release validation of 0.14.0, which is kept as it was written.
 
+## 0.20.1
+
+Checked on 2026-11-16 against `58a92aa` (0.20.0).
+
+| Check | Actual result |
+|---|---|
+| `make check`: `gofmt`, `go vet ./...`, `go test -race ./...`, Node core suite | PASS |
+| Dry run | 148 of 148 promises in 12 scenarios; the `design` scenario calls the hook through the real binary during the task and after it |
+| The `design` scenario on 0.20.0 | 32 of 34: the two promises about the reminder fail |
+| Installed Codex (0.169.0) | its binary names the `UserPromptSubmit` hook and `additionalContext`, the same wire shape as Claude Code |
+
+Tests: the hook's note without a task, during a task with an accepted design and after the task; the command
+line dispatches on `hook_event_name`; install keeps a foreign `UserPromptSubmit` hook and uninstall removes only
+ours. Not checked: that a lead heeds the reminder — that shows only in real sessions. No model was run.
+
 ## 0.20.0
 
 Checked on 2026-11-16 against `958ef03` (0.19.2).

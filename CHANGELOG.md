@@ -2,6 +2,29 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.20.1
+
+The lead is reminded whose the design is at the moment the user speaks, not only in a guide it read long ago.
+
+**Added**
+
+- A hook on every message of the user (`UserPromptSubmit`), installed beside the Stop hook for Claude Code and
+  for Codex. While the session has a task it adds a few lines for the lead: a doubt about how the change is
+  built goes to the architect of the accepted design, with the command and the receipt — or to the preparation
+  worker in a mode without architects. After the task: the next request goes to `prepare` as the user's own
+  words. It reads the saved task and changes nothing; a session without a task is told nothing.
+
+**Changed**
+
+- `agentgate install` and `update` add that hook next to the hooks you already have; `doctor` checks both as
+  "lead hooks". In Codex, review and trust the new entry once with `/hooks`.
+- A failure inside a hook answers nothing instead of exiting with the code a client reads as "block".
+
+**Why**
+
+In a recorded session the lead read the guide's rule against filtering answers and then filtered every one of
+its next 46 commands. A rule read at the start of a session is far away, or compacted out, when it is needed.
+
 ## 0.20.0
 
 The design of a task has an owner. A lead session was found designing the change together with the user: it

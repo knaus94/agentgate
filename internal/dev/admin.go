@@ -200,14 +200,35 @@ func Doctor() map[string]any {
 	add("state", err == nil, true, Root()+suffix(err))
 	hint := "run `agentgate install` when this is not ok"
 	hooked := func(path string) bool {
+		var settings struct {
+			Hooks map[string][]struct {
+				Hooks []struct {
+					Command string `json:"command"`
+				} `json:"hooks"`
+			} `json:"hooks"`
+		}
 		raw, _ := os.ReadFile(path)
-		return strings.Contains(string(raw), hookMarker) || strings.Contains(string(raw), selfPath()+" hook")
+		if json.Unmarshal(raw, &settings) != nil {
+			return false
+		}
+		for _, event := range leadHooks {
+			installed := false
+			for _, group := range settings.Hooks[event] {
+				for _, item := range group.Hooks {
+					installed = installed || ourHook(item.Command)
+				}
+			}
+			if !installed {
+				return false
+			}
+		}
+		return true
 	}
 	if slices.Contains(leads, "claude") {
 		installed, _ := os.ReadFile(filepath.Join(claudeDir(), "commands", "dev.md"))
 		add("/dev command", string(installed) == assets.Command, true, hint)
 		add("lead pages", pagesInstalled("claude"), false, "the skill agentgate in "+pagesDir("claude")+"; "+hint)
-		add("Stop hook", hooked(filepath.Join(claudeDir(), "settings.json")), true, hint)
+		add("lead hooks", hooked(filepath.Join(claudeDir(), "settings.json")), true, "the end of a turn and a message of the user; "+hint)
 	}
 	if slices.Contains(leads, "codex") {
 		installed, _ := os.ReadFile(filepath.Join(skillDir(), "SKILL.md"))
@@ -215,7 +236,7 @@ func Doctor() map[string]any {
 		add("lead pages", pagesInstalled("codex"), false, "the skill agentgate in "+pagesDir("codex")+"; "+hint)
 		rule, _ := os.ReadFile(codexRulePath())
 		add("Codex rule", string(rule) == codexRule(), true, "lets Codex run agentgate outside its sandbox; "+hint)
-		add("Codex Stop hook", hooked(filepath.Join(codexDir(), "hooks.json")), false, "trust it once in Codex with /hooks")
+		add("Codex lead hooks", hooked(filepath.Join(codexDir(), "hooks.json")), false, "trust them in Codex with /hooks")
 	}
 	if cfg != nil {
 		_, statErr := os.Stat(config.ExpandHome(cfg.PlaywrightMCP))
@@ -267,7 +288,11 @@ func suffix(err error) string {
 
 const hookMarker = "agentgate hook"
 
-// ourHook recognises a Stop hook of this tool: the current binary under whatever name it runs, any earlier
+// leadHooks are the events of the lead's client this tool answers: the end of a turn, which holds the lead to
+// an unfinished task, and a message of the user, which reminds the lead whose the design is.
+var leadHooks = []string{"Stop", "UserPromptSubmit"}
+
+// ourHook recognises a hook of this tool: the current binary under whatever name it runs, any earlier
 // install of it, and the hook of the Python tool it replaces.
 func ourHook(command string) bool {
 	return command == selfPath()+" hook" || strings.Contains(command, hookMarker) || strings.Contains(command, "claude-dev hook") ||
@@ -366,7 +391,7 @@ type InstallOptions struct {
 // LeadChoices are the answers Install accepts for the lead.
 var LeadChoices = map[string][]string{"claude": {"claude"}, "codex": {"codex"}, "both": {"claude", "codex"}}
 
-// Install puts the lead command and the Stop hook into Claude Code, into Codex, or into both. A Codex-only
+// Install puts the lead command and the hooks into Claude Code, into Codex, or into both. A Codex-only
 // install also selects the profile in which every worker is a Codex model. Running it again changes nothing.
 func Install(options InstallOptions) (any, error) {
 	done := []string{}
@@ -452,8 +477,8 @@ func Install(options InstallOptions) (any, error) {
 				if err := placePages(lead, true, explicit, &done); err != nil {
 					return nil, err
 				}
-				next = append(next, "Codex: start a new session and type $dev help. Run /hooks there once and trust the agentgate Stop hook; "+
-					"Codex does not run a hook until you have reviewed it.")
+				next = append(next, "Codex: start a new session and type $dev help. Run /hooks there and trust the agentgate hooks (Stop and "+
+					"UserPromptSubmit); Codex does not run a hook until you have reviewed it.")
 			} else if explicit {
 				drop(skill, &done)
 				drop(policy, &done)
@@ -543,42 +568,44 @@ func installHook(path string, uninstall bool) (string, error) {
 	settings := map[string]any{}
 	raw, err := os.ReadFile(path)
 	if err == nil && json.Unmarshal(raw, &settings) != nil {
-		return "", fmt.Errorf("%s is not plain JSON; add the Stop hook `%s hook` by hand", path, selfPath())
+		return "", fmt.Errorf("%s is not plain JSON; add `%s hook` for %s by hand", path, selfPath(), strings.Join(leadHooks, " and "))
 	}
 	hooks, _ := settings["hooks"].(map[string]any)
 	if hooks == nil {
 		hooks = map[string]any{}
 	}
-	var kept []any
-	present := false
 	wanted := selfPath() + " hook"
-	groups, _ := hooks["Stop"].([]any)
-	for _, group := range groups {
-		entry, _ := group.(map[string]any)
-		var inner []any
-		list, _ := entry["hooks"].([]any)
-		for _, item := range list {
-			command, _ := item.(map[string]any)["command"].(string)
-			ours := ourHook(command)
-			if ours && command == wanted && !uninstall && !present {
-				present = true
-				inner = append(inner, item)
-			} else if !ours {
-				inner = append(inner, item)
+	for _, event := range leadHooks {
+		var kept []any
+		present := false
+		groups, _ := hooks[event].([]any)
+		for _, group := range groups {
+			entry, _ := group.(map[string]any)
+			var inner []any
+			list, _ := entry["hooks"].([]any)
+			for _, item := range list {
+				command, _ := item.(map[string]any)["command"].(string)
+				ours := ourHook(command)
+				if ours && command == wanted && !uninstall && !present {
+					present = true
+					inner = append(inner, item)
+				} else if !ours {
+					inner = append(inner, item)
+				}
+			}
+			if len(inner) > 0 {
+				entry["hooks"] = inner
+				kept = append(kept, entry)
 			}
 		}
-		if len(inner) > 0 {
-			entry["hooks"] = inner
-			kept = append(kept, entry)
+		if !uninstall && !present {
+			kept = append(kept, map[string]any{"hooks": []any{map[string]any{"type": "command", "command": wanted, "timeout": 5}}})
 		}
-	}
-	if !uninstall && !present {
-		kept = append(kept, map[string]any{"hooks": []any{map[string]any{"type": "command", "command": wanted, "timeout": 5}}})
-	}
-	if len(kept) > 0 {
-		hooks["Stop"] = kept
-	} else {
-		delete(hooks, "Stop")
+		if len(kept) > 0 {
+			hooks[event] = kept
+		} else {
+			delete(hooks, event)
+		}
 	}
 	settings["hooks"] = hooks
 	updated, _ := json.MarshalIndent(settings, "", "  ")
@@ -596,9 +623,9 @@ func installHook(path string, uninstall bool) (string, error) {
 		return "", err
 	}
 	if uninstall {
-		return "removed the Stop hook from " + path, nil
+		return "removed the lead hooks from " + path, nil
 	}
-	return "added the Stop hook to " + path, nil
+	return "added the lead hooks to " + path, nil
 }
 
 var zedTasks = []map[string]any{

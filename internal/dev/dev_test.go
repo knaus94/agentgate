@@ -907,7 +907,7 @@ func TestInstallIsIdempotentAndKeepsOtherHooks(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", dir)
 	settings := `{"model":"opus","hooks":{"Stop":[{"hooks":[{"type":"command","command":"/old/claude-dev quality-hook"},` +
-		`{"type":"command","command":"other-tool stop"}]}]}}`
+		`{"type":"command","command":"other-tool stop"}]}],"UserPromptSubmit":[{"hooks":[{"type":"command","command":"python3 guard.py"}]}]}}`
 	must(t, os.WriteFile(filepath.Join(dir, "settings.json"), []byte(settings), 0o600))
 	_, err := Install(InstallOptions{Lead: "claude"})
 	must(t, err)
@@ -918,16 +918,17 @@ func TestInstallIsIdempotentAndKeepsOtherHooks(t *testing.T) {
 	}
 	raw, _ := os.ReadFile(filepath.Join(dir, "settings.json"))
 	text := string(raw)
-	if strings.Count(text, selfPath()+" hook") != 1 || strings.Contains(text, "quality-hook") || !strings.Contains(text, "other-tool stop") ||
-		!strings.Contains(text, `"model": "opus"`) {
-		t.Fatalf("exactly one hook of ours, foreign hooks and settings kept: %s", text)
+	if strings.Count(text, selfPath()+" hook") != len(leadHooks) || strings.Contains(text, "quality-hook") || !strings.Contains(text, "other-tool stop") ||
+		!strings.Contains(text, "python3 guard.py") || !strings.Contains(text, `"model": "opus"`) {
+		t.Fatalf("exactly one hook of ours per event, foreign hooks and settings kept: %s", text)
 	}
 	if command, _ := os.ReadFile(filepath.Join(dir, "commands", "dev.md")); !strings.Contains(string(command), "agentgate guide") {
 		t.Fatal("the /dev command must be installed")
 	}
 	_, err = Install(InstallOptions{Uninstall: true})
 	must(t, err)
-	if raw, _ := os.ReadFile(filepath.Join(dir, "settings.json")); strings.Contains(string(raw), selfPath()+" hook") {
-		t.Fatal("uninstall must remove the hook")
+	if raw, _ := os.ReadFile(filepath.Join(dir, "settings.json")); strings.Contains(string(raw), selfPath()+" hook") ||
+		!strings.Contains(string(raw), "python3 guard.py") || !strings.Contains(string(raw), "other-tool stop") {
+		t.Fatalf("uninstall must remove our hooks and nobody else's: %s", raw)
 	}
 }

@@ -279,7 +279,7 @@ func TestWholeTaskThroughTheCommandLine(t *testing.T) {
 	}
 	s := newSandbox(t)
 	installed := s.ok("", "install")
-	if changed := fmt.Sprint(installed["changed"]); !strings.Contains(changed, "commands/dev.md") || !strings.Contains(changed, "Stop hook") ||
+	if changed := fmt.Sprint(installed["changed"]); !strings.Contains(changed, "commands/dev.md") || !strings.Contains(changed, "added the lead hooks") ||
 		!strings.Contains(changed, "skills/agentgate/SKILL.md") || !strings.Contains(changed, "skills/agentgate/needs.md") {
 		t.Fatalf("install adds the command, the hook and the lead's pages: %v", installed)
 	}
@@ -308,6 +308,10 @@ func TestWholeTaskThroughTheCommandLine(t *testing.T) {
 	}
 	if hook, _, _ := s.run(hookInput, "hook"); !strings.Contains(hook, `"decision": "block"`) {
 		t.Fatalf("the Stop hook blocks an unfinished task: %s", hook)
+	}
+	prompted := strings.Replace(hookInput, "{", `{"hook_event_name":"UserPromptSubmit","prompt":"why not a view?",`, 1)
+	if hook, _, code := s.run(prompted, "hook"); code != 0 || !strings.Contains(hook, `"additionalContext"`) || !strings.Contains(hook, "agentgate prepare") {
+		t.Fatalf("on a message of the user the hook reminds the lead where a doubt about the plan goes: %s", hook)
 	}
 	stdout, _, code := s.run("", "check", "--all")
 	if code != 2 || !strings.Contains(stdout, `"failed": true`) || !strings.Contains(stdout, `"returncode": 7`) {
@@ -363,7 +367,7 @@ func TestWholeTaskThroughTheCommandLine(t *testing.T) {
 	}
 	removed := s.ok("", "install", "--uninstall")
 	if changed := fmt.Sprint(removed["changed"]); !strings.Contains(changed, "commands/dev.md") ||
-		!strings.Contains(changed, "removed the Stop hook") || !strings.Contains(changed, "skills/agentgate/SKILL.md") {
+		!strings.Contains(changed, "removed the lead hooks") || !strings.Contains(changed, "skills/agentgate/SKILL.md") {
 		t.Fatalf("uninstall removes the command, the hook and the lead's pages: %v", removed)
 	}
 }

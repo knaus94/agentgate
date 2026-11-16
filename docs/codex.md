@@ -31,10 +31,10 @@ For Codex the installer writes:
 |---|---|---|
 | `dev` skill and its invocation policy | `~/.agents/skills/dev/` | Explicit `$dev <task>` invocation |
 | Executable prefix rule | `~/.codex/rules/agentgate.rules` | Allow the lead to request execution of AgentGate outside Codex's own sandbox |
-| Stop-hook entry | `~/.codex/hooks.json` | Ask the lead to continue an unfinished task when it tries to end its turn |
+| Hook entries (Stop, UserPromptSubmit) | `~/.codex/hooks.json` | Ask the lead to continue an unfinished task when it tries to end its turn; remind it on a message of the user that the design is the architect's |
 
 `CODEX_HOME` changes the Codex rules and hooks location. The skill directory remains under the user's home.
-The installer asks you to review and trust the AgentGate Stop hook in Codex with `/hooks`. Check this against
+The installer asks you to review and trust the AgentGate hooks in Codex with `/hooks`. Check this against
 the Codex version you run; a hook entry alone does not establish that the host has enabled it. Task commands
 and the dashboard can be used independently of the hook.
 

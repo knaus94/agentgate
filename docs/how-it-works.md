@@ -211,6 +211,13 @@ A Stop hook keeps the lead from ending its turn on an unfinished task, unless an
 or the task is honestly paused. Its message names a command that was just refused and the kinds of what the
 task needs.
 
+A second hook answers every message of the user while the session has a task. It adds a few lines for the
+lead: during the task, that a doubt about how the change is built goes to the architect of the accepted
+design (or to the preparation worker in a mode without one), with the command and the receipt; after the task,
+that the next request goes to `prepare` as the user's own words. A guide is read at the start of a session and
+is far away, or compacted out, by the time the user objects; in a recorded session the lead read a rule and
+then broke it in every one of its next 46 commands. The hook only reads the saved task and changes nothing.
+
 A finished task answers with a receipt — the routes that ran, substitutions, the checks and their results,
 rounds and time per stage — and the notes it leaves, one line each. Accepting a note reopens the task where it
 ended. `drop` ends a task on the user's word and takes back what it changed, never overwriting a file someone

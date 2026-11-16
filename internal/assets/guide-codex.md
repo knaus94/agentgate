@@ -38,7 +38,7 @@ section.
   unavailable in the current mode, ask in one concise message; do not enter plan mode or build a workaround.
   Some Codex versions expose it in Default mode through `features.default_mode_request_user_input`; that is
   the user's setting, not something to edit during a task.
-- **Ending a turn.** The user may have trusted the Stop hook (`/hooks`), which holds you to an unfinished
+- **Ending a turn.** The user may have trusted the hooks (`/hooks`): one holds you to an unfinished
   task. Do not rely on it: before you end a turn, the last `agentgate` answer must say `done`, or you `pause`
   with the true reason.
 - The user's command is `$dev`, where this guide writes `/dev`.

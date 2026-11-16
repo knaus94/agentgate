@@ -86,6 +86,36 @@ func Stop(cfg *config.Config) (any, error) {
 	return gate.report(cfg, []string{"stopped by the user"}), gate.save()
 }
 
+// PromptHook is the lead client's hook on a message of the user. A rule read at the start of a session is far
+// away by the time the user doubts the design or asks for the next change, and a compaction may have removed
+// it; this arrives with the message. It only reads the saved task: nothing is locked or changed, and a task it
+// cannot read says nothing.
+func PromptHook(cwd, sessionID string) map[string]any {
+	gate, err := loadGate(cwd, sessionID)
+	if err != nil || gate == nil || gate.legacy != nil {
+		return map[string]any{}
+	}
+	note := "agentgate, to the lead (not a message of the user): "
+	switch {
+	case !gate.active():
+		note += "the last task of this session is finished. If the user now asks for another change, it goes to `agentgate prepare` as their own " +
+			"words, quoted in order, with what they attached: no summary of yours, no solution, no \"keep X\" or \"do not touch Y\". What you " +
+			"believe you know goes in `notes`."
+	case gate.Plan.Architecture != nil:
+		note += fmt.Sprintf("this session leads a task at step `%s`. You coordinate; the design is the architect's. If this message doubts how the "+
+			"change is built, proposes another way or adds a constraint, carry the user's words to the architect — `agentgate architecture` with "+
+			"{\"revise\": %q, \"notes\": \"<the user's words>\"} — and apply the `plan_changes` it returns with `amend`. Do not answer it from your "+
+			"own reading of the code, and do not write a mechanism into a requirement. A question about how the code works today is `agentgate consult`.",
+			gate.Step, gate.Plan.Architecture.ID)
+	default:
+		note += fmt.Sprintf("this session leads a task at step `%s`. You coordinate; the plan is the preparation worker's. If this message doubts how "+
+			"the change is built, proposes another way or adds a constraint, carry the user's words to it — `agentgate prepare` with "+
+			"{\"notes\": \"<the user's words>\"} — and apply the plan it returns with `amend --plan`. Do not answer it from your own reading of the "+
+			"code, and do not write a mechanism into a requirement. A question about how the code works today is `agentgate consult`.", gate.Step)
+	}
+	return map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": "UserPromptSubmit", "additionalContext": note}}
+}
+
 // StopHook is the lead client's Stop hook: it keeps the lead from ending a turn on an unfinished task unless
 // an operation is still running or the task is honestly paused.
 func StopHook(cwd, sessionID string) map[string]any {

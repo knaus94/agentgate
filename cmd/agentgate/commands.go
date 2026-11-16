@@ -81,6 +81,30 @@ var renamed = map[string]string{
 // sandboxSafe are the actions that only read or print: they work inside a caller's sandbox too.
 var sandboxSafe = []string{"", "help", "--help", "-h", "version", "guide", "reference", "parse", "preview", "route", "modes", "status", "show", "watch", "hook"}
 
+// hook answers a hook of the lead's client: the end of a turn, or a message of the user. The client reads exit
+// code 2 as "block", and that is the code a Go panic exits with, so a failure here answers nothing instead of
+// blocking the user's message.
+func hook() (answer any) {
+	defer func() {
+		if recover() != nil {
+			answer = map[string]any{}
+		}
+	}()
+	var payload struct {
+		Cwd       string `json:"cwd"`
+		SessionID string `json:"session_id"`
+		Event     string `json:"hook_event_name"`
+	}
+	raw, _ := io.ReadAll(os.Stdin)
+	if json.Unmarshal(raw, &payload) != nil {
+		return map[string]any{}
+	}
+	if payload.Event == "UserPromptSubmit" {
+		return dev.PromptHook(payload.Cwd, payload.SessionID)
+	}
+	return dev.StopHook(payload.Cwd, payload.SessionID)
+}
+
 func run(args arguments) (any, int, error) {
 	// Help and version are pure: even an invalid configuration or an old state
 	// directory must not make them mutate files or fail to explain the command.
@@ -132,15 +156,7 @@ func run(args arguments) (any, int, error) {
 	case "update":
 		return selfUpdate(args.flags["check"])
 	case "hook":
-		var payload struct {
-			Cwd       string `json:"cwd"`
-			SessionID string `json:"session_id"`
-		}
-		raw, _ := io.ReadAll(os.Stdin)
-		if json.Unmarshal(raw, &payload) != nil {
-			return map[string]any{}, 0, nil
-		}
-		return dev.StopHook(payload.Cwd, payload.SessionID), 0, nil
+		return hook(), 0, nil
 	case "parse":
 		text, err := args.raw()
 		if err != nil {

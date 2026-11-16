@@ -956,7 +956,7 @@ func TestDoctorReportsWhatIsMissing(t *testing.T) {
 	for _, item := range report["checks"].([]probe) {
 		checks[item.Name] = item
 	}
-	if report["healthy"] != false || checks["/dev command"].OK || checks["Stop hook"].OK || !checks["config"].OK {
+	if report["healthy"] != false || checks["/dev command"].OK || checks["lead hooks"].OK || !checks["config"].OK {
 		t.Fatalf("a machine without the command and hook is not healthy: %+v", checks)
 	}
 	if checks["browser tooling"].Required {
@@ -968,7 +968,7 @@ func TestDoctorReportsWhatIsMissing(t *testing.T) {
 	for _, item := range Doctor()["checks"].([]probe) {
 		checks[item.Name] = item
 	}
-	if !checks["/dev command"].OK || !checks["Stop hook"].OK {
+	if !checks["/dev command"].OK || !checks["lead hooks"].OK {
 		t.Fatalf("install satisfies the doctor: %+v", checks)
 	}
 }
@@ -1593,8 +1593,8 @@ func TestCodexLeadIsInstalledChosenAndRemoved(t *testing.T) {
 	hooks, _ := os.ReadFile(filepath.Join(codexDir(), "hooks.json"))
 	if !strings.Contains(string(skill), "name: dev") || !strings.Contains(string(policy), "allow_implicit_invocation: false") ||
 		!strings.Contains(string(rule), `prefix_rule(pattern=["agentgate"], decision="allow")`) ||
-		!strings.Contains(string(hooks), " hook") || !strings.Contains(string(hooks), "other-tool stop") {
-		t.Fatalf("codex gets the skill, the rule and the Stop hook next to its own hooks:\n%s\n%s\n%s", skill, rule, hooks)
+		strings.Count(string(hooks), " hook\"") != 2 || !strings.Contains(string(hooks), "UserPromptSubmit") || !strings.Contains(string(hooks), "other-tool stop") {
+		t.Fatalf("codex gets the skill, the rule and both hooks next to its own hooks:\n%s\n%s\n%s", skill, rule, hooks)
 	}
 	if _, err := os.Stat(filepath.Join(claude, "commands", "dev.md")); err == nil {
 		t.Fatal("a codex-only install puts nothing into Claude Code")
