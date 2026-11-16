@@ -18,7 +18,7 @@ The archive includes source, documentation, SHA-256 checksums, and binaries for 
 After extracting it:
 
 ```sh
-cd agentgate-0.20.1
+cd agentgate-0.20.2
 sh scripts/install-local.sh --lead both
 agentgate setup doctor
 agentgate config validate
@@ -125,13 +125,14 @@ Pipes, redirected input and `TERM=dumb` produce one snapshot instead of an inter
 
 | Mode | Typical scope | Architecture | Review | Blocking severities |
 |---|---|---|---|---|
-| light `-l` | Small, low-risk change | The plan | One reviewer, `astra:medium` | P0–P1 |
+| light `-l` | Small, low-risk change | One architect, `opus:medium` | One reviewer, `opus:medium`: correctness, architecture, simplicity | P0–P1 |
 | medium `-m` | Ordinary implementation | One architect, `opus:high` | One reviewer, `opus:high`: correctness, architecture, simplicity | P0–P1 |
 | heavy `-h` | Named risk or complex uncertain work | Two independent proposals, closed into one design | Separate architecture and correctness lanes | P0–P2 |
 | ultra `-x` | Severe or irreversible risk | Proposals, cross-critique, one closing design | Additional correctness and security lanes | P0–P2 |
 
-With no flag, the recorded assessment selects a mode deterministically. A flag, or `mode` in the plan, takes precedence. Every role
-runs on the model the table names, without substitutes by default; a Codex-only profile is also included. These are editable starting configurations, not universal performance rankings.
+With no flag, the recorded assessment selects a mode deterministically. A flag, or `mode` in the plan, takes precedence. Claude models design and
+review, Codex models plan, write and check the browser; when the Codex limit runs out, Opus takes the call. A
+Codex-only profile is also included. These are editable starting configurations, not universal performance rankings.
 [Routing policy](docs/model-selection.md) · [Mode rules](docs/modes.md).
 
 ```sh

@@ -39,20 +39,20 @@ of several stages each stage may carry its own assessment and gets its own mode.
 
 | | light | medium | heavy | ultra |
 |---|---|---|---|---|
-| Preparation | `sol:medium` | `sol:medium` | `sol:medium` | `sol:medium` |
-| Architects | the plan | `opus:high` | `fable:high` ∥ `astra:high`, independent, in parallel | `fable:xhigh` ∥ `astra:xhigh`, then each critiques the other at `high` |
+| Preparation | `astra:medium` | `astra:medium` | `astra:medium` | `astra:medium` |
+| Architects | `opus:medium` | `opus:high` | `opus:high` ∥ `astra:xhigh`, independent, in parallel | `fable:high` ∥ `astra:max`, then each critiques the other one step lower |
 | Closing round | — | — | the first architect, in its own session: one design out of two | the same, answering every blocker of the critique |
-| Revision | `prepare` with notes | the architect, on the user's answers and remarks, before the task or during it | the same | the same |
-| Backend writer | `sol:high` | `sol:xhigh` | `opus:high` | `opus:xhigh` |
+| Revision | the architect | the architect, on the user's answers and remarks, before the task or during it | the same | the same |
+| Backend writer | `sol:high` | `sol:xhigh` | `astra:high` | `astra:xhigh` |
 | Frontend writer | `sol:high` | `sol:xhigh` | `astra:high` | `astra:xhigh` |
-| Review lanes | one lane, `astra:medium`: correctness, architecture, simplicity | one lane, `opus:high`: correctness, architecture, simplicity | architecture+simplicity `fable:high` ∥ correctness `opus:high` | architecture+simplicity `fable:high` ∥ correctness `fable:xhigh` ∥ correctness `opus:xhigh` ∥ security `opus:high` |
-| UI designer | `astra:medium` | `astra:medium` | `astra:high` | `astra:xhigh` |
+| Review lanes | one lane, `opus:medium`: correctness, architecture, simplicity | one lane, `opus:high`: correctness, architecture, simplicity | correctness `fable:high` ∥ architecture+simplicity `opus:high` | correctness `fable:xhigh` ∥ correctness `opus:xhigh` ∥ security `opus:high` ∥ architecture+simplicity `fable:high` |
+| UI designer | `opus:medium` | `opus:medium` | `opus:high` | `opus:xhigh` |
 | Browser check | `astra:high` | `astra:high` | `astra:high` | `astra:high` |
 | Effort ceiling | `xhigh` | `xhigh` | `xhigh` | `max` |
 | Blocking severities | P0, P1 | P0, P1 | P0, P1, P2 | P0, P1, P2 |
 | Declared checks | optional | at least one per stage, or a stated `checks_waiver` | the same | the same |
 | Review of the whole change after the last stage | with three or more stages | with three or more stages | always, for a staged plan | always, for a staged plan |
-| Process ceilings (design / writer / reviewer) | default 20 min | default 20 min | 15 / 30 / 20 min | 30 / 60 / 30 min |
+| Process ceilings (design / writer / reviewer) | default 20 min | default 20 min | 30 / 30 / 20 min | 60 / 60 / 30 min |
 
 The preparation route is the key `modes.medium.scout`; the key keeps the name it had when a separate scout
 existed. A mode may set its own.
@@ -81,7 +81,7 @@ architect's, a correction the writer's, a recheck the reviewer's.
 as default. Heavy is one step above, ultra two. Effort goes to design and correctness review first — they
 produce little text and decide a lot — and less to lanes that read more than they reason.
 
-**3. `max` is earned, never assumed.** No default uses it. A writer's effort rises one step, up to the mode's
+**3. `max` is earned, never assumed.** Only the second architect of ultra starts at it. A writer's effort rises one step, up to the mode's
 ceiling, only when a correction made no verified progress and the lead gave a new diagnosis, when the lead
 passes `escalate` to `decide`, or when the plan raises one hard stream with `effort`. Only ultra can reach `max`.
 

@@ -6,10 +6,10 @@ frontend writers, the reviewer lanes, the severities that block and the effort c
 
 - **The table is the user's.** `agentgate config set modes.medium.backend sonnet:high` changes it in the
   user's file; do it only on their word, never for one task. The `config` page has the layers.
-- **Light mode** has one reviewer, `astra:medium`. A mode whose `review` is `[]` makes you the reviewer
+- **Light mode** has one architect and one reviewer, both `opus:medium`. A mode whose `review` is `[]` makes you the reviewer
   (`needs: review`).
-- **Limits.** A model whose limit is exhausted is replaced by its first configured fallback (`fallbacks`, none
-  by default); the answer reports it in `substitutions`, and the `receipt` at the end lists every substitution.
+- **Limits.** A model whose limit is exhausted is replaced by its first configured fallback (`fallbacks`: Opus for
+  Astra, Sol and Fable by default, none for Opus); the answer reports it in `substitutions`, and the `receipt` at the end lists every substitution.
   With no fallback the call stops: `pause` with the reason and when the limit returns. `agentgate
   accounts` lists the CLI profiles, each limit by name and when an exhausted one returns. An account "kept
   for the lead" is the user's reservation: no worker runs on it, and a worker with no other account goes

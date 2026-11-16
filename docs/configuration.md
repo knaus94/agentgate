@@ -150,7 +150,8 @@ model writes part of the task: which model reviews is the user's choice.
 {"fallbacks":{"fable":["astra","opus"],"astra":["fable","opus"],"sol":["sonnet"]}}
 ```
 
-The built-in table declares no fallbacks: an exhausted limit stops the call until it returns. This example
+The built-in table sends Astra, Sol and Fable to Opus and declares none for Opus, whose exhausted limit stops
+the call until it returns. This example
 adds three lists and preserves other fallback keys from lower layers. A fallback
 list names configured aliases in retry order. It cannot contain its own alias or duplicate entries.
 

@@ -52,7 +52,8 @@
         "P0",
         "P1"
       ],
-      "escalate_to": "high"
+      "escalate_to": "high",
+      "ui_designer": "astra:medium"
     },
     "medium": {
       "scout": "terra:medium",
@@ -74,7 +75,8 @@
         "P0",
         "P1"
       ],
-      "escalate_to": "high"
+      "escalate_to": "high",
+      "ui_designer": "astra:medium"
     },
     "heavy": {
       "scout": "",
@@ -105,7 +107,8 @@
         "P1",
         "P2"
       ],
-      "escalate_to": "max"
+      "escalate_to": "max",
+      "ui_designer": "astra:high"
     },
     "ultra": {
       "scout": "",
@@ -148,7 +151,8 @@
         "P1",
         "P2"
       ],
-      "escalate_to": "max"
+      "escalate_to": "max",
+      "ui_designer": "astra:xhigh"
     }
   }
 }

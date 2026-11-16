@@ -59,12 +59,14 @@ func TestBuiltInTableIsValidAndComplete(t *testing.T) {
 			t.Errorf("mode %s is incomplete: %+v", name, mode)
 		}
 	}
-	if light := cfg.Modes["light"].Review; len(light) != 1 || light[0].Route != "astra:medium" || len(cfg.Modes["ultra"].Review) != 4 || !cfg.Modes["ultra"].Critique {
-		t.Fatal("light has one reviewer, astra:medium; ultra has four lanes and a critique")
+	if light := cfg.Modes["light"].Review; len(light) != 1 || light[0].Route != "opus:medium" || len(cfg.Modes["light"].Architecture) != 1 ||
+		len(cfg.Modes["ultra"].Review) != 4 || !cfg.Modes["ultra"].Critique {
+		t.Fatal("light has an architect and one reviewer, opus:medium; ultra has four lanes and a critique")
 	}
-	if len(cfg.Fallbacks) != 0 || cfg.VisualReviewer != "astra:high" || cfg.UIDesignerFor("ultra") != "astra:xhigh" || cfg.UIDesignerFor("") != "astra:medium" ||
-		cfg.Modes["heavy"].Backend != "opus:high" || cfg.Modes["heavy"].Frontend != "astra:high" || len(cfg.Modes["medium"].Architecture) != 1 {
-		t.Fatal("the built-in table has no substitutes, astra checks the browser, the designer is set per mode, opus writes the backend of heavy")
+	if !slices.Equal(cfg.Fallbacks["astra"], []string{"opus"}) || !slices.Equal(cfg.Fallbacks["sol"], []string{"opus"}) || len(cfg.Fallbacks["opus"]) != 0 ||
+		cfg.VisualReviewer != "astra:high" || cfg.UIDesignerFor("ultra") != "opus:xhigh" || cfg.UIDesignerFor("") != "opus:medium" ||
+		cfg.Modes["heavy"].Backend != "astra:high" || cfg.Modes["heavy"].Frontend != "astra:high" || len(cfg.Modes["medium"].Architecture) != 1 {
+		t.Fatal("codex writes and falls back to opus, claude designs and reviews with no substitute, astra checks the browser")
 	}
 	route, err := cfg.Route("fable:xhigh")
 	if err != nil || route.Provider != "claude" || route.Pool != "fable" || route.String() != "fable:xhigh" {
@@ -146,7 +148,7 @@ func TestSetUnsetAndRollback(t *testing.T) {
 	if err := Unset("modes.heavy.backend"); err != nil {
 		t.Fatal(err)
 	}
-	if cfg, _ = Load(); cfg.Modes["heavy"].Backend != "opus:high" {
+	if cfg, _ = Load(); cfg.Modes["heavy"].Backend != "astra:high" {
 		t.Fatal("unset restores the built-in value")
 	}
 }

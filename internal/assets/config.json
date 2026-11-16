@@ -41,18 +41,30 @@
       "pool": "codex"
     }
   },
-  "fallbacks": {},
+  "fallbacks": {
+    "astra": [
+      "opus"
+    ],
+    "sol": [
+      "opus"
+    ],
+    "fable": [
+      "opus"
+    ]
+  },
   "reviewers_excluded": [
     "sol"
   ],
-  "ui_designer": "astra:medium",
+  "ui_designer": "opus:medium",
   "visual_reviewer": "astra:high",
-  "consultant": "sonnet:medium",
+  "consultant": "astra:medium",
   "playwright_mcp": "~/.local/share/agentgate/playwright-mcp/node_modules/@playwright/mcp/cli.js",
   "modes": {
     "light": {
       "scout": "",
-      "architecture": [],
+      "architecture": [
+        "opus:medium"
+      ],
       "critique": false,
       "backend": "sol:high",
       "frontend": "sol:high",
@@ -63,7 +75,7 @@
             "architecture",
             "simplicity"
           ],
-          "route": "astra:medium"
+          "route": "opus:medium"
         }
       ],
       "blocking": [
@@ -71,10 +83,10 @@
         "P1"
       ],
       "escalate_to": "xhigh",
-      "ui_designer": "astra:medium"
+      "ui_designer": "opus:medium"
     },
     "medium": {
-      "scout": "sol:medium",
+      "scout": "astra:medium",
       "architecture": [
         "opus:high"
       ],
@@ -96,30 +108,30 @@
         "P1"
       ],
       "escalate_to": "xhigh",
-      "ui_designer": "astra:medium"
+      "ui_designer": "opus:medium"
     },
     "heavy": {
       "scout": "",
       "architecture": [
-        "fable:high",
-        "astra:high"
+        "opus:high",
+        "astra:xhigh"
       ],
       "critique": false,
-      "architecture_timeout_s": 900,
+      "architecture_timeout_s": 1800,
       "reviewer_timeout_s": 1200,
-      "backend": "opus:high",
+      "backend": "astra:high",
       "frontend": "astra:high",
       "review": [
         {
           "axes": [
-            "architecture",
-            "simplicity"
+            "correctness"
           ],
           "route": "fable:high"
         },
         {
           "axes": [
-            "correctness"
+            "architecture",
+            "simplicity"
           ],
           "route": "opus:high"
         }
@@ -130,28 +142,21 @@
         "P2"
       ],
       "escalate_to": "xhigh",
-      "ui_designer": "astra:high"
+      "ui_designer": "opus:high"
     },
     "ultra": {
       "scout": "",
       "architecture": [
-        "fable:xhigh",
-        "astra:xhigh"
+        "fable:high",
+        "astra:max"
       ],
       "critique": true,
-      "architecture_timeout_s": 1800,
+      "architecture_timeout_s": 3600,
       "writer_timeout_s": 3600,
       "reviewer_timeout_s": 1800,
-      "backend": "opus:xhigh",
+      "backend": "astra:xhigh",
       "frontend": "astra:xhigh",
       "review": [
-        {
-          "axes": [
-            "architecture",
-            "simplicity"
-          ],
-          "route": "fable:high"
-        },
         {
           "axes": [
             "correctness"
@@ -169,6 +174,13 @@
             "security"
           ],
           "route": "opus:high"
+        },
+        {
+          "axes": [
+            "architecture",
+            "simplicity"
+          ],
+          "route": "fable:high"
         }
       ],
       "blocking": [
@@ -177,7 +189,7 @@
         "P2"
       ],
       "escalate_to": "max",
-      "ui_designer": "astra:xhigh"
+      "ui_designer": "opus:xhigh"
     }
   }
 }

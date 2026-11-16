@@ -38,7 +38,7 @@ only on their word, with `resume`.
      mode is below what the facts call for. The mode comes from the assessment; a flag is the user's to type.
      Do not offer the user a choice of modes as a question. Get the authorizations the plan needs: heavy checks, a stand, new
      tests.
-2. **Design**, in a mode with architects (medium, heavy and ultra by default; `agentgate modes`):
+2. **Design**, in a mode with architects (every mode by default; `agentgate modes`):
    `agentgate architecture --plan <name>`. The architect designs from what the preparation found; two
    architects are closed by the first into one design. The answer holds that design, its `questions` for the
    user and the plan entry that accepts it (`input`). Ask the questions as written and put the answers into the

@@ -2,6 +2,26 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.20.2
+
+The built-in table divides the work by what each model family is for: Claude models design and review, Codex
+models plan, write and check.
+
+**Changed**
+
+- Preparation and consultations run on `astra:medium`; every writer is a Codex model: Sol in light and medium,
+  Astra in heavy and ultra.
+- Light gets an architect, `opus:medium`, and its reviewer becomes `opus:medium`. The UI designer is Opus in
+  every mode.
+- Heavy: architects `opus:high` ∥ `astra:xhigh`, closed by Opus; review lanes correctness `fable:high` ∥
+  architecture and simplicity `opus:high`.
+- Ultra: architects `fable:high` ∥ `astra:max` with cross-critique, closed by Fable; review lanes correctness
+  `fable:xhigh` ∥ correctness `opus:xhigh` ∥ security `opus:high` ∥ architecture and simplicity `fable:high`.
+- Fallbacks: Astra, Sol and Fable fall back to Opus at the same effort. Opus has none: when it is exhausted
+  the call waits rather than letting Codex review.
+- The design pass may take 30 minutes in heavy and 60 in ultra.
+- The Codex profile sets its UI designer per mode, so it keeps Astra there.
+
 ## 0.20.1
 
 The lead is reminded whose the design is at the moment the user speaks, not only in a guide it read long ago.

@@ -27,21 +27,23 @@ changes with `agentgate config validate`.
 
 | Role | light | medium | heavy | ultra |
 |---|---|---|---|---|
-| Preparation | sol:medium | sol:medium | sol:medium | sol:medium |
-| Architecture | the plan | opus:high | fable:high + astra:high, closed by fable | fable:xhigh + astra:xhigh, cross-critique, closed by fable |
-| Backend writer | sol:high | sol:xhigh | opus:high | opus:xhigh |
+| Preparation | astra:medium | astra:medium | astra:medium | astra:medium |
+| Architecture | opus:medium | opus:high | opus:high + astra:xhigh, closed by opus | fable:high + astra:max, cross-critique, closed by fable |
+| Backend writer | sol:high | sol:xhigh | astra:high | astra:xhigh |
 | Frontend writer | sol:high | sol:xhigh | astra:high | astra:xhigh |
-| Architecture and simplicity review | astra:medium, one lane with correctness | opus:high, one lane with correctness | fable:high | fable:high |
-| Correctness review | the same lane | the same lane | opus:high | fable:xhigh + opus:xhigh |
+| Architecture and simplicity review | opus:medium, one lane with correctness | opus:high, one lane with correctness | opus:high | fable:high |
+| Correctness review | the same lane | the same lane | fable:high | fable:xhigh + opus:xhigh |
 | Security review | — | — | — | opus:high |
-| UI designer | astra:medium | astra:medium | astra:high | astra:xhigh |
+| UI designer | opus:medium | opus:medium | opus:high | opus:xhigh |
+| Consultant | astra:medium | astra:medium | astra:medium | astra:medium |
 | Browser check | astra:high | astra:high | astra:high | astra:high |
 | Escalation ceiling | xhigh | xhigh | xhigh | max |
 
-No route has a fallback: when a provider's limit is exhausted on every account, the call stops and the lead
-pauses the task until it returns. In heavy and ultra a reviewer may be the model that writes part of the code
-(Opus writes the backend and reviews correctness; Astra writes the frontend and checks the browser): that is
-the table's choice, and the tool runs it as configured.
+Claude models own the design and the review; Codex models plan, write, answer consultations and check the
+browser. A Claude model closes every design, and no reviewer reviews code its own model wrote; Astra checks in
+the browser the frontend it wrote in heavy and ultra. When the Codex limit is exhausted on every account,
+Astra and Sol fall back to Opus at the same effort; Fable falls back to Opus. Opus has no fallback: when it is
+exhausted, the call stops and the lead pauses the task until it returns, rather than letting Codex review.
 
 The table intentionally does not encode prices, subscription multipliers or benchmark scores. Those change
 independently of the gate and do not establish the best route for a particular repository. Use observed

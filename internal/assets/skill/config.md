@@ -25,7 +25,7 @@ Per mode: `scout` — the route that prepares plans and maps the code; `architec
 passes; `backend`, `frontend` — the writers; `review` — the reviewer lanes, each with its axes
 (`correctness`, `architecture`, `simplicity`, `security`); `blocking` — the severities that block;
 `escalate_to` — the highest effort a stalled correction may reach; `*_timeout_s` — process ceilings. Light has
-one reviewer lane, `astra:medium`; an empty `review` makes the lead the reviewer.
+one reviewer lane, `opus:medium`; an empty `review` makes the lead the reviewer.
 
 Every role runs on the model the table names, also when that model writes too: which model reviews is the
 user's choice. `reviewers_excluded` is the only exclusion. `ui_designer` may be set per mode

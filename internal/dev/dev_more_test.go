@@ -513,7 +513,7 @@ func TestConsultAndDesign(t *testing.T) {
 			{Name: "risk", Question: "what can break?", Route: "fable:high"}}})
 	})
 	rows := answers["answers"].([]any)
-	if len(rows) != 2 || rows[0].(map[string]any)["route"].(map[string]any)["alias"] != "sonnet" || rows[1].(map[string]any)["route"].(map[string]any)["alias"] != "fable" {
+	if len(rows) != 2 || rows[0].(map[string]any)["route"].(map[string]any)["alias"] != "astra" || rows[1].(map[string]any)["route"].(map[string]any)["alias"] != "fable" {
 		t.Fatalf("each lane answers on its route: %v", rows)
 	}
 	if Current() != nil {

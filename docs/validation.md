@@ -4,6 +4,21 @@ This record distinguishes live integrations from controlled provider fixtures an
 model quality, arbitrary specification size or every possible execution environment. It has two parts: what
 was run for the 0.16.0 source, and the release validation of 0.14.0, which is kept as it was written.
 
+## 0.20.2
+
+Checked on 2026-11-17 against `6ffe342` (0.20.1). Only the built-in table, the Codex profile, tests and
+documentation changed.
+
+| Check | Actual result |
+|---|---|
+| `gofmt -l`, `go vet` of `internal/config`, `cmd/agentgate`, `internal/dev` | PASS |
+| `go test` (without `-race`) of `internal/config`, `cmd/agentgate`, `internal/dev`, `internal/provider`, `internal/accounts` | PASS |
+| The Codex profile over the new built-in table | invalid until the profile set its UI designer per mode (it inherited `opus:*` with Opus removed); PASS after |
+
+Tests adapted to the new table: the built-in table, `config unset` restoring the default backend, the default
+consultant. The full `make check` with `-race` and the browser scenarios run in the release workflow before
+publication. No model was run.
+
 ## 0.20.1
 
 Checked on 2026-11-16 against `58a92aa` (0.20.0).

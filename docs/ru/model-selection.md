@@ -27,21 +27,23 @@
 
 | Роль | light | medium | heavy | ultra |
 |---|---|---|---|---|
-| Подготовка | sol:medium | sol:medium | sol:medium | sol:medium |
-| Архитектура | план | opus:high | fable:high + astra:high, итоговый дизайн за fable | fable:xhigh + astra:xhigh, взаимная критика, итоговый дизайн за fable |
-| Бэкенд | sol:high | sol:xhigh | opus:high | opus:xhigh |
+| Подготовка | astra:medium | astra:medium | astra:medium | astra:medium |
+| Архитектура | opus:medium | opus:high | opus:high + astra:xhigh, итоговый дизайн за opus | fable:high + astra:max, взаимная критика, итоговый дизайн за fable |
+| Бэкенд | sol:high | sol:xhigh | astra:high | astra:xhigh |
 | Фронтенд | sol:high | sol:xhigh | astra:high | astra:xhigh |
-| Ревью архитектуры и простоты | astra:medium, одна полоса вместе с корректностью | opus:high, одна полоса вместе с корректностью | fable:high | fable:high |
-| Ревью корректности | та же полоса | та же полоса | opus:high | fable:xhigh + opus:xhigh |
+| Ревью архитектуры и простоты | opus:medium, одна полоса вместе с корректностью | opus:high, одна полоса вместе с корректностью | opus:high | fable:high |
+| Ревью корректности | та же полоса | та же полоса | fable:high | fable:xhigh + opus:xhigh |
 | Ревью безопасности | — | — | — | opus:high |
-| UI-дизайнер | astra:medium | astra:medium | astra:high | astra:xhigh |
+| UI-дизайнер | opus:medium | opus:medium | opus:high | opus:xhigh |
+| Консультант | astra:medium | astra:medium | astra:medium | astra:medium |
 | Браузерная проверка | astra:high | astra:high | astra:high | astra:high |
 | Потолок усилия | xhigh | xhigh | xhigh | max |
 
-Замен нет ни у одного маршрута: когда лимит провайдера исчерпан на всех аккаунтах, вызов останавливается, и
-лид ставит задачу на паузу до его возвращения. В heavy и ultra ревьюер может быть моделью, которая пишет часть
-кода (Opus пишет бэкенд и ревьюит корректность, Astra пишет фронтенд и проверяет браузер): так решила таблица,
-и инструмент выполняет её как есть.
+Проектируют и ревьюят модели Claude; модели Codex планируют, пишут код, отвечают на консультации и проверяют
+браузер. Итоговый дизайн всегда за моделью Claude, и ни один ревьюер не проверяет код своей же модели; Astra
+проверяет в браузере фронтенд, который сама написала в heavy и ultra. Когда лимит Codex исчерпан на всех
+аккаунтах, Astra и Sol заменяются на Opus с тем же усилием; Fable тоже заменяется на Opus. У Opus замены нет:
+при исчерпанном лимите вызов останавливается и лид ставит задачу на паузу, а не отдаёт ревью Codex.
 
 В таблицу намеренно не встроены цены, коэффициенты подписок и результаты бенчмарков. Они меняются
 отдельно от инструмента и не доказывают, какая модель лучше для вашего репозитория. Настраивайте профиль
