@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/knaus94/agentgate/internal/assets"
 	"github.com/knaus94/agentgate/internal/config"
@@ -255,7 +256,7 @@ func Architecture(cfg *config.Config, plan *Plan) (any, error) {
 	if err := resolved.checkArchitectureContract(receipt.Fingerprint); err != nil {
 		return nil, err
 	}
-	return receipt, receipt.save()
+	return receipt.view(), receipt.save()
 }
 
 // revise lets the first architect address the blockers the lead verified. One round only:
@@ -297,7 +298,7 @@ func revise(resolved *Resolved, receipt *Receipt, run func(string, string, confi
 	if err := resolved.checkArchitectureContract(receipt.Fingerprint); err != nil {
 		return nil, err
 	}
-	return receipt, receipt.save()
+	return receipt.view(), receipt.save()
 }
 
 func (r *Receipt) blockers() map[string]Issue {
@@ -355,6 +356,82 @@ func (r *Receipt) accepted(base string) *ArchLane {
 		}
 	}
 	return chosen
+}
+
+// ArchitectureView is an architecture receipt as the lead judges it: every design and critique in readable
+// form, every blocker under its id, and the plan entry that accepts it. It is the receipt the plan accepted,
+// or else the newest of this checkout.
+func ArchitectureView(plan *Plan) (map[string]any, error) {
+	var receipt *Receipt
+	if plan != nil && plan.Architecture != nil {
+		receipt, _ = loadReceipt(plan.Architecture.ID, "architecture")
+	}
+	if receipt == nil {
+		paths, _ := filepath.Glob(filepath.Join(designsDir(), "*", "receipt.json"))
+		var newest time.Time
+		for _, path := range paths {
+			info, err := os.Stat(path)
+			candidate, loadErr := loadReceipt(filepath.Base(filepath.Dir(path)), "architecture")
+			if err == nil && loadErr == nil && info.ModTime().After(newest) {
+				receipt, newest = candidate, info.ModTime()
+			}
+		}
+	}
+	if receipt == nil {
+		return nil, errors.New("no architecture pass has run in this checkout: `agentgate architecture --plan <name>` runs one")
+	}
+	return receipt.view(), nil
+}
+
+// view is the receipt as a person reads it, with the input that accepts it.
+func (r *Receipt) view() map[string]any {
+	issues := func(list []Issue) []string {
+		out := []string{}
+		for _, issue := range list {
+			out = append(out, issue.ID+": "+oneLine(issue.Evidence)+" → "+oneLine(issue.Remedy))
+		}
+		return out
+	}
+	lanes := []map[string]any{}
+	blockers := map[string]string{}
+	var bases []string
+	for _, lane := range r.Lanes {
+		item := map[string]any{"round": lane.Round, "by": lane.Route.String(), "summary": lane.Report.Summary}
+		if lane.Report.Design != "" {
+			item["design"] = lane.Report.Design
+		}
+		if len(lane.Report.Risks) > 0 {
+			item["risks"] = issues(lane.Report.Risks)
+		}
+		if len(lane.Report.OpenQuestions) > 0 {
+			item["open_questions"] = lane.Report.OpenQuestions
+		}
+		if len(lane.Report.Blockers) > 0 {
+			item["blockers"] = issues(lane.Report.Blockers)
+		}
+		if lane.Report.Agreements != "" {
+			item["agreements"] = lane.Report.Agreements
+		}
+		if lane.Round == "design" {
+			bases = append(bases, lane.Route.Alias)
+		}
+		for _, issue := range lane.Report.Blockers {
+			blockers[issue.ID] = "<how it is resolved, or why it is wrong>"
+		}
+		lanes = append(lanes, item)
+	}
+	base := "<the alias of the design you build on: " + strings.Join(bases, ", ") + ">"
+	if len(bases) == 1 {
+		base = bases[0]
+	}
+	accept := map[string]any{"id": r.ID, "base": base, "acceptance": "<your amendments to that design; where they differ, they win>"}
+	if len(blockers) > 0 {
+		accept["blockers"] = blockers
+	}
+	return map[string]any{"id": r.ID, "mode": r.Mode, "lanes": lanes, "substitutions": r.Substitutions, "receipt_file": filepath.Join(r.Dir, "receipt.json"),
+		"input": map[string]any{"architecture": accept},
+		"next": "Judge the designs and blockers. Put `input.architecture` into the plan with your acceptance and an answer for every blocker, " +
+			"save it (`plan save`), then `start`; an active task takes it with `amend`."}
 }
 
 // architectureFor is what writers and reviewers receive: one accepted design and the lead's amendments to it.

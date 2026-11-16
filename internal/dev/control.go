@@ -54,8 +54,14 @@ func Stop(cfg *config.Config) (any, error) {
 		return nil, err
 	}
 	if ops.RequestStop(home(), "the user stopped /dev") {
-		return map[string]any{"cancellation_requested": true, "operation": ops.Status(home()),
-			"next": "The running operation is terminating its processes and will park the task. Check status to confirm."}, nil
+		result := map[string]any{"cancellation_requested": true, "operation": ops.Status(home()).Action,
+			"next": "The running operation is terminating its processes and will park the task. `status` confirms it."}
+		if gate, err := LoadCurrent(); err == nil && gate != nil {
+			var out map[string]any
+			gate.Inside(func() { out = gate.respond(cfg, nil, result) })
+			return out, nil
+		}
+		return result, nil
 	}
 	unlock, err := lock()
 	if err != nil {

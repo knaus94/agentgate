@@ -27,30 +27,40 @@ var SkillPolicy string
 //go:embed prompts/*.md
 var prompts embed.FS
 
-//go:embed reference/*.md
-var reference embed.FS
+//go:embed skill/*.md
+var skill embed.FS
 
-// Reference returns one topic of the protocol reference; the empty topic is the index: commands and inputs.
-// A lead loads a topic when it needs it, so the plan schema or the design workflow is not carried through a
-// task that never touches them.
+// Reference returns one page of the lead's pages; the empty topic is the index with the commands. A lead opens
+// the page of its situation, so the plan schema or the design workflow is not carried through a task that
+// never touches them. The same pages are installed as a skill.
 func Reference(topic string) (string, bool) {
-	if topic == "" {
-		topic = "index"
+	if topic == "" || topic == "index" {
+		_, body, _ := strings.Cut(SkillPage("SKILL"), "\n---\n")
+		return strings.TrimLeft(body, "\n"), true
 	}
-	raw, err := reference.ReadFile("reference/" + topic + ".md")
-	return string(raw), err == nil && !strings.ContainsAny(topic, "/.")
+	if strings.ContainsAny(topic, "/.") || topic == "SKILL" {
+		return "", false
+	}
+	raw, err := skill.ReadFile("skill/" + topic + ".md")
+	return string(raw), err == nil
 }
 
-// ReferenceTopics lists the topics besides the index.
+// ReferenceTopics lists the pages besides the index.
 func ReferenceTopics() []string {
-	entries, _ := reference.ReadDir("reference")
+	entries, _ := skill.ReadDir("skill")
 	var out []string
 	for _, entry := range entries {
-		if name := strings.TrimSuffix(entry.Name(), ".md"); name != "index" {
+		if name := strings.TrimSuffix(entry.Name(), ".md"); name != "SKILL" {
 			out = append(out, name)
 		}
 	}
 	return out
+}
+
+// SkillPage is one file of the skill, by name without its extension.
+func SkillPage(name string) string {
+	raw, _ := skill.ReadFile("skill/" + name + ".md")
+	return string(raw)
 }
 
 //go:embed profiles/*.json

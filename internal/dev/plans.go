@@ -32,14 +32,29 @@ func PlanFile(name string) (string, error) {
 	return filepath.Join(plansDir(), name, "plan.json"), nil
 }
 
-// slug derives a plan name from the request when the lead gave none.
+// planNameFrom makes a plan name of what the preparation worker proposed, or "".
+func planNameFrom(proposed string) string {
+	words := regexp.MustCompile(`[a-z0-9]+`).FindAllString(strings.ToLower(proposed), -1)
+	name := strings.Join(words, "-")
+	if len(name) > 40 {
+		name = strings.TrimRight(name[:40], "-")
+	}
+	if planName.MatchString(name) && len(words) > 0 {
+		return name
+	}
+	return ""
+}
+
+var link = regexp.MustCompile(`\bhttps?://\S+`)
+
+// slug derives a plan name from the request when neither the lead nor the worker gave one.
 func slug(plan *Plan) string {
-	// The name comes from the task, not from the command and the flags that precede it.
+	// The name comes from the task, not from the command, the flags that precede it or the links in it.
 	task := plan.Request
 	if request, err := ParseRequest(plan.Request); err == nil {
 		task = request.Task
 	}
-	words := regexp.MustCompile(`[a-z0-9]+`).FindAllString(strings.ToLower(task+" "+plan.Brief), -1)
+	words := regexp.MustCompile(`[a-z0-9]+`).FindAllString(strings.ToLower(link.ReplaceAllString(task+" "+plan.Brief, " ")), -1)
 	var kept []string
 	for _, word := range words {
 		if len(word) > 2 && len(kept) < 5 {
@@ -101,10 +116,11 @@ func PlanSave(cfg *config.Config, plan *Plan, name string) (*SavedPlan, error) {
 // Proposal ties a saved plan to the preparation that drafted it: the worker session that can revise it and
 // the map of the code it drew. It lives with the checkout's state, not in the repository.
 type Proposal struct {
-	Name        string `json:"name"`
-	Digest      string `json:"digest"` // of the plan as it was saved; a plan edited by hand afterwards is no longer this proposal
-	Preparation string `json:"preparation"`
-	ContextPack string `json:"context_pack,omitempty"`
+	Name        string   `json:"name"`
+	Digest      string   `json:"digest"` // of the plan as it was saved; a plan edited by hand afterwards is no longer this proposal
+	Preparation string   `json:"preparation"`
+	ContextPack string   `json:"context_pack,omitempty"`
+	Attachments []string `json:"attachments,omitempty"` // the files the user gave, as the preparation kept them
 }
 
 func proposalFile(name string) string {
@@ -180,7 +196,12 @@ func renderBrief(name string, resolved *Resolved, revisions []Revision) string {
 	line("# %s\n", name)
 	line("> Written by `agentgate`; edit `plan.json` and save again rather than this file.\n")
 	if plan.Request != "" {
-		line("**Request:** %s\n", strings.TrimSpace(plan.Request))
+		// The request opens the brief; a long one is in plan.json, the brief says what was made of it.
+		request := strings.TrimSpace(plan.Request)
+		if lines := strings.Split(request, "\n"); len(lines) > 5 || len(request) > 600 {
+			request = clipText(strings.Join(lines[:min(5, len(lines))], "\n"), 600) + "\n\n(the request continues in plan.json)"
+		}
+		line("**Request:** %s\n", request)
 	}
 	line("**Mode:** %s (%s: %s)\n", resolved.Mode, resolved.Decision.Source, strings.Join(resolved.Decision.Because, "; "))
 	if assessment := plan.Assessment; assessment != nil {

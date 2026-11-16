@@ -315,11 +315,12 @@ func (g *Gate) runLane(cfg *config.Config, spec laneSpec, index int, dir string,
 	if quality != nil {
 		schema = object(map[string]any{"reports": reviewSchema["properties"].(map[string]any)["reports"], "quality": qualitySchema})
 		prompt += "\nAlso assess every requirement and rule in quality, using the current evidence. Return quality {requirements, rules}; " +
-			"each requirement needs id, status (verified/partial/missing), reason, evidence [{kind (code/check/browser), ref, detail}]. " +
+			"each requirement needs id, status (verified/partial/missing), cause when it is not verified (code/proof/plan), reason, evidence [{kind (code/check/browser), ref, detail}]. " +
 			"Each rule needs id, status (pass/block/not_applicable/unavailable), evidence. Reassess all criteria even on a correction.\n"
 	}
 	call := provider.Call{Route: route, Prompt: prompt + toolNote, Dir: lane.Dir, Schema: schema, MCP: tools, Writable: toolDirs,
-		Timeout: timeout, Persist: true, Resume: lane.Session, ReadDirs: append(append([]string{dir, filepath.Join(g.dir(), "checks")}, packDirs(g.ContextPack)...), designDirs...)}
+		Timeout: timeout, Persist: true, Resume: lane.Session,
+		ReadDirs: append(append(append([]string{dir, filepath.Join(g.dir(), "checks")}, packDirs(g.ContextPack)...), designDirs...), g.attachmentDirs()...)}
 	for attempt := 0; ; attempt++ {
 		result, used, err := subs.invoke(cfg, call, skip)
 		if err != nil {
@@ -460,6 +461,10 @@ func (g *Gate) validateReports(reports []Report, axes, scope []string, known map
 			}
 			if previous, ok := known[finding.ID]; !ok || previous.Axis != report.Axis {
 				finding.ID = g.ID[:8] + "-" + digest([]string{report.Axis, finding.Path, finding.Category, finding.Evidence})[:16]
+				// A later pass that raises an earlier note again under a new id joins it: the same axis, path and line.
+				if earlier := sameSpot(known, report.Axis, finding.Path, finding.Line); earlier != "" && !seen[earlier] {
+					finding.ID = earlier
+				}
 			}
 			if seen[finding.ID] {
 				add("%s is reported twice", where)
@@ -471,6 +476,29 @@ func (g *Gate) validateReports(reports []Report, axes, scope []string, known map
 		return nil, errors.New(strings.Join(problems, "; "))
 	}
 	return reports, nil
+}
+
+// sameSpot is the earliest known finding of an axis at one path and line, or "".
+func sameSpot(known map[string]Finding, axis, path string, line int) string {
+	match := ""
+	for id, finding := range known {
+		if finding.Axis == axis && finding.Path == path && finding.Line == line && (match == "" || id < match) {
+			match = id
+		}
+	}
+	return match
+}
+
+// openNotes are the notes of the present position nobody acted on: a later pass is shown them so it does not
+// raise them again under new ids.
+func (g *Gate) openNotes(cfg *config.Config) []map[string]any {
+	_, _, notes := g.tally(cfg)
+	out := []map[string]any{}
+	for _, finding := range notes {
+		out = append(out, map[string]any{"id": finding.ID, "axis": finding.Axis, "severity": finding.Severity, "path": finding.Path,
+			"line": finding.Line, "evidence": clipText(oneLine(finding.Evidence), 300)})
+	}
+	return out
 }
 
 func (g *Gate) leadLane(review LeadReview, known map[string]Finding) (LaneRun, error) {
@@ -513,6 +541,9 @@ func (g *Gate) applyReview(cfg *config.Config, review Review, accepted []Finding
 		}
 	}
 	for _, finding := range accepted {
+		if finding.Axis == "criterion" {
+			continue // work sent from a criterion is done when the criterion is met: settleDemands
+		}
 		delete(g.Resolutions, finding.ID)
 		axis := reviewAxis(finding)
 		var votes []string
@@ -566,6 +597,7 @@ func (g *Gate) applyReview(cfg *config.Config, review Review, accepted []Finding
 	}
 	g.admitFindings(cfg, review.Lanes)
 	g.settleDemands()
+	g.admitCriteria()
 }
 
 // admitFindings applies the blocking rule: a blocking finding nobody judged yet goes to its author. A finding

@@ -2,6 +2,59 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.17.0
+
+What a lead was missing in real sessions, and the answers it had to work around. The lead protocol changes:
+`decide` takes three forms instead of seven, and every answer has one shape. Decisions:
+[0012](docs/decisions/0012-the-lead-gives-work.md); plan: [docs/briefs/0.17-lead-experience.md](docs/briefs/0.17-lead-experience.md).
+
+**Changed — the lead protocol**
+
+- `decide` takes `findings`, `review` and `work: [{stream, note, requirement?, escalate?}]`. Work opens a
+  correction for the named streams at once, in their writers' sessions, at any step after their round and at
+  `done`; failing checks go to the streams named. `requirements`, `reassessment`, `brief`, `streams` and
+  `escalate` are removed; sending one is refused with what replaced it. A diagnosis given after a stalled
+  correction raises its writers one step of effort by itself.
+- A requirement that is not verified carries the reviewer's `cause`: `code`, `proof` or `plan`. Missing code
+  goes to the writer that owns it without the lead, within the limit of automatic rounds, and is closed when
+  the criterion is verified; missing proof and a wrong plan go to the lead.
+- Every command about a task answers with the common object; its own data is under `result`. A refused
+  command carries `refused`, a failed one `error`, both with the task as it is (exit 1). `status` adds
+  `running {action, since}` and `last {action, state, error}`. A review task's findings are under `outcome`.
+- Each need carries `command` and `input`: the call that settles it, with the real ids, streams and valid
+  references filled in. Its `what` begins with the cause in the tool's own words; long details are clipped. A
+  refusal that depends on a value lists the valid ones.
+- Light mode has a reviewer, `astra:medium`. The lead reviews only when a configuration sets `review: []`.
+
+**Added**
+
+- `amend` takes named operations beside the complete plan: `scope`, `checks`, `requirements`, `timeouts`,
+  `design` and `mode`, each with `update`, validated like a complete plan.
+- `mode` in the plan and in the input of `prepare`, stronger than a flag. When a flag or the plan sets a mode
+  below what the assessment gives, `because` says so with the risks.
+- `prepare {attachments: [paths]}`: files anywhere on the machine are copied, shown to the preparation worker
+  (pictures as pictures) and carried into the task for its writers and reviewers.
+- A finished task lists its notes in one line each; `decide {findings}` on a finished, unlanded task reopens it
+  where it ended with those findings accepted.
+- `drop`, on the user's word, ends a task and takes back what it changed; a file someone changed after the
+  task's writers left it is never overwritten. `forget` removes a finished or dropped task from the record.
+- At `done` the answer carries `receipt`: routes per role, substitutions, check results, notes, rounds and
+  time per stage. `show receipt`, `show review` and `show architecture` print what a person judges and the
+  input to answer with; `architecture` answers in the same readable form.
+- `status` shows a running writer's elapsed time, its silence and its last event.
+- The lead's pages are written by situation (`needs`, `answers`, `scope`, `mode`, `models`, `design`,
+  `finished`, `places`, `refusals`, …) in one place: `agentgate install` installs them as the skill
+  `agentgate` for both clients, and `agentgate reference <page>` prints the same text. `guide` is shorter.
+- The preparation worker names the plan; a name derived from the request ignores links.
+
+**Fixed**
+
+- A writer is stopped after ten minutes without an event, not by a twenty-minute clock; `writer_timeout_s` is a
+  ceiling, 3600 seconds by default. A stopped writer is continued in its own session by the next `run`.
+- A later review pass is shown its open notes, and a finding raised again at the same path and line joins the
+  earlier one instead of appearing under a new id.
+- The brief of a saved plan quotes the first lines of a long request instead of all of it.
+
 ## 0.16.2
 
 Defects real lead sessions of 0.16 ran into; the lead protocol is unchanged. The analysis and the plan for the

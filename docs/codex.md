@@ -89,7 +89,7 @@ The source of this table is [the bundled profile](../internal/assets/profiles/co
 | Preparation | `terra:medium` | `terra:medium` | `terra:medium` | `terra:medium` |
 | Architecture | the plan | the plan | `astra:high` + `sol:xhigh` | `astra:max` + `sol:max`, then cross-critique |
 | Writers | `sol:medium` | `astra:medium` | `astra:high` | `astra:high` |
-| Review | the lead reads the patch | one lane, `sol:high`: correctness, architecture, simplicity | `sol:xhigh` architecture and simplicity + `sol:xhigh` correctness | `sol:xhigh` architecture and simplicity + `sol:max` and `terra:max` correctness + `sol:xhigh` security |
+| Review | one lane, `astra:medium`: correctness, architecture, simplicity | one lane, `sol:high`: correctness, architecture, simplicity | `sol:xhigh` architecture and simplicity + `sol:xhigh` correctness | `sol:xhigh` architecture and simplicity + `sol:max` and `terra:max` correctness + `sol:xhigh` security |
 | Escalation ceiling | `high` | `high` | `max` | `max` |
 
 Other configured roles are `sol:medium` for consultation, `astra:medium` for UI design and `terra:high` for

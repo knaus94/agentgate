@@ -3,6 +3,7 @@ package ops
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"syscall"
 	"time"
@@ -36,6 +37,19 @@ func Run(cmd *exec.Cmd, timeout time.Duration) error { return RunStarted(cmd, ti
 
 // RunStarted is Run with a callback made once the process exists, for a caller that records its pid.
 func RunStarted(cmd *exec.Cmd, timeout time.Duration, started func()) error {
+	return RunWatched(cmd, Limits{Timeout: timeout}, started)
+}
+
+// Limits end a child that runs too long, or that stops showing signs of work.
+type Limits struct {
+	Timeout  time.Duration // ceiling of the whole run; zero: none
+	Idle     time.Duration // longest time the activity file may stay unchanged; zero: no watch
+	Activity string        // the file a working child keeps writing, such as its event stream
+}
+
+// RunWatched is RunStarted under Limits.
+func RunWatched(cmd *exec.Cmd, limits Limits, started func()) error {
+	timeout := limits.Timeout
 	if err := Checkpoint(); err != nil {
 		return err
 	}
@@ -82,6 +96,17 @@ loop:
 				Terminate(cmd, done)
 				result = fmt.Errorf("%w after %s", ErrTimeout, timeout)
 				break loop
+			}
+			if limits.Idle > 0 {
+				last := began
+				if info, err := os.Stat(limits.Activity); err == nil && info.ModTime().After(last) {
+					last = info.ModTime()
+				}
+				if time.Since(last) >= limits.Idle {
+					Terminate(cmd, done)
+					result = fmt.Errorf("%w: no event for %s", ErrTimeout, limits.Idle)
+					break loop
+				}
 			}
 		}
 	}

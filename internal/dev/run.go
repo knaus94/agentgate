@@ -41,7 +41,7 @@ func Execute(action string, run func() (any, error)) (any, error) {
 	}
 	// An isolated task is driven from inside its worktree; the user's checkout is only where it was started.
 	defer leave()
-	if err := gate.enter(); err != nil && action != "land" {
+	if err := gate.enter(); err != nil && action != "land" && action != "drop" {
 		return nil, errors.Join(err, ops.End(err))
 	}
 	// A task saved by an earlier version gets its origin trees here: under its lock, in its own checkout.

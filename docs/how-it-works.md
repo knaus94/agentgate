@@ -6,7 +6,7 @@
 
 | Role | Who | Can do |
 |---|---|---|
-| Lead | your Claude Code or Codex session | everything a normal session can: your MCP servers, plugins and skills stay available |
+| Lead | your Claude Code or Codex session | everything a normal session can: your MCP servers, plugins and skills stay available. Its pages — what each need asks, what each command answers — are installed as the skill `agentgate` |
 | Preparation | one read-only model process, resumed on every call | read the repository, ask what only a person can decide, draft the plan and a map of the area |
 | Architect | a fresh model process | heavy and ultra: read the repository, return a design |
 | Writer | a model process per stream, resumed for corrections | edit the files of its stream |
@@ -43,17 +43,20 @@ What follows a verification is determined, so the tool does it:
 |---|---|
 | `answer` | a writer stopped with questions |
 | `failed` | a writer or a provider failed; `run` retries the unfinished streams |
-| `review` | light mode: the lead is the reviewer and is handed the patch |
+| `review` | the mode has no reviewer process (`review: []`): the lead is the reviewer and is handed the patch |
 | `finding` | the author disputed a finding and the reviewer upheld it, or it waits for an approval |
-| `requirement`, `rule` | a criterion that is due is not verified |
+| `requirement`, `rule` | a criterion that is due is not verified, and the cause is not code a writer can add: the proof is missing, or the plan put it where it cannot be met |
 | `stall` | a correction made no verified progress: a new diagnosis is needed, not another attempt |
 | `limit` | three corrections ran in a row without the lead looking |
 | `setup` | a verification tool could not observe the result |
 | `scenarios` | opted-in browser scenarios were not observed |
 | `scope` | an isolated task changed a file that no stream owns |
 
-Every answer also lists `actions`: the commands that are legal now, the one that moves the task first. A
-command that is not legal answers with the same picture and the reason. The guard, the list and the tests
+Each need carries the call that settles it — `command` and `input`, with the real ids, streams and valid
+references filled in — so the lead does not look the shape up. Every answer also lists `actions`: the
+commands that are legal now, the one that moves the task first. A command that is not legal, or that fails,
+answers with the same picture and the reason; its own data is under `result`. `status` adds what is running
+and how the last command ended. The guard, the list and the tests
 are derived from one table, so a task cannot reach a position with no way out
 ([decision 0002](decisions/0002-one-state-machine.md)).
 
@@ -68,7 +71,16 @@ it against the code and its brief. It fixes it, or returns a dispute with eviden
 the finding reads the dispute in its own session and withdraws the finding or upholds it. Only an upheld
 dispute reaches the lead, with both arguments. A finding is therefore closed by the reviewer's agreement or
 by the lead's ruling, never by the author alone. Findings below the blocking line are notes
-([decision 0005](decisions/0005-autopilot-and-author-filtered-findings.md)).
+([decision 0005](decisions/0005-autopilot-and-author-filtered-findings.md)). A later pass is shown the open
+notes, and a finding raised again at the same path and line joins the earlier one instead of becoming a new
+one.
+
+A requirement that is not verified carries the reviewer's cause. `code` — the code does not do it — goes to
+the writer that owns that code, as a blocking finding does, and is closed when the requirement is verified.
+`proof` and `plan` go to the lead. The lead decides three things only: it rules on findings, it judges a
+patch where no reviewer process runs, and it gives work — `decide {work: [{stream, note, requirement?,
+escalate?}]}` opens a correction for the named streams at any step after their round
+([decision 0012](decisions/0012-the-lead-gives-work.md)).
 
 Two things keep the loop cheap: a recheck runs only the lanes that have something to verify plus one
 correctness lane on the delta, one effort step lower; and effort rises only when a correction demonstrably
@@ -76,8 +88,9 @@ stalled.
 
 ### When the plan is wrong
 
-`agentgate amend` replaces the plan of the active task at any step, with `update` saying what changed and
-why. Accepted stages are frozen. A requirement may be added, or moved to the stage that completes it;
+`agentgate amend` changes the plan of the active task at any step, with `update` saying what changed and
+why: named operations — files for a stream, checks added or removed, a requirement added or moved, timeouts,
+designs, the mode — or the complete plan. Accepted stages are frozen. A requirement may be added, or moved to the stage that completes it;
 changing or removing one needs `authorized`. An amendment makes stale only what it touches: moving a
 requirement has the reviewer reassess the criteria in its own session and does not re-read the code
 ([decision 0006](decisions/0006-amendment-is-ordinary.md)).
@@ -149,8 +162,9 @@ layers deal with it, cheapest first.
    and hidden failures are P1; code someone must keep for no benefit is P2. Naming and formatting taste, what a
    linter already reports and code the change did not add are out of scope.
 
-In light mode there is no reviewer process: the lead receives the signals with the patch and applies the same
-test. `/dev clean` remains the way to simplify code that is already in the repository.
+In a mode configured without a reviewer process (`review: []`) the lead receives the signals with the patch
+and applies the same test; light mode has a reviewer of its own by default. `/dev clean` remains the way to
+simplify code that is already in the repository.
 
 The rules draw on public work: the community `/deslop` commands and the `code-slop` skill for the list of
 patterns, the Karpathy-inspired guidelines for "every changed line traces to the request", Anthropic's
@@ -192,7 +206,13 @@ file at any time, also for one that a generator adds later
   was observed. A requirement is due at the last stage that covers it.
 
 A Stop hook keeps the lead from ending its turn on an unfinished task, unless an operation is still running
-or the task is honestly paused.
+or the task is honestly paused. Its message names a command that was just refused and the kinds of what the
+task needs.
+
+A finished task answers with a receipt — the routes that ran, substitutions, the checks and their results,
+rounds and time per stage — and the notes it leaves, one line each. Accepting a note reopens the task where it
+ended. `drop` ends a task on the user's word and takes back what it changed, never overwriting a file someone
+else edited since; `forget` removes a finished or dropped task from the record.
 
 Two sessions can work in the same checkout. Each has its own task; a file can be owned by only one of them.
 
@@ -234,6 +254,7 @@ disk and nothing depends on a daemon staying alive.
 | Handoff | writer → writer | the contract a stream actually implemented, delivered in the assignment of the streams that come `after` it and of the next stage |
 | Board | writers ↔ writers, lead → writers | a shared directory; each writer posts its public contract as soon as it is decided, and reads the others' |
 | Answer | lead → blocked writer | the reply is sent into the writer's **own session**; it continues with full context |
+| Work | lead → writer | `decide {work}`: the lead's note goes to the named stream's writer in its **own session**, as a correction |
 | Review packet | tool → reviewer | one patch of the change, the files as they were, the criteria. Generated output is listed, not shown |
 | Findings | reviewer → writer | blocking findings go to the writer that owns the file, in its **own session** |
 | Dispute | writer → reviewer | the author's evidence against a finding, answered by the reviewer in its **own session** |

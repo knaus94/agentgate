@@ -307,8 +307,11 @@ func Land(cfg *config.Config, gate *Gate, input LandInput) (any, error) {
 			}
 			gate.Pause = nil
 		}
-		result["landed"], result["step"] = how, gate.Step
-		return result, gate.save()
+		result["landed"] = how
+		if err := gate.save(); err != nil {
+			return nil, err
+		}
+		return gate.respond(cfg, nil, result), nil
 	}
 	if how == "drop" {
 		return close(map[string]any{"next": "The worktree and its branch are removed. Nothing changed in the checkout."})

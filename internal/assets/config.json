@@ -77,7 +77,16 @@
       "critique": false,
       "backend": "sol:medium",
       "frontend": "sonnet:medium",
-      "review": [],
+      "review": [
+        {
+          "axes": [
+            "correctness",
+            "architecture",
+            "simplicity"
+          ],
+          "route": "astra:medium"
+        }
+      ],
       "blocking": [
         "P0",
         "P1"
@@ -114,7 +123,6 @@
       ],
       "critique": false,
       "architecture_timeout_s": 900,
-      "writer_timeout_s": 1800,
       "reviewer_timeout_s": 1200,
       "backend": "opus:high",
       "frontend": "opus:high",

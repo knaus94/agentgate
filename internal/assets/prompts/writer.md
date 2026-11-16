@@ -67,6 +67,9 @@ reviewer and remove whatever fails one test: does this line trace to the assignm
   make a check pass, no skipped or weakened test, no stub presented as finished. What cannot be finished goes
   into `blockers`.
 
+`attachments`, when present, are files the user gave with the request — a specification, reference pictures.
+Open the ones your work depends on; your file reading tool shows a picture.
+
 `context_pack`, when present, is a map of this area drawn when the task was planned: the files that matter,
 who calls them, the invariants and the conventions. Read it first and do not re-explore what it already
 covers. It can be wrong or incomplete, and earlier stages may have changed the code since: verify what you
@@ -109,4 +112,5 @@ first.
 - A finding listed in `correction.upheld` was disputed before and kept by the reviewer or the lead: fix it.
 - Make every check in `failing_checks` pass: `output_tail` shows how it failed and `log` has the full output.
   Fix the cause in your code; never weaken or skip the check.
-- `remedy` may carry a decision or a new diagnosis from the lead. Preserve everything else.
+- `work` is what the lead asks of your stream in this correction: a decision, a new diagnosis, a missing piece.
+  Do it. `remedy` says what the round is for. Preserve everything else.

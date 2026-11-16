@@ -223,7 +223,7 @@ func TestReferenceDocumentsEveryCommand(t *testing.T) {
 	}
 	for _, command := range []string{"parse", "preview", "prepare", "route", "architecture", "design", "consult", "start", "run", "answer", "decide",
 		"amend", "show", "tell", "check", "visual", "land", "pause", "resume", "stop", "status", "watch", "doctor", "install", "update", "modes",
-		"config", "prune", "version"} {
+		"config", "prune", "version", "drop", "forget"} {
 		if !strings.Contains(reference, "`"+command) {
 			t.Errorf("the reference does not document %q", command)
 		}
@@ -232,7 +232,8 @@ func TestReferenceDocumentsEveryCommand(t *testing.T) {
 		}
 	}
 	for _, field := range []string{"assessment", "streams", "stages", "covers", "requirements", "checks", "checks_waiver", "baseline", "update", "authorized",
-		"rework", "answers", "notes", "findings", "reassessment", "escalate", "recheck", "revise_blockers", "usage_context", "skip_reason"} {
+		"rework", "answers", "notes", "findings", "work", "cause", "escalate", "attachments", "mode", "scope", "timeouts", "recheck", "revise_blockers",
+		"usage_context", "skip_reason"} {
 		if !strings.Contains(reference, field) {
 			t.Errorf("the reference does not document the %q field", field)
 		}
@@ -278,8 +279,9 @@ func TestWholeTaskThroughTheCommandLine(t *testing.T) {
 	}
 	s := newSandbox(t)
 	installed := s.ok("", "install")
-	if len(installed["changed"].([]any)) != 2 {
-		t.Fatalf("install adds the command and the hook: %v", installed)
+	if changed := fmt.Sprint(installed["changed"]); !strings.Contains(changed, "commands/dev.md") || !strings.Contains(changed, "Stop hook") ||
+		!strings.Contains(changed, "skills/agentgate/SKILL.md") || !strings.Contains(changed, "skills/agentgate/needs.md") {
+		t.Fatalf("install adds the command, the hook and the lead's pages: %v", installed)
 	}
 	plan := `{"request":"change the file","assessment":{"size":"ordinary","evidence":"one file"},"brief":"a.txt must say fixed",
 	  "streams":[{"name":"core","domain":"backend","files":["a.txt"]}],
@@ -358,8 +360,9 @@ func TestWholeTaskThroughTheCommandLine(t *testing.T) {
 		t.Fatalf("a fresh task is not pruned: %v", pruned)
 	}
 	removed := s.ok("", "install", "--uninstall")
-	if len(removed["changed"].([]any)) != 2 {
-		t.Fatalf("uninstall removes the command and the hook: %v", removed)
+	if changed := fmt.Sprint(removed["changed"]); !strings.Contains(changed, "commands/dev.md") ||
+		!strings.Contains(changed, "removed the Stop hook") || !strings.Contains(changed, "skills/agentgate/SKILL.md") {
+		t.Fatalf("uninstall removes the command, the hook and the lead's pages: %v", removed)
 	}
 }
 

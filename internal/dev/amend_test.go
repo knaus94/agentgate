@@ -67,7 +67,7 @@ func TestAReviewedStageIsAmendedWithoutLosingTheTaskOrWaivingARequirement(t *tes
 		return "", nil
 	}
 	writers := f.model
-	changeQuality(f, func(q *QualityReport) { q.Requirements[0].Status = "partial" })
+	changeQuality(f, func(q *QualityReport) { q.Requirements[0].Status, q.Requirements[0].Cause = "partial", "plan" })
 	reviewers := f.model
 	f.model = func(kind string, packet map[string]any, call provider.Call) (string, error) {
 		if kind == "writer" {
@@ -141,7 +141,7 @@ func TestAReviewedStageIsAmendedWithoutLosingTheTaskOrWaivingARequirement(t *tes
 	changeQuality(f2, func(q *QualityReport) {
 		for index := range q.Requirements {
 			if q.Requirements[index].ID == "R1" {
-				q.Requirements[index].Status = "partial"
+				q.Requirements[index].Status, q.Requirements[index].Cause = "partial", "plan"
 			}
 		}
 	})

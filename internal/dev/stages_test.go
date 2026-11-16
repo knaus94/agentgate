@@ -196,7 +196,7 @@ func TestARequirementIsDueAtTheLastStageThatCoversIt(t *testing.T) {
 		for index := range report.Requirements {
 			// The reviewer is right: after the base stage the feature is only partly there.
 			if report.Requirements[index].ID == "R2" && strings.Contains(packet["brief"].(string), "## This stage: base") {
-				report.Requirements[index].Status, report.Requirements[index].Reason = "partial", "the base is there, the feature is not"
+				report.Requirements[index].Status, report.Requirements[index].Cause, report.Requirements[index].Reason = "partial", "plan", "the base is there, the feature is not"
 			}
 		}
 		raw, _ := json.Marshal(map[string]any{"reports": []map[string]any{{"axis": "correctness", "status": "PASS", "findings": []any{},
@@ -388,7 +388,7 @@ func TestStagesStepByStepInAWorktreeWithAnAmendedPlan(t *testing.T) {
 	if strings.Count(string(log), "dev: ") != 2 {
 		t.Fatalf("each stage is its own commit: %s", log)
 	}
-	landed := f.land("apply")
+	landed := resultOf(f.land("apply"))
 	if landed["landed"] != "apply" || fileText(t, "a.txt") != "before\n+base-core\n+feature-core\n" || fileText(t, "b.txt") != "before\n+feature-core\n" {
 		t.Fatalf("landing brings every stage in at once: %v", landed)
 	}

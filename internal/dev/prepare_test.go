@@ -267,7 +267,7 @@ func TestATechnicalBlockerAndAFailedCatalogueReachTheLeadAsTheyAre(t *testing.T)
 func TestPreparationRevisesThePlanOfARunningTask(t *testing.T) {
 	f := newFixture(t)
 	plan := stagedPlan("-m build the feature")
-	changeQuality(f, func(q *QualityReport) { q.Requirements[0].Status = "partial" })
+	changeQuality(f, func(q *QualityReport) { q.Requirements[0].Status, q.Requirements[0].Cause = "partial", "plan" })
 	reviewer := f.model
 	f.model = func(kind string, packet map[string]any, call provider.Call) (string, error) {
 		if kind == "prepare" {

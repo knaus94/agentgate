@@ -1,4 +1,4 @@
-# agentgate reference — configuration
+# Configuration
 
 Layers, later ones winning: the built-in table or the selected profile; user extensions and the user's
 `~/.config/agentgate/config.json`; repository extensions and `.agentgate.json`; the personal
@@ -24,8 +24,8 @@ A route is `<model alias>:<effort>` with effort `low medium high xhigh max`. Pro
 Per mode: `scout` — the route that prepares plans and maps the code; `architecture` and `critique` — the design
 passes; `backend`, `frontend` — the writers; `review` — the reviewer lanes, each with its axes
 (`correctness`, `architecture`, `simplicity`, `security`); `blocking` — the severities that block;
-`escalate_to` — the highest effort a stalled correction may reach; `*_timeout_s` — process ceilings. An empty
-`review` makes the lead the reviewer, as in light.
+`escalate_to` — the highest effort a stalled correction may reach; `*_timeout_s` — process ceilings. Light has
+one reviewer lane, `astra:medium`; an empty `review` makes the lead the reviewer.
 
 The model that wrote the code never reviews it, whatever the table says: a lane whose model is an author is
 moved to its first independent fallback, and a plan with no independent reviewer is refused before it starts.

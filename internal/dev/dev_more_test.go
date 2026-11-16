@@ -135,13 +135,13 @@ func TestReviewOfExistingWorkIsReadOnlyAndEndsWithItsFindings(t *testing.T) {
 	if before, _, _ := treeFile(gate.objects(), gate.BaseTree, "a.txt"); string(before) != "before\n" {
 		t.Fatal("the reviewed change starts at the base commit, not at the working tree")
 	}
-	if result := done["result"].(map[string]any); len(result["findings"].([]any)) != 1 {
+	if result := done["outcome"].(map[string]any); len(result["findings"].([]any)) != 1 {
 		t.Fatalf("the findings are the result of a review: %v", result)
 	}
 	if _, err := os.Stat("leaked.txt"); err == nil {
 		t.Fatal("a check of a read-only review must not be able to write the checkout")
 	}
-	if _, err := gate.openCorrection(f.cfg, false); err == nil || !strings.Contains(err.Error(), "no authority") {
+	if _, err := gate.openCorrection(f.cfg, false, nil); err == nil || !strings.Contains(err.Error(), "no authority") {
 		t.Fatalf("a review without --fix never changes code: %v", err)
 	}
 	clean := newFixture(t)
@@ -280,8 +280,8 @@ func TestAnUpheldFindingIsFixedOnceTheLeadSaysSo(t *testing.T) {
 			correction := packet["correction"].(map[string]any)
 			id = correction["findings"].([]any)[0].(map[string]any)["id"].(string)
 			if upheld := asStrings(correction["upheld"]); len(upheld) == 1 {
-				if !strings.Contains(correction["remedy"].(string), "The reviewer is right") {
-					t.Errorf("the lead's ruling reaches the writer: %v", correction["remedy"])
+				if work := asStrings(correction["work"]); len(work) != 1 || !strings.Contains(work[0], "The reviewer is right") {
+					t.Errorf("the lead's ruling reaches the writer: %v", correction["work"])
 				}
 				write(t, "a.txt", "corrected\n")
 				return `{"status":"COMPLETED","summary":"fixed it","blockers":[],"handoff":"","deviations":[],"disputes":[{"id":"` + id + `","evidence":"still disagree"}]}`, nil
@@ -302,7 +302,7 @@ func TestAnUpheldFindingIsFixedOnceTheLeadSaysSo(t *testing.T) {
 		t.Fatalf("an upheld dispute stops for the lead: %v", stopped)
 	}
 	done := f.decide(DecideInput{Findings: []Disposition{{ID: id, Decision: "accepted", Evidence: "The reviewer is right: a.txt:1 holds the wrong value"}},
-		Brief: "The reviewer is right; use the agreed value"})
+		Work: []WorkOrder{{Stream: "core", Note: "The reviewer is right; use the agreed value"}}})
 	gate := Current()
 	if done["step"] != StepDone || len(gate.Disputes) != 0 {
 		t.Fatalf("a finding the lead upheld is fixed, and cannot be disputed a second time: %v %+v", done, gate.Disputes)
@@ -339,12 +339,12 @@ func TestAStalledCorrectionNeedsANewDiagnosis(t *testing.T) {
 	if again := f.proceed(); !slices.Equal(needs(again), []string{"stall"}) || f.count("writer") != 2 {
 		t.Fatalf("running again does not buy another identical attempt: %v", again)
 	}
-	f.fails("decide", "reassessment needs evidence", func() (any, error) {
-		return Decide(f.cfg, Current(), DecideInput{Reassessment: &Reassessment{Evidence: "the cause is elsewhere"}})
+	f.fails("decide", "needs note", func() (any, error) {
+		return Decide(f.cfg, Current(), DecideInput{Work: []WorkOrder{{Stream: "core"}}})
 	})
-	f.decide(DecideInput{Brief: "new remedy", Reassessment: &Reassessment{Evidence: "the cause is elsewhere", ChangedApproach: "fix the caller"}})
+	f.decide(DecideInput{Work: []WorkOrder{{Stream: "core", Note: "the cause is elsewhere: fix the caller"}}})
 	gate = Current()
-	if gate.Iteration != 2 || len(gate.Corrections) != 2 || !strings.Contains(gate.Round.Remedy, "fix the caller") {
+	if gate.Iteration != 2 || len(gate.Corrections) != 2 || !strings.Contains(gate.Round.Work[0].Note, "fix the caller") {
 		t.Fatalf("a reassessed correction is a new round that carries the new diagnosis: %d", gate.Iteration)
 	}
 	efforts := []string{}
@@ -496,7 +496,7 @@ func TestTellPostsToTheBoardWritersShare(t *testing.T) {
 	must(t, err)
 	_, err = Tell(Current(), TellInput{Message: "and keep the old field"})
 	must(t, err)
-	raw, _ := os.ReadFile(posted.(map[string]any)["posted"].(string))
+	raw, _ := os.ReadFile(posted["posted"].(string))
 	if !strings.Contains(string(raw), "use the v2 contract") || !strings.Contains(string(raw), "and keep the old field") {
 		t.Fatalf("notes accumulate on the board: %s", raw)
 	}
@@ -929,11 +929,11 @@ func TestAFailingCheckGoesBackToTheWriterBeforeAnyReviewer(t *testing.T) {
 	if failing := stalled["checks"].(map[string]any)["failing"].([]any); len(failing) != 1 {
 		t.Fatalf("the answer names the failing check: %v", stalled["checks"])
 	}
-	f.fails("decide", "names no stream", func() (any, error) {
-		return Decide(f.cfg, Current(), DecideInput{Streams: []string{"ghost"}, Reassessment: &Reassessment{Evidence: "e", ChangedApproach: "c"}})
+	f.fails("decide", "not a stream of the present position", func() (any, error) {
+		return Decide(f.cfg, Current(), DecideInput{Work: []WorkOrder{{Stream: "ghost", Note: "edit a.txt"}}})
 	})
 	repaired = true
-	done := f.decide(DecideInput{Brief: "write the word", Reassessment: &Reassessment{Evidence: "the file was untouched", ChangedApproach: "edit a.txt"}})
+	done := f.decide(DecideInput{Work: []WorkOrder{{Stream: "core", Note: "the file was untouched: write the word into a.txt"}}})
 	if writers := Current().Writers; writers[len(writers)-1].Route.Effort != "high" {
 		t.Fatalf("a check that keeps failing earns one more effort step: %s", writers[len(writers)-1].Route)
 	}
@@ -1128,7 +1128,7 @@ func TestIsolatedTaskLeavesTheCheckoutUntouchedUntilLanded(t *testing.T) {
 	}
 	f.fails("start", "not landed yet", func() (any, error) { return Start(f.cfg, f.plan("-w another change"), "", false, RunInput{}) })
 
-	landed := f.land("")
+	landed := resultOf(f.land(""))
 	if landed["landed"] != "apply" || fileText(t, "a.txt") != "after\n" || !strings.Contains(gitOut(t, "status", "--porcelain"), " M a.txt") {
 		t.Fatalf("apply leaves the change in the checkout, uncommitted: %v", landed)
 	}
@@ -1191,14 +1191,14 @@ func TestIsolatedSessionsCatchUpAndNeverConflictInTheCheckout(t *testing.T) {
 	}
 
 	as("first")
-	if landed := f.land("commit"); landed["commit"] == nil || fileText(t, "a.txt") != "first\n" || strings.TrimSpace(gitOut(t, "status", "--porcelain")) != "" {
+	if landed := resultOf(f.land("commit")); landed["commit"] == nil || fileText(t, "a.txt") != "first\n" || strings.TrimSpace(gitOut(t, "status", "--porcelain")) != "" {
 		t.Fatalf("commit lands the task as a commit on the current branch: %v", landed)
 	}
 
 	// The third task touches other files: the checkout's new commit merges in cleanly, its checks run again, it lands.
 	as("third")
 	checks := len(Current().Checks)
-	if landed := f.land("apply"); landed["landed"] != "apply" || fileText(t, "b.txt") != "third\n" || fileText(t, "a.txt") != "first\n" {
+	if landed := resultOf(f.land("apply")); landed["landed"] != "apply" || fileText(t, "b.txt") != "third\n" || fileText(t, "a.txt") != "first\n" {
 		t.Fatalf("a task on other files lands on top of the new commit: %v", landed)
 	}
 	if len(Current().Checks) != checks+1 {
@@ -1219,7 +1219,7 @@ func TestIsolatedSessionsCatchUpAndNeverConflictInTheCheckout(t *testing.T) {
 		t.Fatalf("the conflict goes to the writer that owns the file, and the merged result is reviewed again: %v", closed)
 	}
 	gitOut(t, "stash", "-q", "--include-untracked") // the third task's uncommitted change is the user's to keep or drop
-	if landed := f.land("branch"); landed["branch"] != gate.Branch || fileText(t, "a.txt") != "first\n" {
+	if landed := resultOf(f.land("branch")); landed["branch"] != gate.Branch || fileText(t, "a.txt") != "first\n" {
 		t.Fatalf("branch keeps the work for a pull request and leaves the checkout alone: %v", landed)
 	}
 	if got := gitOut(t, "show", gate.Branch+":a.txt"); got != "both changes\n" {
@@ -1240,7 +1240,7 @@ func TestLandingRefusesToOverwriteTheUsersOwnEdits(t *testing.T) {
 		t.Fatal("a refused landing changes nothing and can be repeated")
 	}
 	gitOut(t, "checkout", "-q", "--", "a.txt")
-	if landed := f.land("apply"); landed["landed"] != "apply" || fileText(t, "a.txt") != "after\n" {
+	if landed := resultOf(f.land("apply")); landed["landed"] != "apply" || fileText(t, "a.txt") != "after\n" {
 		t.Fatalf("once the edit is out of the way the task lands: %v", landed)
 	}
 }
@@ -1289,7 +1289,7 @@ func TestPlansMoveToASyncedFolderAndStayUsable(t *testing.T) {
 	if len(gate.Foreign) != 0 || fileText(t, filepath.Join(gate.Worktree, ".origin")) != repo+"\n" {
 		t.Fatalf("setup knows the checkout it was started from; the link is not a foreign change: %v", gate.Foreign)
 	}
-	if landed := f.land("apply"); landed["landed"] != "apply" || len(landed["files"].([]any)) != 1 {
+	if landed := resultOf(f.land("apply")); landed["landed"] != "apply" || len(landed["files"].([]any)) != 1 {
 		t.Fatalf("only the task's file lands, not the link: %v", landed)
 	}
 

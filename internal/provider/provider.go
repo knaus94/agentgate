@@ -30,6 +30,8 @@ type Call struct {
 	Dir      string // private lane directory: logs, provider home, result
 	Schema   any    // JSON schema of the answer, or nil for free text
 	Timeout  time.Duration
+	Idle     time.Duration        // the process is stopped when its event stream stays silent this long; zero: never
+	Images   []string             // pictures attached to the prompt, where the CLI takes them
 	Writer   bool                 // may edit the checkout
 	Persist  bool                 // keep the session so it can be continued later
 	Resume   string               // session to continue instead of starting a fresh one

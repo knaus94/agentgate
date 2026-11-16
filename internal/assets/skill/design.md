@@ -1,9 +1,16 @@
-# agentgate reference — implementing a Figma design
+# A Figma design
 
 `agentgate prepare` with the user's request. The host tool reads a bounded catalogue of the linked file; the
 preparation worker finds the repository's conventions, selects desktop and mobile content nodes and pairs them
 with implementation roots. You get a brief, product questions and the exact setup and check commands to
 authorize. You do not extract layers, compare screenshots, tune CSS or write measurement scripts.
+
+## Reaching Figma
+
+`agentgate figma status` says who is signed in and whether the session still works; `agentgate figma login`
+signs in once, in a browser window the user completes. A REST token in `FIGMA_ACCESS_TOKEN` works without a
+browser. The preparation reads the catalogue itself; you never call the exporter's scripts or paste their
+output into `notes`.
 
 ## In the plan
 

@@ -54,7 +54,7 @@ configured. See [Codex](codex.md) and the actual profile in
 
 A single-provider setup cannot provide cross-vendor review. It can still enforce independent sessions,
 different author/reviewer model identities, current checks and evidence-bound completion. A single-model
-setup is suitable only for light mode, where the lead reviews the change.
+setup is suitable only for a mode configured with `review: []`, where the lead reviews the change.
 
 ## Change a route
 

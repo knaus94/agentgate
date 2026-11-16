@@ -38,7 +38,16 @@
       "critique": false,
       "backend": "sol:medium",
       "frontend": "sol:medium",
-      "review": [],
+      "review": [
+        {
+          "axes": [
+            "correctness",
+            "architecture",
+            "simplicity"
+          ],
+          "route": "astra:medium"
+        }
+      ],
       "blocking": [
         "P0",
         "P1"

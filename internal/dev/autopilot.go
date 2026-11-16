@@ -18,7 +18,8 @@ import (
 // write, check, review, send findings back to their authors, accept a stage, open the next — and stops where
 // a person is needed. Called again with nothing decided, it reports the same needs and starts no model.
 
-// Need is one thing only a person can settle. Every kind has one way to resolve it, named in Resolve.
+// Need is one thing only a person can settle. Every kind has one way to resolve it, named in Resolve; Command
+// and Input are that way as it is sent, with the real ids filled in and `<…>` where the lead writes its own words.
 type Need struct {
 	Kind    string `json:"kind"` // answer, failed, review, finding, requirement, rule, stall, limit, setup, scenarios, conflict, scope
 	ID      string `json:"id,omitempty"`
@@ -26,6 +27,8 @@ type Need struct {
 	What    string `json:"what"`
 	Detail  any    `json:"detail,omitempty"`
 	Resolve string `json:"resolve"`
+	Command string `json:"command,omitempty"`
+	Input   any    `json:"input,omitempty"`
 	// environment marks a need that comes from a failing check, where the cause may lie outside the code: a
 	// stand, a service. Running the task again runs that check again.
 	environment bool
@@ -115,25 +118,28 @@ func (g *Gate) classify(cfg *config.Config) (string, []Need, error) {
 	// would land unreviewed. It is settled before anything is paid to review the rest.
 	if g.Worktree != "" && len(foreign) > 0 {
 		return verdictLead, []Need{{Kind: "scope", What: "the isolated task changed files outside its plan: " + strings.Join(foreign, ", "),
-			Resolve: "`amend` the plan to give them to a stream, so they are reviewed with the rest; or remove them from the worktree. Then `run`."}}, nil
+			Resolve: "`amend` {scope} gives them to a stream, so they are reviewed with the rest; or remove them from the worktree. Then `run`.",
+			Command: "amend", Input: map[string]any{"update": "<why these files belong to the task>",
+				"scope": []map[string]any{{"stream": g.oneOf(g.streamNames()), "add": foreign}}}}}, nil
 	}
 	receipts := g.currentReceipts()
 	failing := g.failingReceipts(receipts)
 	for _, failure := range failing {
 		if failure.Setup {
 			return verdictLead, []Need{{Kind: "setup", What: "layout check of " + layoutScreen(failure.Argv) + " could not observe the page: " + toolMessage(failure.Tail),
-				Detail: map[string]string{"log": failure.Log, "check": checkLabel(failure.Argv)}, environment: true,
+				Detail: map[string]string{"log": failure.Log, "check": checkLabel(failure.Argv)}, environment: true, Command: "run",
 				Resolve: "Repair the stand, or have `prepare` correct the measurement contract and `amend` it; then `run` measures again. Do not tune CSS, baselines or tolerances to get past it."}}, nil
 		}
 	}
 	// A check that passed on these same files and fails now failed outside the code. Writers cannot repair a
-	// stopped database: the lead hears of it, unless it already sent the failure to the writers.
-	if writes && len(failing) > 0 && g.Remedy == "" && len(g.FixStreams) == 0 && !slices.ContainsFunc(failing, func(f CheckFailure) bool { return !f.Environment }) {
+	// stopped database: the lead hears of it.
+	if writes && len(failing) > 0 && !slices.ContainsFunc(failing, func(f CheckFailure) bool { return !f.Environment }) {
 		var out []Need
 		for _, failure := range failing {
-			out = append(out, Need{Kind: "setup", environment: true, Detail: lastLines(failure.Tail, 12),
-				What:    "check `" + checkLabel(failure.Argv) + "` passed on these same files before and fails now: the cause is outside the code — a service, a stand, the machine",
-				Resolve: "Repair what its log names, then `run` runs the check again. If the code is at fault after all, decide {brief} sends the failure to the writers."})
+			out = append(out, Need{Kind: "setup", environment: true, Detail: lastLines(failure.Tail, 12), Command: "run",
+				What: lastLine(strings.TrimSpace(failure.Tail)) + " — check `" + checkLabel(failure.Argv) +
+					"` passed on these same files before and fails now: the cause is outside the code (a service, a stand, the machine)",
+				Resolve: "Repair what its log names, then `run` runs the check again. If the code is at fault after all, decide {work} sends the failure to the writers you name."})
 		}
 		return verdictLead, out, nil
 	}
@@ -144,8 +150,9 @@ func (g *Gate) classify(cfg *config.Config) (string, []Need, error) {
 		}
 		// The same check failing again after a correction aimed at it is a stall, just like a finding that returns.
 		stalled := len(g.Corrections) > 0 && slices.ContainsFunc(g.Corrections[len(g.Corrections)-1].CheckIDs, func(id string) bool { return slices.Contains(ids, id) })
-		if stalled && g.Reassessed == nil {
-			need := g.stall("check-still-failing", failing[0].Tail)
+		if stalled {
+			need := g.stall("check-still-failing", lastLines(failing[0].Tail, 12))
+			need.What = lastLine(strings.TrimSpace(failing[0].Tail)) + " — check `" + checkLabel(failing[0].Argv) + "` still fails after the correction aimed at it"
 			need.environment = true
 			need.Resolve += " If the cause was outside the code and you repaired it, `run` runs the failing checks again."
 			return verdictLead, []Need{need}, nil
@@ -179,7 +186,8 @@ func (g *Gate) classify(cfg *config.Config) (string, []Need, error) {
 			if reading := g.Reading; reading != nil && reading.Key == key && reading.Contract == contract && reading.QualityDigest == quality.fingerprint() {
 				need := Need{Kind: "review", What: "this mode has no reviewer process: read the patch and judge it yourself",
 					Detail:  map[string]string{"patch": reading.Patch, "packet": reading.Packet},
-					Resolve: "decide {review: {summary, findings, quality}} — quality only when the packet has one; a code ref is path:line or path:first-last. Judge every slop_signal and every added line: does the task need it? An empty findings list is a valid result."}
+					Resolve: "`show review` prints what to judge. Then decide {review: {summary, findings, quality}} — quality only when the packet has one; a code ref is path:line or path:first-last. Judge every slop_signal and every added line: does the task need it? An empty findings list is a valid result.",
+					Command: "decide", Input: map[string]any{"review": g.reviewSkeleton(quality)}}
 				if disputed := len(g.openDisputes(g.accepted())); disputed > 0 {
 					need.What = fmt.Sprintf("the writer disputes %d of your findings; its evidence is under `disputes` in the packet. Read the patch and judge again", disputed)
 					need.Resolve += " A disputed finding you leave out of findings is withdrawn; one you report again under its id is upheld and goes back to be fixed."
@@ -206,7 +214,7 @@ func (g *Gate) classify(cfg *config.Config) (string, []Need, error) {
 		return verdictClean, nil, nil // a review of existing work ends with its report: the findings are the result
 	}
 	if len(g.accepted()) > 0 {
-		if progress := g.progress(key); progress.Reassess && g.Reassessed == nil && !g.Ruled {
+		if progress := g.progress(key); progress.Reassess && !g.Ruled {
 			return verdictLead, []Need{g.stall(progress.Status, strings.Join(append(progress.Recurring, progress.Unresolved...), ", "))}, nil
 		}
 		if need, limited := g.limited(); limited {
@@ -216,12 +224,13 @@ func (g *Gate) classify(cfg *config.Config) (string, []Need, error) {
 	}
 	var needs []Need
 	for _, finding := range g.undecided(cfg) {
-		need := Need{Kind: "finding", ID: finding.ID, What: fmt.Sprintf("%s %s at %s:%d — %s", finding.Severity, finding.Axis, finding.Path, finding.Line, oneLine(finding.Evidence)),
-			Resolve: "decide {findings: [{id, decision: accepted|rejected, evidence}]}: rejected needs contrary evidence from the code; accepted sends it back to be fixed."}
-		detail := map[string]any{"impact": finding.Impact, "remedy": finding.Remedy}
+		need := Need{Kind: "finding", ID: finding.ID, What: fmt.Sprintf("%s %s at %s:%d — %s", finding.Severity, finding.Axis, finding.Path, finding.Line, clipText(oneLine(finding.Evidence), 300)),
+			Resolve: "decide {findings: [{id, decision: accepted|rejected, evidence}]}: rejected needs contrary evidence from the code; accepted sends it back to be fixed.",
+			Command: "decide", Input: map[string]any{"findings": []map[string]any{{"id": finding.ID, "decision": "<accepted|rejected>", "evidence": "<what in the code decides it>"}}}}
+		detail := map[string]any{"impact": clipText(finding.Impact, 300), "remedy": clipText(finding.Remedy, 300)}
 		if dispute, disputed := g.Disputes[finding.ID]; disputed {
 			need.What = "disputed by its author and upheld by the reviewer: " + need.What
-			detail["author_evidence"] = dispute.Evidence
+			detail["author_evidence"] = clipText(dispute.Evidence, 400)
 		}
 		switch g.Dispositions[finding.ID].Decision {
 		case "needs-approval":
@@ -243,7 +252,9 @@ func (g *Gate) classify(cfg *config.Config) (string, []Need, error) {
 	return verdictClean, nil, nil
 }
 
-// unmet turns the criteria that keep the position from being accepted into needs.
+// unmet turns the criteria that keep the position from being accepted into needs. The reviewer's cause says
+// whose they are: missing code is work for a writer, missing proof is evidence to collect, a wrong plan is an
+// amendment.
 func (g *Gate) unmet(report *QualityReport, quality *qualityInputs) []Need {
 	var needs []Need
 	for _, result := range report.Requirements {
@@ -251,35 +262,113 @@ func (g *Gate) unmet(report *QualityReport, quality *qualityInputs) []Need {
 		if index < 0 || result.Status == "verified" || !quality.Requirements[index].Due {
 			continue
 		}
-		needs = append(needs, Need{Kind: "requirement", ID: result.ID, What: fmt.Sprintf("%s is %s: %s", result.ID, result.Status, oneLine(result.Reason)),
-			Detail: quality.Requirements[index].Text,
-			Resolve: "If code is missing: decide {requirements: [{id, action: \"fix\", note}]} sends it to the writers. If proof is missing: collect it (`check`, a browser pass) and `run`. " +
-				"If the requirement belongs to a later stage: `amend` the plan so that stage covers it. Never weaken a requirement to pass."})
+		need := Need{Kind: "requirement", ID: result.ID, Detail: clipText(quality.Requirements[index].Text, 300)}
+		reason := clipText(oneLine(result.Reason), 400)
+		switch result.Cause {
+		case "proof":
+			need.What = fmt.Sprintf("%s is %s: the proof is missing — %s", result.ID, result.Status, reason)
+			need.Resolve = "Make the proof available — a declared check that exercises the code, a browser pass — then `run`; " +
+				"`run {recheck: true}` has the reviewer judge unchanged evidence again. Never weaken the requirement."
+			need.Command = "run"
+		case "plan":
+			need.What = fmt.Sprintf("%s is %s: the plan puts it where it cannot be met — %s", result.ID, result.Status, reason)
+			need.Resolve = "`amend` {requirements} moves it to the stage that completes it, or give what this stage delivers its own requirement. " +
+				"Changing what it asks needs the user's word in `authorized`."
+			need.Command, need.Input = "amend", map[string]any{"update": "<why it is due later>",
+				"requirements": []map[string]any{{"id": result.ID, "stage": g.oneOf(g.laterStages())}}}
+		default:
+			need.What = fmt.Sprintf("%s is %s: the code does not do it — %s", result.ID, result.Status, reason)
+			need.Resolve = "decide {work: [{stream, requirement, note}]} gives it to the writer that owns it. If proof is what is missing after all, collect it and `run`; if the plan is wrong, `amend`."
+			need.Command, need.Input = "decide", map[string]any{"work": []map[string]any{{"stream": g.oneOf(g.streamNames()), "requirement": result.ID,
+				"note": "<what is missing>"}}}
+		}
+		needs = append(needs, need)
 	}
 	for _, result := range report.Rules {
 		index := slices.IndexFunc(quality.Rules, func(r reviewRule) bool { return r.ID == result.ID })
 		if index < 0 || quality.Rules[index].Mode != "blocking" || result.Status == "pass" || result.Status == "not_applicable" {
 			continue
 		}
-		needs = append(needs, Need{Kind: "rule", ID: result.ID, What: fmt.Sprintf("rule %s is %s: %s", result.ID, result.Status, oneLine(result.Evidence)),
-			Resolve: "A defect belongs in a finding: decide {requirements: [{id, action: \"fix\", note}]} sends the rule's failure to the writers. " +
-				"Missing evidence: make it available and `run`, or `pause` when it cannot be had."})
+		needs = append(needs, Need{Kind: "rule", ID: result.ID, What: fmt.Sprintf("rule %s is %s: %s", result.ID, result.Status, clipText(oneLine(result.Evidence), 400)),
+			Resolve: "A defect: decide {work: [{stream, requirement: <the rule id>, note}]} gives the rule's failure to a writer. " +
+				"Missing evidence: make it available and `run`, or `pause` when it cannot be had.",
+			Command: "decide", Input: map[string]any{"work": []map[string]any{{"stream": g.oneOf(g.streamNames()), "requirement": result.ID, "note": "<what to change>"}}}})
 	}
 	return needs
 }
 
+// oneOf is a value the lead picks: the only one, or the choice spelled out.
+func (g *Gate) oneOf(values []string) string {
+	switch len(values) {
+	case 0:
+		return "<none>"
+	case 1:
+		return values[0]
+	}
+	return "<one of: " + strings.Join(values, ", ") + ">"
+}
+
+// laterStages are the stages after the present one, where a requirement may still be due.
+func (g *Gate) laterStages() []string {
+	var out []string
+	for index := g.Stage + 1; index < len(g.Plan.Stages) && !g.Whole; index++ {
+		out = append(out, g.Plan.Stages[index].Name)
+	}
+	return out
+}
+
 func (g *Gate) stall(status, detail string) Need {
+	streams := g.streamNames()
+	if g.Round != nil && g.Round.Correction {
+		streams = nil
+		for _, stream := range g.Round.Streams {
+			streams = append(streams, stream.Name)
+		}
+	}
+	var work []map[string]any
+	for _, stream := range streams {
+		work = append(work, map[string]any{"stream": stream, "note": "<the new diagnosis and what to do differently>"})
+	}
 	return Need{Kind: "stall", What: "the last correction made no verified progress (" + status + ")", Detail: detail,
-		Resolve: "Diagnose again instead of repeating: `consult` can investigate. Then decide {reassessment: {evidence, changed_approach}}; " +
-			"the writers get it and one more step of effort. `pause` and ask the user when a decision is missing."}
+		Resolve: "Diagnose again instead of repeating: `consult` can investigate. Then decide {work: [{stream, note}]} with the new diagnosis " +
+			"and the changed approach; its writers get one more step of effort. `pause` and ask the user when a decision is missing.",
+		Command: "decide", Input: map[string]any{"work": work}}
 }
 
 func (g *Gate) limited() (Need, bool) {
 	if g.AutoRounds < autoRounds {
 		return Need{}, false
 	}
-	return Need{Kind: "limit", What: fmt.Sprintf("%d corrections ran in a row in this stage without you looking", g.AutoRounds),
+	return Need{Kind: "limit", What: fmt.Sprintf("%d corrections ran in a row in this stage without you looking", g.AutoRounds), Command: "run",
 		Resolve: "`show findings` shows what keeps coming back. `run` continues; `amend` or `pause` when the plan or a decision is what is wrong."}, true
+}
+
+// reviewSkeleton is the lead's review as it is sent, with every criterion of the packet listed.
+func (g *Gate) reviewSkeleton(quality *qualityInputs) map[string]any {
+	review := map[string]any{"summary": "<what you read and verified>", "findings": []any{}}
+	if quality == nil {
+		return review
+	}
+	passing := ""
+	for id, check := range quality.Checks {
+		if check.Receipt.ReturnCode == 0 && (passing == "" || id < passing) {
+			passing = id
+		}
+	}
+	requirements, rules := []map[string]any{}, []map[string]any{}
+	for _, requirement := range quality.Requirements {
+		proof := map[string]any{"kind": "code", "ref": "<path:line>", "detail": "<what it shows>"}
+		if requirement.Method == "check" && passing != "" {
+			proof = map[string]any{"kind": "check", "ref": passing, "detail": "<what the check proves>"}
+		}
+		requirements = append(requirements, map[string]any{"id": requirement.ID, "status": "<verified|partial|missing>",
+			"cause": "<code|proof|plan, when not verified>", "reason": "<…>", "evidence": []any{proof}})
+	}
+	for _, rule := range quality.Rules {
+		rules = append(rules, map[string]any{"id": rule.ID, "status": "<pass|block|not_applicable|unavailable>", "evidence": "<…>"})
+	}
+	review["quality"] = map[string]any{"requirements": requirements, "rules": rules}
+	return review
 }
 
 // Start validates a plan, opens a task for it and runs it.
@@ -322,6 +411,7 @@ func Start(cfg *config.Config, plan *Plan, name string, implement bool, input Ru
 		if fileExists(proposal.ContextPack) {
 			gate.ContextPack = proposal.ContextPack
 		}
+		gate.Attachments = copyAttachments(proposal.Attachments, filepath.Join(gate.dir(), "attachments"))
 	}
 	if err := gate.save(); err != nil {
 		return nil, err
@@ -444,7 +534,7 @@ func Run(cfg *config.Config, gate *Gate, input RunInput) (any, error) {
 			stale = 0
 			switch verdict {
 			case verdictFix:
-				note, err := gate.openCorrection(cfg, true)
+				note, err := gate.openCorrection(cfg, true, nil)
 				if err != nil {
 					return nil, err
 				}
@@ -494,8 +584,9 @@ func (g *Gate) openStage(cfg *config.Config) error {
 	return g.save()
 }
 
-// openCorrection sends what verification found back to the writers that own it, in their own sessions.
-func (g *Gate) openCorrection(cfg *config.Config, auto bool) (string, error) {
+// openCorrection sends what verification found back to the writers that own it, in their own sessions, with
+// the work the lead gives.
+func (g *Gate) openCorrection(cfg *config.Config, auto bool, work []WorkOrder) (string, error) {
 	if !g.Request.Writes() {
 		return "", errors.New("a review without --fix has no authority to change code")
 	}
@@ -519,16 +610,20 @@ func (g *Gate) openCorrection(cfg *config.Config, auto bool) (string, error) {
 		}
 		touched[target.Name] = true
 	}
-	// A failing check does not say which stream broke it: every stream gets it unless the lead named the owners.
+	// A failing check does not say which stream broke it: every stream gets it, unless the lead gave the work to
+	// named streams.
 	for _, failure := range failing {
 		checkIDs = append(checkIDs, checkID(failure.Argv))
 	}
 	if len(failing) > 0 {
 		for _, stream := range streams {
-			if !stream.Done && (len(g.FixStreams) == 0 || slices.Contains(g.FixStreams, stream.Name)) {
+			if !stream.Done && (len(work) == 0 || slices.ContainsFunc(work, func(item WorkOrder) bool { return item.Stream == stream.Name })) {
 				touched[stream.Name] = true
 			}
 		}
+	}
+	for _, item := range work {
+		touched[item.Stream] = true
 	}
 	for _, file := range conflicts {
 		if stream := g.owner(file); stream != nil {
@@ -547,23 +642,16 @@ func (g *Gate) openCorrection(cfg *config.Config, auto bool) (string, error) {
 	if len(round) == 0 {
 		return "", errors.New("there is nothing to correct: no accepted finding, failing check or conflict names a stream of the present stage")
 	}
-	// More effort is earned, not assumed: a correction that made no verified progress, or the lead's explicit
-	// request, raises the writers one step, up to the mode's ceiling.
-	if g.Reassessed != nil || g.Escalate {
-		g.Boost++
-	}
-	remedy := g.Remedy
-	if strings.TrimSpace(remedy) == "" {
-		remedy = "Diagnose and correct the accepted findings and failing checks in this assignment. Repair the root cause, preserve the contract, and report the diagnosis and actual checks."
-	}
-	if g.Reassessed != nil {
-		remedy += "\n\nNew diagnosis from the lead: " + g.Reassessed.Evidence + "\nChanged approach: " + g.Reassessed.ChangedApproach
+	remedy := "Diagnose and correct the accepted findings and failing checks in this assignment. Repair the root cause, preserve the contract, and report the diagnosis and actual checks."
+	if len(work) > 0 {
+		remedy = "Do the lead's work in this assignment, and correct the accepted findings and failing checks it holds. Repair the root cause, preserve the contract, and report what you did and the actual checks."
 	}
 	g.Iteration++
 	g.Rounds++
-	g.Corrections = append(g.Corrections, Correction{Iteration: g.Iteration, FindingIDs: ids, StartKey: key, CheckIDs: checkIDs, Brief: remedy, Reassessment: g.Reassessed})
-	g.Round = &Round{Batch: g.batch(), Streams: round, Correction: true, Auto: auto, Findings: accepted, Remedy: remedy, Boost: g.Boost, Failures: failing, Conflicts: conflicts}
-	g.Reassessed, g.Escalate, g.Ruled, g.Remedy, g.FixStreams, g.Reading = nil, false, false, "", nil, nil
+	g.Corrections = append(g.Corrections, Correction{Iteration: g.Iteration, FindingIDs: ids, StartKey: key, CheckIDs: checkIDs, Brief: remedy, Work: work})
+	g.Round = &Round{Batch: g.batch(), Streams: round, Correction: true, Auto: auto, Findings: accepted, Remedy: remedy, Work: work, Boost: g.Boost,
+		Failures: failing, Conflicts: conflicts}
+	g.Ruled, g.Reading = false, nil
 	if auto {
 		g.AutoRounds++
 	}
@@ -575,6 +663,9 @@ func (g *Gate) openCorrection(cfg *config.Config, auto bool) (string, error) {
 		names[index] = stream.Name
 	}
 	what := []string{}
+	if len(work) > 0 {
+		what = append(what, "the lead's work")
+	}
 	if len(accepted) > 0 {
 		what = append(what, fmt.Sprintf("%d findings", len(accepted)))
 	}
@@ -645,7 +736,11 @@ func (g *Gate) accept(cfg *config.Config) (string, error) {
 	}
 	stage := g.stage()
 	record := StageRecord{Name: stage.Name, Mode: g.Mode, Summary: g.workSummary(), AcceptedAt: time.Now().Unix(),
-		Rounds: len(g.Corrections), Findings: len(g.Findings()), Tree: now, Handoffs: map[string]string{}, Writers: map[string]WriterRef{}}
+		Rounds: len(g.Corrections), Findings: len(g.Findings()), Tree: now, Handoffs: map[string]string{}, Writers: map[string]WriterRef{},
+		Reviewers: g.reviewers(), Checks: g.checkLines()}
+	for _, finding := range g.leftNotes() {
+		record.Notes = append(record.Notes, noteLine(finding))
+	}
 	for name, writer := range g.latest() {
 		if writer.Handoff != "" {
 			record.Handoffs[name] = writer.Handoff

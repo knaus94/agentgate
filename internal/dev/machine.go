@@ -51,6 +51,9 @@ const (
 	ActLand   Action = "land"   // bring a finished isolated task into the checkout, or drop it
 	ActCheck  Action = "check"  // run declared checks
 	ActVisual Action = "visual" // record the browser choice or a skip, or run a browser pass
+	// Drop and forget are the user's to ask for; they are never offered among the actions.
+	ActDrop   Action = "drop"   // end the task and take back what it changed
+	ActForget Action = "forget" // remove a finished or dropped task from the record
 )
 
 // legal lists the actions of each step, the one that moves the task first.
@@ -58,7 +61,7 @@ var legal = map[string][]Action{
 	StepWrite:     {ActRun, ActAnswer, ActDecide, ActAmend, ActCheck, ActVisual, ActPause, ActStop},
 	StepVerify:    {ActRun, ActDecide, ActAmend, ActCheck, ActVisual, ActPause, ActStop},
 	StepDecide:    {ActDecide, ActRun, ActAmend, ActCheck, ActVisual, ActPause, ActStop},
-	StepDone:      {ActLand},
+	StepDone:      {ActLand, ActDecide}, // decide fixes the notes a finished task left
 	StepCancelled: {ActLand},
 }
 
@@ -67,7 +70,7 @@ var transitions = map[string][]string{
 	StepWrite:     {StepWrite, StepVerify, StepCancelled},
 	StepVerify:    {StepVerify, StepWrite, StepDecide, StepDone, StepCancelled},
 	StepDecide:    {StepDecide, StepWrite, StepVerify, StepDone, StepCancelled},
-	StepDone:      {StepVerify}, // reopened: the finished content changed, or a landing must catch up first
+	StepDone:      {StepVerify, StepCancelled}, // reopened, or dropped
 	StepCancelled: {},
 }
 
@@ -111,7 +114,8 @@ func (g *Gate) can(action Action) error {
 	refuse := func(format string, values ...any) error {
 		return &Refusal{Action: action, Because: fmt.Sprintf(format, values...), Instead: g.actions()}
 	}
-	if action == ActLand {
+	switch action {
+	case ActLand:
 		switch {
 		case g.Worktree == "":
 			return refuse("this task was not isolated: its changes are already in the checkout")
@@ -119,6 +123,26 @@ func (g *Gate) can(action Action) error {
 			return refuse("this task is already closed (%s)", g.Landed)
 		}
 		return nil
+	case ActDrop:
+		switch {
+		case g.Landed != "":
+			return refuse("this task is already closed (%s): its changes are the checkout's now", g.Landed)
+		case g.Dropped:
+			return refuse("this task was already dropped")
+		}
+		return nil
+	case ActForget:
+		switch {
+		case g.active():
+			return refuse("only a finished or dropped task is forgotten; this one is at %s", g.Step)
+		case g.Worktree != "" && g.Landed == "":
+			return refuse("this task's worktree is not landed or dropped yet: `land` it, or `drop` it")
+		}
+		return nil
+	case ActDecide:
+		if g.Step == StepDone && g.Landed != "" {
+			return refuse("this task is landed (%s): its changes are the checkout's now; a new task fixes what it left", g.Landed)
+		}
 	}
 	if !slices.Contains(legal[g.Step], action) && action != ActResume {
 		if !g.active() {
@@ -144,11 +168,15 @@ func (g *Gate) can(action Action) error {
 
 // actions is what the lead can do now, the action that moves the task first. Everything listed passes can.
 func (g *Gate) actions() []Action {
-	if g.Worktree != "" && g.Landed == "" && !g.active() {
-		return []Action{ActLand}
-	}
 	if !g.active() {
-		return nil
+		var out []Action
+		if g.Worktree != "" && g.Landed == "" {
+			out = append(out, ActLand)
+		}
+		if g.Step == StepDone && g.Landed == "" && len(g.leftNotes()) > 0 {
+			out = append(out, ActDecide)
+		}
+		return out
 	}
 	if g.Pause != nil && g.Pause.Kind == PauseUser {
 		return []Action{ActResume, ActStop}
@@ -184,6 +212,17 @@ func (g *Gate) actions() []Action {
 	}
 	if g.Worktree != "" && g.Landed == "" {
 		out = append(out, ActLand) // an unfinished isolated task can still be dropped
+	}
+	return out
+}
+
+// leftNotes are the findings a position closed without fixing: not resolved and not rejected.
+func (g *Gate) leftNotes() []Finding {
+	var out []Finding
+	for _, finding := range g.Findings() {
+		if _, resolved := g.Resolutions[finding.ID]; !resolved && g.Dispositions[finding.ID].Decision != "rejected" {
+			out = append(out, finding)
+		}
 	}
 	return out
 }

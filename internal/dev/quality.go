@@ -21,11 +21,16 @@ type Proof struct {
 }
 
 type RequirementResult struct {
-	ID       string  `json:"id"`
-	Status   string  `json:"status"` // verified, partial or missing
+	ID     string `json:"id"`
+	Status string `json:"status"` // verified, partial or missing
+	// Cause says whose an unmet requirement is: code — the code does not do it, and its writer gets it; proof —
+	// the code may do it and the evidence is missing; plan — the plan puts it where it cannot be met.
+	Cause    string  `json:"cause,omitempty"`
 	Reason   string  `json:"reason"`
 	Evidence []Proof `json:"evidence"`
 }
+
+var causes = []string{"code", "proof", "plan"}
 
 type RuleResult struct {
 	ID       string `json:"id"`
@@ -79,7 +84,7 @@ type qualityInputs struct {
 }
 
 var qualitySchema = object(map[string]any{
-	"requirements": items(map[string]any{"id": text, "status": enum("verified", "partial", "missing"), "reason": text,
+	"requirements": items(map[string]any{"id": text, "status": enum("verified", "partial", "missing"), "cause": nullable(enum(causes...)), "reason": text,
 		"evidence": items(map[string]any{"kind": enum("code", "check", "browser"), "ref": text, "detail": text})}),
 	"rules": items(map[string]any{"id": text, "status": enum("pass", "block", "not_applicable", "unavailable"), "evidence": text}),
 })
@@ -256,13 +261,20 @@ func (g *Gate) validateQuality(report *QualityReport, input *qualityInputs) erro
 	var problems []string
 	add := func(format string, values ...any) { problems = append(problems, fmt.Sprintf(format, values...)) }
 	seen := map[string]bool{}
-	for _, result := range report.Requirements {
+	for position, result := range report.Requirements {
 		index := slices.IndexFunc(input.Requirements, func(r criterion) bool { return r.ID == result.ID })
 		if index < 0 || seen[result.ID] || !slices.Contains([]string{"verified", "partial", "missing"}, result.Status) || strings.TrimSpace(result.Reason) == "" {
 			add("invalid requirement result %q: needs a known unique id, status and reason", result.ID)
 			continue
 		}
 		seen[result.ID] = true
+		switch {
+		case result.Status == "verified":
+			report.Requirements[position].Cause = "" // a verified requirement has nothing to route
+		case !slices.Contains(causes, result.Cause):
+			add("requirement %q is %s: give its cause — code (the code does not do it), proof (the code may do it and the evidence is missing) "+
+				"or plan (the plan puts it where it cannot be met)", result.ID, result.Status)
+		}
 		requirement := input.Requirements[index]
 		method := requirement.Method == ""
 		for index := range result.Evidence {

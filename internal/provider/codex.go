@@ -29,6 +29,9 @@ func runCodex(call Call) (Result, error) {
 	if call.Resume != "" {
 		argv = append(argv, "resume", call.Resume)
 	}
+	for _, image := range call.Images {
+		argv = append(argv, "--image", image)
+	}
 	argv = append(argv, "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "--ignore-user-config",
 		"--ignore-rules", "-m", call.Route.Model, "-c", "model_reasoning_effort="+quote(call.Route.Effort), "--json", "-o", result)
 	if !call.Persist && call.Resume == "" {
@@ -59,7 +62,8 @@ func runCodex(call Call) (Result, error) {
 	}
 	argv = append(argv, "-")
 	if err := execute(call, argv, workerEnvironment(call, "CODEX_HOME="+home), "events.jsonl"); err != nil {
-		return Result{}, err
+		// A run that was stopped keeps its thread: the next attempt continues it instead of starting over.
+		return Result{Session: startedSession(call, "thread_id")}, err
 	}
 	session, completed := call.Resume, false
 	if err := scanEvents(filepath.Join(call.Dir, "events.jsonl"), func(line []byte) {

@@ -2,6 +2,7 @@ package dev
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,7 +27,9 @@ import (
 type PrepareInput struct {
 	Request        string            `json:"request,omitempty"`
 	Name           string            `json:"name,omitempty"`
+	Mode           string            `json:"mode,omitempty"` // light, medium, heavy or ultra: the plan carries it, stronger than a flag
 	Context        []string          `json:"context,omitempty"`
+	Attachments    []string          `json:"attachments,omitempty"` // files the user gave, anywhere on the machine: copied and shown to the worker
 	Notes          string            `json:"notes,omitempty"`
 	Answers        map[string]string `json:"answers,omitempty"`         // question id -> the user's answer
 	RefreshDesigns bool              `json:"refresh_designs,omitempty"` // re-read Figma when the selected design itself changed
@@ -43,16 +46,18 @@ type Question struct {
 
 // Preparation is what is kept of the conversation between calls.
 type Preparation struct {
-	ID        string       `json:"id"`
-	Request   string       `json:"request"`
-	Name      string       `json:"name,omitempty"`
-	Route     config.Route `json:"route"`
-	Session   string       `json:"session"`
-	Dir       string       `json:"dir"` // the worker's lane, which holds its session
-	Status    string       `json:"status"`
-	Questions []Question   `json:"questions,omitempty"`
-	Rounds    int          `json:"rounds"`
-	UpdatedAt int64        `json:"updated_at"`
+	ID          string       `json:"id"`
+	Request     string       `json:"request"`
+	Name        string       `json:"name,omitempty"`
+	Mode        string       `json:"mode,omitempty"`        // the lead's choice, kept in every plan this preparation returns
+	Attachments []string     `json:"attachments,omitempty"` // copies of the files the user gave
+	Route       config.Route `json:"route"`
+	Session     string       `json:"session"`
+	Dir         string       `json:"dir"` // the worker's lane, which holds its session
+	Status      string       `json:"status"`
+	Questions   []Question   `json:"questions,omitempty"`
+	Rounds      int          `json:"rounds"`
+	UpdatedAt   int64        `json:"updated_at"`
 }
 
 // corrections is how many times one call sends validation problems back into the worker's session.
@@ -141,11 +146,11 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if input.Mode != "" && !slices.Contains(config.ModeNames, input.Mode) {
+		return nil, fmt.Errorf("mode is one of %s, not %q", strings.Join(config.ModeNames, ", "), input.Mode)
+	}
 	if preparation == nil {
-		mode := request.Mode
-		if mode == "" {
-			mode = "medium"
-		}
+		mode := cmp.Or(input.Mode, request.Mode, "medium")
 		spec := cfg.Modes[mode].Scout
 		if spec == "" {
 			spec = cfg.Modes["medium"].Scout
@@ -160,9 +165,26 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 	if input.Name != "" {
 		preparation.Name = input.Name
 	}
+	if input.Mode != "" {
+		preparation.Mode = input.Mode
+	}
 	root := filepath.Dir(preparationFile(preparation.ID))
+	added, err := preparation.attach(input.Attachments, filepath.Join(root, "attachments"))
+	if err != nil {
+		return nil, err
+	}
+	// Pictures go with the prompt where the CLI takes them: all of them to a new session, the new ones after.
+	images := imagesOf(added)
+	if preparation.Session == "" {
+		images = imagesOf(preparation.Attachments)
+	}
 	packet := map[string]any{"request": input.Request, "context": context, "notes": input.Notes,
 		"review_rule_catalogue": reviewRuleCatalogue(cfg)}
+	if len(preparation.Attachments) > 0 {
+		packet["attachments"] = preparation.Attachments
+		packet["attachments_note"] = "Files the user gave with the request. Read every one: a picture is attached to your prompt where your client " +
+			"takes pictures, and your file reading tool shows it too. What they show is part of the request."
+	}
 	if len(input.Answers) > 0 {
 		var answers []map[string]string
 		for _, question := range preparation.Questions {
@@ -257,7 +279,8 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 				"host validator found. You already read the repository; read again only what the new input makes necessary. Return the same JSON schema.\n" + toolNote
 		}
 		result, used, err := subs.invoke(cfg, provider.Call{Route: preparation.Route, Prompt: prompt, Dir: preparation.Dir, Schema: prepareSchema,
-			Timeout: seconds(prepareTimeout), Persist: true, Resume: preparation.Session, MCP: tools, Writable: toolDirs, ReadDirs: []string{root}}, nil)
+			Timeout: seconds(prepareTimeout), Persist: true, Resume: preparation.Session, MCP: tools, Writable: toolDirs, ReadDirs: []string{root}, Images: images}, nil)
+		images = nil
 		if err != nil {
 			if saveErr := preparation.save(); saveErr != nil {
 				return nil, errors.Join(err, saveErr)
@@ -271,6 +294,7 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 		}
 		var answer struct {
 			Status    string          `json:"status"`
+			Name      string          `json:"name"`
 			Summary   string          `json:"summary"`
 			Questions []Question      `json:"questions"`
 			Setup     []string        `json:"setup"`
@@ -310,7 +334,7 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 		}
 		var resolved *Resolved
 		if problems == nil {
-			plan.Request = input.Request // the worker cannot relax the user's mode or request flags
+			plan.Request, plan.Mode = input.Request, preparation.Mode // the worker cannot relax the user's mode or request flags
 			if revising {
 				carry(plan, gate.Plan)
 				if strings.TrimSpace(plan.Update) == "" {
@@ -345,12 +369,15 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 		if name == "" && revising {
 			name = gate.PlanName
 		}
+		if name == "" {
+			name = planNameFrom(answer.Name)
+		}
 		saved, err := PlanSave(cfg, plan, name)
 		if err != nil {
 			return nil, err
 		}
 		preparation.Name, preparation.Status, preparation.Questions = saved.Name, "READY", nil
-		proposal := &Proposal{Name: saved.Name, Digest: digest(plan), Preparation: preparation.ID}
+		proposal := &Proposal{Name: saved.Name, Digest: digest(plan), Preparation: preparation.ID, Attachments: preparation.Attachments}
 		if previous := loadProposal(saved.Name); previous != nil {
 			proposal.ContextPack = previous.ContextPack // a revision that draws no new map keeps the one it had
 		}
@@ -417,6 +444,7 @@ func (p *Preparation) remember(gate *Gate) error {
 // accepted architecture and interface design, the review base and the process ceilings.
 func carry(plan, current *Plan) {
 	plan.Architecture, plan.BaseRef = current.Architecture, current.BaseRef
+	plan.Mode = cmp.Or(plan.Mode, current.Mode)
 	plan.WriterTimeoutS, plan.ReviewerTimeoutS = current.WriterTimeoutS, current.ReviewerTimeoutS
 	if plan.UI == nil || (current.UI != nil && current.UI.Design != "") {
 		plan.UI = current.UI
@@ -451,6 +479,81 @@ func checkLines(plan *Plan) []string {
 	for _, check := range plan.checksFor(-1) {
 		if !generatedDesignCheck(check) {
 			out = append(out, strings.Join(check.Argv, " "))
+		}
+	}
+	return out
+}
+
+// attach copies the files the user gave into the preparation and returns the new copies. A path may lie
+// anywhere on the machine; a file given again is not copied twice.
+func (p *Preparation) attach(paths []string, dir string) ([]string, error) {
+	var added []string
+	for _, path := range paths {
+		source, err := filepath.Abs(config.ExpandHome(path))
+		if err != nil {
+			return nil, err
+		}
+		info, err := os.Stat(source)
+		switch {
+		case err != nil:
+			return nil, fmt.Errorf("attachment %s: %w", path, err)
+		case !info.Mode().IsRegular():
+			return nil, fmt.Errorf("attachment %s is not a regular file", path)
+		case info.Size() > attachmentLimit:
+			return nil, fmt.Errorf("attachment %s is larger than %d MiB", path, attachmentLimit>>20)
+		}
+		raw, err := os.ReadFile(source)
+		if err != nil {
+			return nil, err
+		}
+		name := filepath.Base(source)
+		target := filepath.Join(dir, name)
+		for index := 2; slices.Contains(p.Attachments, target); index++ {
+			if existing, err := os.ReadFile(target); err == nil && bytes.Equal(existing, raw) {
+				break
+			}
+			target = filepath.Join(dir, fmt.Sprintf("%d-%s", index, name))
+		}
+		if slices.Contains(p.Attachments, target) {
+			continue // the same file again
+		}
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(target, raw, 0o600); err != nil {
+			return nil, err
+		}
+		p.Attachments = append(p.Attachments, target)
+		added = append(added, target)
+	}
+	return added, nil
+}
+
+const attachmentLimit = 20 << 20
+
+// imagesOf are the pictures among some files.
+func imagesOf(paths []string) []string {
+	var out []string
+	for _, path := range paths {
+		if slices.Contains([]string{".png", ".jpg", ".jpeg", ".gif", ".webp"}, strings.ToLower(filepath.Ext(path))) {
+			out = append(out, path)
+		}
+	}
+	return out
+}
+
+// copyAttachments gives a task its own copies of the files its plan was prepared with: a preparation is
+// pruned on its own schedule.
+func copyAttachments(paths []string, dir string) []string {
+	var out []string
+	for _, path := range paths {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		target := filepath.Join(dir, filepath.Base(path))
+		if os.MkdirAll(dir, 0o700) == nil && os.WriteFile(target, raw, 0o600) == nil {
+			out = append(out, target)
 		}
 	}
 	return out

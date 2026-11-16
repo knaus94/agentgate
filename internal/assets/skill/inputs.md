@@ -1,4 +1,30 @@
-# agentgate reference — other inputs
+# Other inputs
+
+## prepare
+
+```json
+{"request": "-m add rate limiting to the export endpoint", "name": "export-limits", "mode": "heavy",
+ "context": ["docs/exports.md"], "attachments": ["/home/me/Downloads/brief.pdf", "/home/me/shots/limits.png"],
+ "notes": "Keep the public response shape", "answers": {"q1": "per account"}}
+```
+
+The first call may be the request text itself, as the user typed it, instead of a JSON object. `request`
+starts a preparation; later calls may leave it out and continue the same worker. `BLOCKED` returns
+`questions: [{id, question, options, recommended}]`: ask the user, then send `answers`. `mode` is kept in the
+plan, stronger than a flag (the `mode` page). `attachments` are files the user gave, anywhere on the machine:
+they are copied, shown to the worker — pictures as pictures — and carried into the task for its writers and
+reviewers. With an active task the worker revises that task's plan; apply the result with `amend --plan
+<name>`. `fresh: true` abandons the open preparation and explores again.
+
+## run
+
+```json
+{"visual": {"url": "http://localhost:4200", "origins": ["http://localhost:4200"]}, "recheck": false, "reviewer_timeout_s": 1800}
+```
+
+All optional. `recheck: true` asks for a fresh judgement of unchanged evidence; it bypasses no condition.
+When a check fails for a cause that may lie outside the code (a stand, a service), `run` runs the failing
+checks again; nothing else is repeated.
 
 ## architecture (heavy, ultra)
 
@@ -56,12 +82,13 @@ stand needs the user's approval of the exact commands. A layout or type check is
 ## check
 
 `{"argv": ["yarn", "nx", "test", "orders"]}` or `agentgate check --all`. Only commands the plan declares; to
-add one, `amend` the plan.
+add one, `amend {"update": "…", "checks": [{"add": [["yarn", "nx", "test", "orders"]]}]}`. The answer's
+`result` holds the receipts; exit code 2 when one failed.
 
 ## tell
 
 `{"message": "The response shape is {items, next}"}` appends a note to the board the writers of the task share.
-It is a note, not an interrupt.
+It reaches writers that are running; it is a note, not an interrupt. Work for a writer is `decide {work}`.
 
 ## pause
 

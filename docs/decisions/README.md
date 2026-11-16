@@ -17,6 +17,7 @@ record's evidence stops being true, the decision should be revisited rather than
 | [0009](0009-review-economics.md) | Review economics: one patch, collapsed generated output, criteria reassessed apart from code | accepted |
 | [0010](0010-state-format-and-migration.md) | State format 2 and the migration of saved tasks | accepted |
 | [0011](0011-kept-and-rejected.md) | What was kept, and what was considered and rejected | accepted |
+| [0012](0012-the-lead-gives-work.md) | 0.17: the lead gives work; a need says how it is settled; the pages are a skill | accepted |
 
 ## Method
 

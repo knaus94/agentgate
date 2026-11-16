@@ -1,4 +1,4 @@
-# agentgate reference — isolated tasks
+# Isolated tasks
 
 With `-w` in the request, with `worktree.default` in the configuration, or for a plan of several stages when
 the repository says how to prepare a worktree, the task works in its own git worktree on its own branch,
@@ -18,10 +18,10 @@ created from the checkout's `HEAD` when the task starts. The flow is the same, w
   | `apply` (default) | the change appears in the checkout, uncommitted |
   | `commit` | the same, committed on the current branch with your `message`, in the repository's convention |
   | `branch` | the checkout is not touched; the task's branch is kept for a pull request |
-  | `drop` | the work is thrown away; possible at any step |
+  | `drop` | the work is thrown away; possible at any step, and so is the command `drop` |
 
 - If the checkout moved on, `land` merges it into the worktree first. It may answer `landed: false` with the
-  task reopened: follow its `needs`. Conflict markers go back to the writers; `decide {brief}` says how the two
+  task reopened: follow its `needs`. Conflict markers go back to the writers; `decide {work}` says how the two
   changes combine. Then `run`, and `land` again.
 - `land` refuses when the user has uncommitted edits in the files it would write. Tell them; do not stash or
   discard anything of theirs.

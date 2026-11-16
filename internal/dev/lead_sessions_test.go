@@ -113,7 +113,7 @@ func TestARequirementSentAsWorkIsNotAStall(t *testing.T) {
 					resolutions = append(resolutions, map[string]any{"id": accepted.(map[string]any)["id"], "resolved": true, "evidence": "fixed"})
 				}
 				report["resolutions"] = resolutions
-				quality.Requirements[0].Status, quality.Requirements[0].Reason = "partial", "the foreign owner is not exercised"
+				quality.Requirements[0].Status, quality.Requirements[0].Cause, quality.Requirements[0].Reason = "partial", "proof", "the foreign owner is not exercised"
 			}
 			reports = append(reports, report)
 		}
@@ -125,7 +125,7 @@ func TestARequirementSentAsWorkIsNotAStall(t *testing.T) {
 		t.Fatalf("the criterion is unmet after a correction that changed nothing: %v", waiting)
 	}
 	writers := f.count("writer")
-	sent := f.decide(DecideInput{Requirements: []CriterionDecision{{ID: "R1", Action: "fix", Note: "Add the foreign owner"}}})
+	sent := f.decide(DecideInput{Work: []WorkOrder{{Stream: "core", Requirement: "R1", Note: "Add the foreign owner"}}})
 	if slices.Contains(needs(sent), "stall") || f.count("writer") != writers+1 {
 		t.Fatalf("work the lead sends is given to the writer, never read as a stalled correction: %v", sent)
 	}
@@ -316,7 +316,7 @@ func TestAnAmendmentLeavesNoInstructionsInThePlan(t *testing.T) {
 	revised.Update, revised.Rework = "the value is agreed", []string{"core"}
 	f.amend(revised)
 	shown := asMap(f.do("show", func() (any, error) { return Show(f.cfg, Current(), "plan") }))
-	plan := shown["plan"].(map[string]any)
+	plan := resultOf(shown)["plan"].(map[string]any)
 	revisions := Current().Revisions
 	last := revisions[len(revisions)-1]
 	if plan["update"] != nil || plan["rework"] != nil || last.Reason != "the value is agreed" || !slices.Equal(last.Rework, []string{"core"}) {
@@ -333,12 +333,12 @@ func TestTheStopHookSaysWhatWasRefused(t *testing.T) {
 		return "", nil
 	}
 	f.start(f.plan("-m implement"))
-	f.fails("decide", "needs a known id", func() (any, error) {
+	f.fails("decide", "is not a finding of this task", func() (any, error) {
 		return Decide(f.cfg, Current(), DecideInput{Findings: []Disposition{{ID: "nope", Decision: "accepted", Evidence: "e"}}})
 	})
 	hook := StopHook(Current().Cwd, "fixture-session")
 	reason, _ := hook["reason"].(string)
-	if hook["decision"] != "block" || !strings.Contains(reason, "`decide`, was refused: finding \"nope\" needs a known id") || !strings.Contains(reason, "It needs: answer") {
+	if hook["decision"] != "block" || !strings.Contains(reason, "`decide`, was refused: finding \"nope\" is not a finding of this task") || !strings.Contains(reason, "It needs: answer") {
 		t.Fatalf("the hook names the refusal the lead may have missed and what the task needs: %q", reason)
 	}
 }

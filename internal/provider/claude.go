@@ -67,7 +67,7 @@ func runClaude(call Call) (Result, error) {
 		argv = append(argv, "--json-schema", string(schema))
 	}
 	if err := execute(call, argv, workerEnvironment(call, "CLAUDE_CONFIG_DIR="+home), "events.jsonl"); err != nil {
-		return Result{}, err
+		return Result{Session: startedSession(call, "session_id")}, err
 	}
 	type outcome struct {
 		Type       string                     `json:"type"`

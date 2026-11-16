@@ -91,7 +91,7 @@ agentgate task start --file plan.json
 | Подготовка | `terra:medium` | `terra:medium` | `terra:medium` | `terra:medium` |
 | Архитектура | план | план | `astra:high` + `sol:xhigh` | `astra:max` + `sol:max`, затем перекрёстная критика |
 | Писатели | `sol:medium` | `astra:medium` | `astra:high` | `astra:high` |
-| Ревью | лид читает патч | одна полоса, `sol:high`: корректность, архитектура, простота | `sol:xhigh` архитектура и простота + `sol:xhigh` корректность | `sol:xhigh` архитектура и простота + `sol:max` и `terra:max` корректность + `sol:xhigh` безопасность |
+| Ревью | одна полоса, `astra:medium`: корректность, архитектура, простота | одна полоса, `sol:high`: корректность, архитектура, простота | `sol:xhigh` архитектура и простота + `sol:xhigh` корректность | `sol:xhigh` архитектура и простота + `sol:max` и `terra:max` корректность + `sol:xhigh` безопасность |
 | Потолок усилия | `high` | `high` | `max` | `max` |
 
 Остальные роли настроены на `sol:medium` для консультаций, `astra:medium` для UI-дизайна и `terra:high` для

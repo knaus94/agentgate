@@ -4,6 +4,65 @@ This record distinguishes live integrations from controlled provider fixtures an
 model quality, arbitrary specification size or every possible execution environment. It has two parts: what
 was run for the 0.16.0 source, and the release validation of 0.14.0, which is kept as it was written.
 
+## 0.17.0
+
+Checked on 2026-11-16 against the source based on `e5ef01f` (0.16.2). What changed and why is in
+[decision 0012](decisions/0012-the-lead-gives-work.md) and the [brief](briefs/0.17-lead-experience.md).
+
+### Automated checks
+
+| Check | Actual result |
+|---|---|
+| `make check`: `gofmt`, `go vet ./...`, `go test -race ./...`, Node core suite | PASS |
+| `go test -count=1 -json ./...` | PASS: 221 top-level tests, zero failures |
+| Node core suite | PASS: 19 tests |
+| `make design-browser` | not run: the design kit did not change in this release |
+
+Four scenario tests are new, one per action a lead was missing (`internal/dev/lead_actions_test.go`): work
+given to the writer it names, with missing code going to its writer without the lead (B1); named operations of
+`amend` (B2); a note of a finished task fixed in it (B5); `drop` that never overwrites someone else's edit, and
+`forget` (B6). Existing tests changed with the protocol they describe: `decide` inputs became `work`; the
+scripted reviewers give a `cause` for every unmet requirement; the fixture configures light mode with
+`review: []`, which is how the lead's own review is configured now; the data of `land`, `show`, `stop` and a
+review task's findings moved under `result` and `outcome`; substitutions at `done` are read from the receipt;
+`install` also installs the lead's pages; a refusal names the valid finding ids.
+
+The stop of a silent writer was checked once with a throwaway test of `ops.RunWatched` that was not kept: a
+child that wrote nothing for the idle limit (1 s in the check) was stopped after 1 s, and a child that kept
+writing ran to its end.
+
+### Dry run: the real binary with recorded worker answers
+
+The same harness as for 0.16.2: no model was called; the release binary ran with the real Bubblewrap sandbox,
+git and worktrees, an isolated home and the user's own routes, and one stand-in for both CLIs answered with
+answers recorded from real worker sessions. It was extended for this release: the stand-in records pictures
+passed with `--image`, gives a reviewer's `cause`, writes the work of a correction, and reports a P2 note;
+four scenarios are new.
+
+| Scenario | 0.17.0 | 0.16.2, same script |
+|---|---|---|
+| A request that repeats `/dev -m --grill`, with a picture from `~/Downloads`: two preparation rounds, `start`, the receipt, the Stop hook, `install`, `reference needs` | 17 of 17 | 0 of 1, then stopped: `attachments` unknown |
+| A blocked stream beside an independent one; `amend` adds the stream it waits for; `answer` | 14 of 14 | 5 of 7, then stopped: the need carries no input; the plan is not under `result` |
+| A P1 finding, a correction that changed nothing, then code missing for a criterion | 4 of 4: the criterion went to its writer without the lead | 2 of 4: the lead is asked |
+| Proof missing for a criterion: `show review`, an input of 0.16, `decide {work}` | 10 of 10 | 2 of 4, then stopped: no cause, no `show review` |
+| A writer needs a file: a wrong stream, then `amend {scope, checks}`, `answer`, `status` | 11 of 11 | 4 of 6, then stopped: `scope` unknown |
+| A P2 note at `done`, accepted by the lead | 6 of 6 | 2 of 4, then stopped: no `notes` |
+| `drop` refused over the user's own edit, `drop`, `forget` | 10 of 10 | 4 of 6, then stopped: no `drop` |
+| An isolated task whose check needs a local service, landed with a message | 20 of 20 | 16 of 20: the behaviour holds, the answers have the earlier shape |
+| Two streams in one directory and a generated migration directory | 6 of 6 | 5 of 6: the behaviour holds, the answer has the earlier shape |
+
+98 of 98 promises held on 0.17.0, in 7 seconds; the same script holds 40 of 58 on 0.16.2.
+
+### Not done
+
+- No run on a real model: the user asked not to spend model quota. What a real reviewer does with `cause`,
+  `open_notes` and a picture, and what a real preparation worker names a plan, is covered only by the prompts
+  and the stand-in.
+- Of a running writer's progress, only its silence (`quiet_s`) was seen, in the answer of `stop` during a real
+  sandboxed process in the test suite; the elapsed time and the last event in `status` were not checked.
+- Whether the pages and the answers reduce a lead's searching is measured in the user's next working sessions
+  of the same kind, from their transcripts.
+
 ## 0.16.2
 
 Checked on 2026-11-16 against the source based on `b1112f7` (0.16.1). The defects come from the transcripts of

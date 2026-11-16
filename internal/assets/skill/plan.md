@@ -1,4 +1,4 @@
-# agentgate reference — the plan
+# The plan
 
 A plan is the brief, the criteria and the stages that deliver them. The preparation worker writes it; write
 one yourself only for an exact change whose files you already know.
@@ -54,7 +54,8 @@ A plan has `streams` or `stages`, not both. Validation reports every problem at 
 
 ## Fields
 
-- **`assessment`** is required when the request has no mode flag. `size`: `trivial`, `ordinary`, `complex`.
+- **`mode`**: `light`, `medium`, `heavy` or `ultra`, stronger than a flag in the request; the `mode` page.
+- **`assessment`** is required when neither the plan nor the request sets a mode. `size`: `trivial`, `ordinary`, `complex`.
   `risks`: `authorization`, `security`, `money`, `data-integrity`, `concurrency`, `migration`,
   `public-contract` — only what the change really touches. `uncertainty`: `low` or `material`. A stage may
   carry its own; the mode is computed per stage.
@@ -98,11 +99,29 @@ refused with the advice to stage it; `--single` in the request allows it, `--sta
 
 ## Amending the plan of an active task
 
-`agentgate amend` takes the complete revised plan with
+`agentgate amend` takes named operations on the present plan, or the complete revised plan. Both carry
+`update` — what changed and why — and the same rules hold for both.
 
 ```json
-{"update": "What changed and why", "authorized": "", "rework": ["api"]}
+{"update": "The generator also writes the client; R3 is completed by the page stage",
+ "scope": [{"stream": "api", "add": ["src/generated/"]}],
+ "checks": [{"stage": "page", "add": [["yarn", "nx", "typecheck", "client"]], "remove": ["e2e"]}],
+ "requirements": [{"id": "R3", "stage": "page"}, {"id": "R7", "text": "Expired claims are refused", "method": "check"}],
+ "timeouts": {"writer_s": 5400, "reviewer_s": 2400},
+ "design": [{"design": "checkout", "set": {"root": "main [data-checkout]"}}, {"add": {"figma": "https://…", "stream": "web"}}],
+ "mode": "heavy",
+ "authorized": "", "rework": ["api"]}
 ```
+
+- `scope`: files a stream gets; `stage` defaults to the present one.
+- `checks`: added to the plan's own list (every stage runs it) or to a named stage; `remove` names a check by
+  its id or by a part of its command only it contains.
+- `requirements`: a new one (`text`, optionally `method`; due at the last stage unless `stage` says), a
+  changed one (`text`: needs `authorized`), or one moved: `stage` is where it becomes due — that stage covers
+  it and no stage after it does.
+- `design`: `add` an entry, or name one (`design`: its screen, name or figma link) with `set` for the fields
+  that change, or `remove: true`.
+- The complete plan: `agentgate show plan` prints it under `result.plan`; send it back changed, with `update`.
 
 - Accepted stages are frozen, and so is every requirement an accepted stage covers.
 - A requirement may be added, or moved to the stage that completes it. Changing or removing one needs

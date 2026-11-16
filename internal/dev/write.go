@@ -29,6 +29,14 @@ var writerSchema = object(map[string]any{"status": enum("COMPLETED", "BLOCKED"),
 	"blockers": list(text), "handoff": text, "deviations": list(text),
 	"disputes": list(object(map[string]any{"id": text, "evidence": text}))})
 
+// attachmentDirs is what a worker must be able to read to open the files the user gave.
+func (g *Gate) attachmentDirs() []string {
+	if len(g.Attachments) == 0 {
+		return nil
+	}
+	return []string{filepath.Dir(g.Attachments[0])}
+}
+
 // board is the shared directory where writers of one task leave notes for each other and read the lead's.
 func (g *Gate) board() string { return filepath.Join(g.dir(), "board") }
 
@@ -221,6 +229,7 @@ func (g *Gate) write(cfg *config.Config) (bool, int, int, error) {
 		g.Substitutions = append(g.Substitutions, subs.list...)
 		subs.list = nil
 		ran += len(records)
+		g.recordLeft()
 		if stopped, err := g.settle(records, firstError(errs)); stopped && err != nil {
 			return false, ran, completed, err
 		}
@@ -278,7 +287,11 @@ func (g *Gate) settle(records []*Writer, failure error) (bool, error) {
 // prepare creates the record of a new writer process, or reuses the session of the stream's previous writer:
 // the writer that wrote the code corrects it with its context intact.
 func (g *Gate) prepare(cfg *config.Config, stream Stream) *Writer {
-	route := writerRoute(cfg, g.Mode, stream, g.Round.Boost)
+	boost := g.Round.Boost
+	if slices.ContainsFunc(g.Round.Work, func(item WorkOrder) bool { return item.Stream == stream.Name && item.Escalate }) {
+		boost++ // the lead asked for more effort on this stream
+	}
+	route := writerRoute(cfg, g.Mode, stream, boost)
 	record := &Writer{Stream: stream.Name, Route: route, Status: "RUNNING", Summary: "writer running", Blockers: []string{}, Batch: g.Round.Batch}
 	previous := g.previousWriter(stream.Name)
 	if previous != nil && previous.Session != "" && (previous.Route.Model == route.Model || g.Round.Correction && permittedContinuation(cfg, route, previous.Route)) {
@@ -336,6 +349,9 @@ func (g *Gate) assignment(stream Stream) map[string]any {
 	if g.amendment() != "" {
 		packet["update"] = g.amendment()
 	}
+	if len(g.Attachments) > 0 {
+		packet["attachments"] = g.Attachments
+	}
 	if previous := g.lastReport(stream.Name); previous != nil {
 		packet["your_previous_report"] = map[string]any{"status": previous.Status, "summary": previous.Summary,
 			"blockers": previous.Blockers, "error": previous.Error}
@@ -347,10 +363,16 @@ func (g *Gate) assignment(stream Stream) map[string]any {
 				mine = append(mine, finding)
 			}
 		}
+		work := []string{}
+		for _, item := range g.Round.Work {
+			if item.Stream == stream.Name {
+				work = append(work, item.Note)
+			}
+		}
 		packet["correction"] = map[string]any{"findings": mine, "failing_checks": g.Round.Failures, "remedy": g.Round.Remedy,
-			"upheld": g.upheld(mine),
-			"rule": "Verify each finding against the code and your brief. Fix it with the stated remedy, or, when it is wrong, leave the code " +
-				"and return a dispute {id, evidence}: the reviewer answers it. Make the failing checks pass; preserve everything else."}
+			"upheld": g.upheld(mine), "work": work,
+			"rule": "Do the lead's `work`. Verify each finding against the code and your brief. Fix it with the stated remedy, or, when it is wrong, " +
+				"leave the code and return a dispute {id, evidence}: the reviewer answers it. Make the failing checks pass; preserve everything else."}
 		var conflicts []string
 		patterns := compilePatterns(stream.Files)
 		for _, file := range g.Round.Conflicts {
@@ -379,8 +401,15 @@ func (g *Gate) upheld(findings []Finding) []string {
 	return out
 }
 
-// target is the stream a finding goes to: the owner of its file, or of a file the lead named for it.
+// target is the stream a finding goes to: the one the lead named, the owner of its file, or of a file the lead
+// named for it.
 func (g *Gate) target(finding Finding) *Stream {
+	if name := g.Dispositions[finding.ID].Stream; name != "" {
+		streams := g.streams()
+		if index := slices.IndexFunc(streams, func(stream Stream) bool { return stream.Name == name }); index >= 0 {
+			return &streams[index]
+		}
+	}
 	if stream := g.owner(finding.Path); stream != nil {
 		return stream
 	}
@@ -420,18 +449,25 @@ func (g *Gate) runWriter(cfg *config.Config, stream Stream, record *Writer, answ
 			prompt += "\nYour stream implements a design; `design` in the assignment names its package.\n" + skill
 		}
 	}
+	previous := g.lastReport(stream.Name)
 	if answer != "" {
 		prompt = "The coordinator answers your blockers:\n" + answer + "\n\nContinue the same assignment (refreshed at " + path +
 			") and return the same JSON schema.\n"
+	} else if record.Session != "" && previous != nil && previous.Batch == record.Batch && (previous.Status == "FAILED" || previous.Status == "CANCELLED") {
+		prompt = "Your work on this stream was stopped (" + oneLine(previous.Error) + "). What you changed is still in the checkout. " +
+			"Continue the same assignment (refreshed at " + path + ") from where you stopped, and return the same JSON schema.\n"
 	} else if record.Session != "" {
 		prompt = "A new assignment for the stream you already worked on is at " + path +
 			". Read it, do exactly what it adds, and return the same JSON schema.\n"
 	}
-	timeout, _ := timeoutSeconds(g.Plan.WriterTimeoutS, cfg.Modes[g.Mode].WriterTimeoutS)
+	// A writer that keeps working is not cut off by the clock: the ceiling is generous, and a writer that goes
+	// silent is what gets stopped.
+	timeout, _ := timeoutSeconds(g.Plan.WriterTimeoutS, cfg.Modes[g.Mode].WriterTimeoutS, writerCeiling)
 	tools, toolDirs, toolNote := workerTools(cfg, "writer")
+	reads := append(append(append(packDirs(g.ContextPack), filepath.Join(g.dir(), "checks")), g.designReadDirs(stream.Name)...), g.attachmentDirs()...)
 	result, used, err := subs.invoke(cfg, provider.Call{Route: record.Route, Prompt: prompt + toolNote, Dir: record.Dir,
-		Schema: writerSchema, Timeout: seconds(timeout), Writer: true, Persist: true, Resume: record.Session, MCP: tools,
-		Writable: append([]string{g.board()}, toolDirs...), ReadDirs: append(append(packDirs(g.ContextPack), filepath.Join(g.dir(), "checks")), g.designReadDirs(stream.Name)...)}, nil)
+		Schema: writerSchema, Timeout: seconds(timeout), Idle: writerIdle, Writer: true, Persist: true, Resume: record.Session, MCP: tools,
+		Writable: append([]string{g.board()}, toolDirs...), ReadDirs: reads}, nil)
 	if used.Model != "" {
 		mu.Lock()
 		g.AuthorModels = append(g.AuthorModels, record.Route.Model, used.Model)
@@ -514,6 +550,7 @@ func (g *Gate) answer(cfg *config.Config, input AnswerInput) error {
 	subs, mu := &substitutions{}, &sync.Mutex{}
 	failure := g.runWriter(cfg, g.Round.Streams[index], record, input.Answer, subs, mu)
 	g.Substitutions = append(g.Substitutions, subs.list...)
+	g.recordLeft()
 	_, err := g.settle([]*Writer{record}, failure)
 	return err
 }
@@ -525,7 +562,7 @@ type TellInput struct {
 
 // Tell appends a note to the board without taking the operation lock, so it reaches writers that are still running.
 // Writers read the board at natural boundaries; this is a note, not an interrupt.
-func Tell(gate *Gate, input TellInput) (any, error) {
+func Tell(gate *Gate, input TellInput) (map[string]any, error) {
 	if strings.TrimSpace(input.Message) == "" {
 		return nil, errors.New("the message is empty")
 	}

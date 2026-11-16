@@ -50,7 +50,7 @@ func TestAnUnprovenRequirementKeepsTheTaskOpenAndIsReassessedCheaply(t *testing.
 	plan.Requirements = []Requirement{{ID: "R1", Text: "the changed line is verified", Method: "check"}}
 	plan.Checks[0].Kind = "test"
 	changeQuality(f, func(report *QualityReport) {
-		report.Requirements[0].Status = "partial"
+		report.Requirements[0].Status, report.Requirements[0].Cause = "partial", "proof"
 		report.Requirements[0].Reason = "the command does not exercise the required behavior"
 	})
 	// As a live reviewer did: it finds no defect in the code and still marks its axis as owing something.
@@ -109,7 +109,7 @@ func TestAnUnmetRequirementCanBeSentToTheWritersAsWork(t *testing.T) {
 	plan.Requirements = []Requirement{{ID: "R1", Text: "the line is corrected"}}
 	changeQuality(f, func(report *QualityReport) {
 		if fileText(t, "a.txt") != "corrected\n" {
-			report.Requirements[0].Status, report.Requirements[0].Reason = "missing", "the line still holds the old value"
+			report.Requirements[0].Status, report.Requirements[0].Cause, report.Requirements[0].Reason = "missing", "proof", "the line still holds the old value"
 		}
 	})
 	reviewer := f.model
@@ -126,9 +126,9 @@ func TestAnUnmetRequirementCanBeSentToTheWritersAsWork(t *testing.T) {
 	}
 	f.start(plan)
 	f.fails("decide", "is not an unmet requirement", func() (any, error) {
-		return Decide(f.cfg, Current(), DecideInput{Requirements: []CriterionDecision{{ID: "R9", Action: "fix"}}})
+		return Decide(f.cfg, Current(), DecideInput{Work: []WorkOrder{{Stream: "core", Requirement: "R9", Note: "fix it"}}})
 	})
-	done := f.decide(DecideInput{Requirements: []CriterionDecision{{ID: "R1", Action: "fix", Note: "Use the corrected value"}}})
+	done := f.decide(DecideInput{Work: []WorkOrder{{Stream: "core", Requirement: "R1", Note: "Use the corrected value"}}})
 	if done["step"] != StepDone || f.count("writer") != 2 {
 		t.Fatalf("missing code goes to the writer and the criterion is judged again: %v", done)
 	}

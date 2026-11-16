@@ -44,7 +44,7 @@ of several stages each stage may carry its own assessment and gets its own mode.
 | Blocker round | — | — | optional, once | optional, once |
 | Backend writer | `sol:medium` | `opus:medium` | `opus:high` | `opus:xhigh` |
 | Frontend writer | `sonnet:medium` | `opus:medium` | `opus:high` | `opus:xhigh` |
-| Review lanes | the lead reads the patch | one lane, `astra:medium`: correctness, architecture, simplicity | architecture+simplicity `fable:high` ∥ correctness `astra:high` | architecture+simplicity `fable:high` ∥ correctness `fable:xhigh` ∥ correctness `astra:xhigh` ∥ security `astra:high` |
+| Review lanes | one lane, `astra:medium`: correctness, architecture, simplicity | one lane, `astra:medium`: correctness, architecture, simplicity | architecture+simplicity `fable:high` ∥ correctness `astra:high` | architecture+simplicity `fable:high` ∥ correctness `fable:xhigh` ∥ correctness `astra:xhigh` ∥ security `astra:high` |
 | Effort ceiling | `high` | `high` | `xhigh` | `max` |
 | Blocking severities | P0, P1 | P0, P1 | P0, P1, P2 | P0, P1, P2 |
 | Declared checks | optional | at least one per stage, or a stated `checks_waiver` | the same | the same |
@@ -108,4 +108,4 @@ agentgate config set modes.heavy.blocking '["P0","P1"]'
 agentgate modes
 ```
 
-Leave `review` empty (`[]`) and the lead reviews the patch itself, as in light.
+Leave `review` empty (`[]`) and the lead reviews the patch itself; light has its own reviewer since 0.17.

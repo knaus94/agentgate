@@ -308,6 +308,12 @@ func (g *Gate) verify(cfg *config.Config, input RunInput, did *[]string) error {
 	if len(g.Corrections) > 0 {
 		packet["correction"] = g.Corrections[len(g.Corrections)-1]
 	}
+	if len(g.Reviews) > 0 {
+		packet["open_notes"] = g.openNotes(cfg)
+	}
+	if len(g.Attachments) > 0 {
+		packet["attachments"] = g.Attachments
+	}
 	subs := &substitutions{}
 	specs, skip, err := g.lanes(cfg, subs)
 	if err != nil {
@@ -511,7 +517,8 @@ func (g *Gate) reassess(cfg *config.Config, quality *qualityInputs, input RunInp
 	route.Effort, route.SubstitutedFrom = config.Lower(route.Effort), ""
 	prompt := "The criteria you judged, or the evidence for them, changed since your review. The code did not change: do not review it again. " +
 		"Read " + path + " and assess every requirement and rule in quality against the code you already read and the current receipts. " +
-		"Return JSON {quality: {requirements, rules}} with the same rules as before: every id exactly once, evidence for every verdict.\n"
+		"Return JSON {quality: {requirements, rules}} with the same rules as before: every id exactly once, evidence for every verdict, " +
+		"and a cause (code, proof or plan) for every requirement that is not verified.\n"
 	subs := &substitutions{}
 	designDirs := []string{}
 	if quality.Browser != nil {
@@ -544,5 +551,6 @@ func (g *Gate) reassess(cfg *config.Config, quality *qualityInputs, input RunInp
 	renewed.QualityDigest, renewed.Dir = quality.fingerprint(), dir
 	g.Reviews = append(g.Reviews, renewed)
 	g.settleDemands()
+	g.admitCriteria()
 	return true, nil
 }

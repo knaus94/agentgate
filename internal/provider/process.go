@@ -78,7 +78,8 @@ func execute(call Call, argv []string, env []string, stdoutName string) error {
 		return err
 	}
 	var receiptErr error
-	err = ops.RunStarted(cmd, call.Timeout, func() {
+	limits := ops.Limits{Timeout: call.Timeout, Idle: call.Idle, Activity: filepath.Join(call.Dir, stdoutName)}
+	err = ops.RunWatched(cmd, limits, func() {
 		receiptErr = record(call, argv, cmd, "starting", started)
 		if receiptErr != nil {
 			_ = cmd.Process.Kill()

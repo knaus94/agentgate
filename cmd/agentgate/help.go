@@ -41,22 +41,24 @@ var commandSpecs = []commandSpec{
 	{name: "start", group: "Lead protocol", summary: "Open a task from a plan and run it", syntax: "start --plan <name> | --file <path>|- [--implement]", input: true, plan: true, flags: []string{"implement"}, example: "agentgate start --plan wallet"},
 	{name: "run", group: "Lead protocol", summary: "Take every determined step — write, check, review, correct, accept — until a person is needed", syntax: "run [--file <path>|-]", input: true, example: "agentgate run"},
 	{name: "answer", group: "Lead protocol", summary: "Answer a blocked writer in its own session and run on", syntax: "answer --file <path>|-", input: true},
-	{name: "decide", group: "Lead protocol", summary: "Rule on findings, give the lead's own review, send an unmet criterion to the writers; then run on", syntax: "decide --file <path>|-", input: true},
-	{name: "amend", group: "Lead protocol", summary: "Replace the plan of the active task, with a reason", syntax: "amend --file <path>|- | --plan <name>", input: true, plan: true},
-	{name: "show", group: "Lead protocol", summary: "Print one part of the task in full", syntax: "show [findings|plan|stage|checks|report|all]", example: "agentgate show findings"},
+	{name: "decide", group: "Lead protocol", summary: "Rule on findings, give the lead's own review, give work to writers; then run on", syntax: "decide --file <path>|-", input: true},
+	{name: "amend", group: "Lead protocol", summary: "Change the plan of the active task: named operations or the complete plan, with a reason", syntax: "amend --file <path>|- | --plan <name>", input: true, plan: true},
+	{name: "show", group: "Lead protocol", summary: "Print one part of the task in full", syntax: "show [findings|plan|stage|checks|review|architecture|receipt|report|all]", example: "agentgate show review"},
 	{name: "tell", group: "Lead protocol", summary: "Leave a note on the writers' shared board", syntax: "tell --file <path>|-", input: true},
 	{name: "check", group: "Lead protocol", summary: "Run declared verification checks", syntax: "check --all | --file <path>|-", input: true, flags: []string{"all"}},
 	{name: "visual", group: "Lead protocol", summary: "Record the browser choice or a skip, or run a browser pass", syntax: "visual --file <path>|-", input: true},
 	{name: "land", group: "Lead protocol", summary: "Apply or drop a completed isolated worktree", syntax: "land [--file <path>|-]", input: true},
 	{name: "pause", group: "Lead protocol", summary: "Park the task with the true reason", syntax: "pause --file <path>|-", input: true},
 	{name: "resume", group: "Lead protocol", summary: "Lift a pause", syntax: "resume"},
+	{name: "drop", group: "Lead protocol", summary: "End the task and take back what it changed, on the user's word", syntax: "drop --file <path>|-", input: true},
+	{name: "forget", group: "Lead protocol", summary: "Remove a finished or dropped task from the record, on the user's word", syntax: "forget --file <path>|-", input: true},
 	{name: "guide", group: "Reference", summary: "Print the lead's workflow guide", syntax: "guide"},
-	{name: "reference", group: "Reference", summary: "Print the protocol: commands and inputs, or one topic", syntax: "reference [plan|inputs|config|design|isolation]"},
+	{name: "reference", group: "Reference", summary: "Print the protocol: commands and inputs, or one page", syntax: "reference [page]", example: "agentgate reference needs"},
 	{name: "hook", group: "Reference", summary: "Read a Claude Stop-hook payload from stdin", syntax: "hook"},
 	{name: "version", group: "Reference", summary: "Print the installed version", syntax: "version"},
 }
 
-var taskCommands = []string{"status", "show", "watch", "stop", "parse", "preview", "prepare", "route", "architecture", "design", "consult", "start", "run", "answer", "decide", "amend", "tell", "check", "visual", "land", "pause", "resume"}
+var taskCommands = []string{"status", "show", "watch", "stop", "parse", "preview", "prepare", "route", "architecture", "design", "consult", "start", "run", "answer", "decide", "amend", "tell", "check", "visual", "land", "pause", "resume", "drop", "forget"}
 var setupCommands = []string{"install", "doctor", "update", "config", "accounts", "modes"}
 
 func command(name string) (commandSpec, bool) {
@@ -95,7 +97,7 @@ func rootHelp() string {
 	out.WriteString("Use agentgate help <command> for syntax and examples. Every command accepts --help.\n")
 	out.WriteString("Groups: task <command>, setup <command>. Existing flat commands remain supported.\n")
 	out.WriteString("JSON inputs: --file <path>, --file - (stdin), or --plan <name> for saved plans.\n")
-	out.WriteString("JSON results go to stdout; errors go to stderr. Exit 0: success, 1: command error or a\ncommand refused in the task's present state (the answer says what is possible), 2: failed\nchecks. Design tools document their own exit codes.\n")
+	out.WriteString("JSON results go to stdout. A command about the task answers with the task as it is, also when it\nis refused (`refused`) or fails (`error`); other errors go to stderr. Exit 0: success, 1: a command\nrefused or failed, 2: failed checks. Design tools document their own exit codes.\n")
 	return out.String()
 }
 

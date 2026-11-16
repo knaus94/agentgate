@@ -70,6 +70,21 @@ func scanEvents(path string, visit func([]byte)) error {
 	return scanner.Err()
 }
 
+// startedSession is the session a run had begun, read from its event stream: the run being continued, or the
+// first event that names one.
+func startedSession(call Call, field string) string {
+	session := call.Resume
+	_ = scanEvents(filepath.Join(call.Dir, "events.jsonl"), func(line []byte) {
+		var event map[string]any
+		if session == "" && json.Unmarshal(line, &event) == nil {
+			if value, ok := event[field].(string); ok {
+				session = value
+			}
+		}
+	})
+	return session
+}
+
 func tail(raw []byte, n int) []byte {
 	if len(raw) > n {
 		return raw[len(raw)-n:]

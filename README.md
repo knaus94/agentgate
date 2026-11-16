@@ -18,7 +18,7 @@ The archive includes source, documentation, SHA-256 checksums, and binaries for 
 After extracting it:
 
 ```sh
-cd agentgate-0.16.2
+cd agentgate-0.17.0
 sh scripts/install-local.sh --lead both
 agentgate setup doctor
 agentgate config validate
@@ -123,12 +123,12 @@ Pipes, redirected input and `TERM=dumb` produce one snapshot instead of an inter
 
 | Mode | Typical scope | Architecture | Review | Blocking severities |
 |---|---|---|---|---|
-| light `-l` | Small, low-risk change | Lead | Lead | P0–P1 |
+| light `-l` | Small, low-risk change | Lead | One independent reviewer, `astra:medium` | P0–P1 |
 | medium `-m` | Ordinary implementation | The plan | One independent reviewer: correctness, architecture, simplicity | P0–P1 |
 | heavy `-h` | Named risk or complex uncertain work | Two independent proposals | Separate architecture and correctness lanes | P0–P2 |
 | ultra `-x` | Severe or irreversible risk | Proposals and cross-critique | Additional correctness and security lanes | P0–P2 |
 
-With no flag, the recorded assessment selects a mode deterministically. A flag takes precedence. The mixed
+With no flag, the recorded assessment selects a mode deterministically. A flag, or `mode` in the plan, takes precedence. The mixed
 profile keeps implementation models separate from the Fable/Astra review routes; a Codex-only profile is
 also included. These are editable starting configurations, not universal performance rankings.
 [Routing policy](docs/model-selection.md) · [Mode rules](docs/modes.md).
@@ -195,5 +195,5 @@ archive and any environment limits.
 [Worktrees](docs/isolation.md) · [Migration](docs/migration.md) · [Design decisions](docs/decisions/README.md) ·
 [Research decisions](docs/research.md) · [Releasing](docs/releasing.md).
 
-`agentgate guide` and `agentgate reference` print the lead workflow and JSON protocol installed with this
-exact binary. License: [MIT](LICENSE).
+`agentgate guide` and `agentgate reference <page>` print the lead workflow and the lead's pages installed with
+this exact binary; `agentgate install` also installs the pages as the skill `agentgate`. License: [MIT](LICENSE).

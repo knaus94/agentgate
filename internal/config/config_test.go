@@ -59,8 +59,8 @@ func TestBuiltInTableIsValidAndComplete(t *testing.T) {
 			t.Errorf("mode %s is incomplete: %+v", name, mode)
 		}
 	}
-	if len(cfg.Modes["light"].Review) != 0 || len(cfg.Modes["ultra"].Review) != 4 || !cfg.Modes["ultra"].Critique {
-		t.Fatal("light is reviewed by the lead; ultra has four lanes and a critique")
+	if light := cfg.Modes["light"].Review; len(light) != 1 || light[0].Route != "astra:medium" || len(cfg.Modes["ultra"].Review) != 4 || !cfg.Modes["ultra"].Critique {
+		t.Fatal("light has one reviewer, astra:medium; ultra has four lanes and a critique")
 	}
 	route, err := cfg.Route("fable:xhigh")
 	if err != nil || route.Provider != "claude" || route.Pool != "fable" || route.String() != "fable:xhigh" {

@@ -18,7 +18,17 @@ type Round struct {
 	Failures   []CheckFailure `json:"check_failures,omitempty"` // declared checks this correction must make pass
 	Findings   []Finding      `json:"findings,omitempty"`       // accepted findings this correction must resolve
 	Remedy     string         `json:"remedy,omitempty"`
+	Work       []WorkOrder    `json:"work,omitempty"`      // what the lead gave the writers of this round
 	Conflicts  []string       `json:"conflicts,omitempty"` // files whose merge markers this correction must resolve
+}
+
+// WorkOrder is work the lead gives the writer of one stream: what to do, and the criterion it satisfies when
+// there is one.
+type WorkOrder struct {
+	Stream      string `json:"stream"`
+	Note        string `json:"note"`
+	Requirement string `json:"requirement,omitempty"` // an unmet requirement or rule of the present assessment
+	Escalate    bool   `json:"escalate,omitempty"`    // one more step of effort for this writer
 }
 
 // CheckFailure is a failing declared check handed back to the writers: the command and the end of its output.
@@ -122,7 +132,8 @@ type Disposition struct {
 	Files       []string `json:"files,omitempty"`
 	Basis       string   `json:"basis,omitempty"`
 	DuplicateOf string   `json:"duplicate_of,omitempty"`
-	Auto        bool     `json:"auto,omitempty"` // sent to its author by the blocking rule, not judged by the lead
+	Stream      string   `json:"stream,omitempty"` // the stream an accepted finding goes to, when its path does not say
+	Auto        bool     `json:"auto,omitempty"`   // sent to its author by the blocking rule, not judged by the lead
 }
 
 type CheckReceipt struct {
@@ -137,18 +148,13 @@ type CheckReceipt struct {
 	Iteration   int      `json:"iteration,omitempty"` // the correction it ran after: a failure from before the last one is stale
 }
 
-type Reassessment struct {
-	Evidence        string `json:"evidence"`
-	ChangedApproach string `json:"changed_approach"`
-}
-
 type Correction struct {
-	Iteration    int           `json:"iteration"`
-	FindingIDs   []string      `json:"finding_ids"`
-	StartKey     string        `json:"start_key"`           // the reviewed change this correction started from
-	CheckIDs     []string      `json:"check_ids,omitempty"` // failing checks this correction was sent to repair
-	Brief        string        `json:"brief"`
-	Reassessment *Reassessment `json:"reassessment,omitempty"`
+	Iteration  int         `json:"iteration"`
+	FindingIDs []string    `json:"finding_ids"`
+	StartKey   string      `json:"start_key"`           // the reviewed change this correction started from
+	CheckIDs   []string    `json:"check_ids,omitempty"` // failing checks this correction was sent to repair
+	Brief      string      `json:"brief"`
+	Work       []WorkOrder `json:"work,omitempty"` // what the lead gave the writers
 }
 
 type VisualRun struct {
@@ -191,10 +197,13 @@ type StageRecord struct {
 	Rounds     int                  `json:"correction_rounds"`
 	Findings   int                  `json:"findings"`
 	Commit     string               `json:"commit,omitempty"`
-	Tree       string               `json:"tree,omitempty"`     // the working tree the stage was accepted at
-	Handoffs   map[string]string    `json:"handoffs,omitempty"` // stream -> the contract later stages build on
-	Writers    map[string]WriterRef `json:"writers,omitempty"`  // stream -> the session a later correction continues
-	Archive    string               `json:"archive"`            // the stage's reviews, findings and receipts
+	Tree       string               `json:"tree,omitempty"`      // the working tree the stage was accepted at
+	Handoffs   map[string]string    `json:"handoffs,omitempty"`  // stream -> the contract later stages build on
+	Writers    map[string]WriterRef `json:"writers,omitempty"`   // stream -> the session a later correction continues
+	Reviewers  []string             `json:"reviewers,omitempty"` // the routes that reviewed the stage
+	Checks     []string             `json:"checks,omitempty"`    // the declared checks and their results
+	Notes      []string             `json:"notes,omitempty"`     // findings left as notes, one line each
+	Archive    string               `json:"archive"`             // the stage's reviews, findings and receipts
 }
 
 // Final is the completion receipt.
@@ -238,19 +247,15 @@ type Gate struct {
 	Dispositions map[string]Disposition `json:"dispositions"`
 	Resolutions  map[string]string      `json:"resolutions"`
 	Disputes     map[string]Dispute     `json:"disputes,omitempty"`
-	Demands      []Finding              `json:"demands,omitempty"` // work the lead sent to writers from an unmet criterion
+	Demands      []Finding              `json:"demands,omitempty"` // work sent to writers from an unmet criterion
 	Checks       []CheckReceipt         `json:"checks"`
 	Baselines    map[string]int         `json:"baselines,omitempty"` // check key -> exit code before any writing
 	Corrections  []Correction           `json:"corrections,omitempty"`
-	Reassessed   *Reassessment          `json:"reassessed,omitempty"` // the lead's new diagnosis, spent by the next correction
-	Escalate     bool                   `json:"escalate,omitempty"`   // the lead asked for one more effort step on the next correction
-	Ruled        bool                   `json:"ruled,omitempty"`      // the lead ruled on a finding since the last correction: the next one is not a repetition
+	Ruled        bool                   `json:"ruled,omitempty"` // the lead ruled on a finding since the last correction: the next one is not a repetition
 	// DesignFailure is why a design of the present stage could not be imported or measured. It is the lead's to
 	// repair; the next run tries again.
 	DesignFailure string                  `json:"design_failure,omitempty"`
-	Remedy        string                  `json:"remedy,omitempty"`      // the lead's note for the next correction
-	FixStreams    []string                `json:"fix_streams,omitempty"` // which streams repair a failing check; default: all
-	Reading       *Reading                `json:"reading,omitempty"`     // a review the lead owes (a mode without reviewer processes)
+	Reading       *Reading                `json:"reading,omitempty"` // a review the lead owes (a mode without reviewer processes)
 	ContextPack   string                  `json:"context_pack,omitempty"`
 	Preparation   string                  `json:"preparation,omitempty"` // the preparation whose worker can revise this plan
 	Boost         int                     `json:"boost,omitempty"`
@@ -263,7 +268,12 @@ type Gate struct {
 	Conflicts     []string                `json:"conflicts,omitempty"` // files left with merge markers by catching up with the checkout
 	Signals       []Signal                `json:"slop_signals,omitempty"`
 	Reported      bool                    `json:"completion_reported,omitempty"`
-	CreatedAt     int64                   `json:"created_at"`
+	// Left is the working tree as the task's writers last left it: a file of the task that differs from it was
+	// changed by someone else, and `drop` does not overwrite it.
+	Left        string   `json:"left_tree,omitempty"`
+	Dropped     bool     `json:"dropped,omitempty"`     // the files the task changed in the checkout were restored
+	Attachments []string `json:"attachments,omitempty"` // files the user gave with the request, copied into the task
+	CreatedAt   int64    `json:"created_at"`
 
 	legacy *legacyState // a task of an earlier format whose origin trees are not built yet
 }

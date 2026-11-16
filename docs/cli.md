@@ -72,18 +72,23 @@ it is invalid. Configuration edits still use `config set`, `unset` and `profile`
 | `start [--implement]` | Open a task from a plan and run it |
 | `run` | Write, check, review, correct, accept — until a person is needed |
 | `answer` | Reply to a blocked writer in its own session, then run on |
-| `decide` | Rule on findings, give the lead's own review, send an unmet criterion to the writers; then run on |
-| `amend` | Replace the plan of the active task, with a reason |
-| `status [--full]`, `show <part>` | The compact picture, or one part in full |
+| `decide` | Rule on findings, give the lead's own review, give work to the writers of named streams; then run on |
+| `amend` | Change the plan of the active task — named operations or the complete plan — with a reason |
+| `status [--full]`, `show <part>` | The compact picture, or one part in full: findings, plan, stage, checks, review, architecture, receipt |
 | `pause`, `resume`, `stop` | Park the task with the true reason; lift a pause; cancel the running operation |
 | `check`, `visual`, `land` | Run declared checks; browser verification; land an isolated task |
+| `drop`, `forget` | On the user's word: end a task and take back what it changed; remove a finished task from the record |
 
 Every one of them answers with the same compact JSON object: the `step` the task is at, what this call
-`did`, what only a person can settle (`needs`, each with the one way to `resolve` it), and the `actions`
-that are legal now. `agentgate guide` is the workflow for a lead; `agentgate reference` has the inputs.
+`did`, what only a person can settle (`needs`, each with the one way to `resolve` it and the `command` and
+`input` that do it), and the `actions` that are legal now. What a command has of its own is under `result`;
+a refused command carries `refused`, a failed one `error`. `agentgate guide` is the workflow for a lead;
+`agentgate reference <page>` has the pages by situation, and `agentgate install` installs them as the skill
+`agentgate`.
 
 The commands of the earlier protocol — `launch`, `review`, `triage`, `fix`, `finish`, `replan`, `hold` —
-answer with the name of what replaced them. `continue` is accepted as another name for `run`.
+answer with the name of what replaced them, and so do the `decide` inputs replaced in 0.17. `continue` is
+accepted as another name for `run`.
 
 ## Task input
 

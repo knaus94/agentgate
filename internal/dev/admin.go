@@ -205,11 +205,13 @@ func Doctor() map[string]any {
 	if slices.Contains(leads, "claude") {
 		installed, _ := os.ReadFile(filepath.Join(claudeDir(), "commands", "dev.md"))
 		add("/dev command", string(installed) == assets.Command, true, hint)
+		add("lead pages", pagesInstalled("claude"), false, "the skill agentgate in "+pagesDir("claude")+"; "+hint)
 		add("Stop hook", hooked(filepath.Join(claudeDir(), "settings.json")), true, hint)
 	}
 	if slices.Contains(leads, "codex") {
 		installed, _ := os.ReadFile(filepath.Join(skillDir(), "SKILL.md"))
 		add("$dev skill", string(installed) == assets.Skill, true, hint)
+		add("lead pages", pagesInstalled("codex"), false, "the skill agentgate in "+pagesDir("codex")+"; "+hint)
 		rule, _ := os.ReadFile(codexRulePath())
 		add("Codex rule", string(rule) == codexRule(), true, "lets Codex run agentgate outside its sandbox; "+hint)
 		add("Codex Stop hook", hooked(filepath.Join(codexDir(), "hooks.json")), false, "trust it once in Codex with /hooks")
@@ -240,6 +242,16 @@ func Doctor() map[string]any {
 		healthy = healthy && (item.OK || !item.Required)
 	}
 	return map[string]any{"healthy": healthy, "checks": probes}
+}
+
+// pagesInstalled says whether every page of the lead's skill is installed as this version has it.
+func pagesInstalled(lead string) bool {
+	for path, content := range pages(pagesDir(lead)) {
+		if installed, err := os.ReadFile(path); err != nil || string(installed) != content {
+			return false
+		}
+	}
+	return true
 }
 
 func suffix(err error) string {
@@ -284,6 +296,23 @@ func codexDir() string {
 func skillDir() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".agents", "skills", "dev")
+}
+
+// pagesDir is where a lead's client keeps the skill with the lead's pages.
+func pagesDir(lead string) string {
+	if lead == "claude" {
+		return filepath.Join(claudeDir(), "skills", "agentgate")
+	}
+	return filepath.Join(filepath.Dir(skillDir()), "agentgate")
+}
+
+// pages are the files of that skill: its index and every page `agentgate reference` prints.
+func pages(dir string) map[string]string {
+	out := map[string]string{filepath.Join(dir, "SKILL.md"): assets.SkillPage("SKILL")}
+	for _, topic := range assets.ReferenceTopics() {
+		out[filepath.Join(dir, topic+".md")] = assets.SkillPage(topic)
+	}
+	return out
 }
 
 func codexRulePath() string { return filepath.Join(codexDir(), "rules", "agentgate.rules") }
@@ -404,6 +433,9 @@ func Install(options InstallOptions) (any, error) {
 			} else if explicit {
 				drop(command, &done)
 			}
+			if err := placePages(lead, wanted, explicit, &done); err != nil {
+				return nil, err
+			}
 		} else {
 			skill, policy := filepath.Join(skillDir(), "SKILL.md"), filepath.Join(skillDir(), "agents", "openai.yaml")
 			hooks = filepath.Join(codexDir(), "hooks.json")
@@ -413,6 +445,9 @@ func Install(options InstallOptions) (any, error) {
 						return nil, err
 					}
 				}
+				if err := placePages(lead, true, explicit, &done); err != nil {
+					return nil, err
+				}
 				next = append(next, "Codex: start a new session and type $dev help. Run /hooks there once and trust the agentgate Stop hook; "+
 					"Codex does not run a hook until you have reviewed it.")
 			} else if explicit {
@@ -421,6 +456,9 @@ func Install(options InstallOptions) (any, error) {
 				drop(codexRulePath(), &done)
 				_ = os.Remove(filepath.Join(skillDir(), "agents"))
 				_ = os.Remove(skillDir())
+				if err := placePages(lead, false, explicit, &done); err != nil {
+					return nil, err
+				}
 			}
 		}
 		if !wanted && !explicit {
@@ -449,6 +487,30 @@ func Install(options InstallOptions) (any, error) {
 		out["next"] = strings.Join(append(next, "`agentgate doctor` verifies the setup."), " ")
 	}
 	return out, nil
+}
+
+// placePages installs the lead's pages as a skill of the lead's client, or removes them on an explicit choice.
+// A page an earlier version installed and this one no longer has is removed with it.
+func placePages(lead string, wanted, explicit bool, done *[]string) error {
+	dir := pagesDir(lead)
+	current := pages(dir)
+	if wanted {
+		for path, content := range current {
+			if err := place(path, content, done); err != nil {
+				return err
+			}
+		}
+	}
+	installed, _ := filepath.Glob(filepath.Join(dir, "*.md"))
+	for _, path := range installed {
+		if _, ours := current[path]; !wanted && explicit || !ours && wanted {
+			drop(path, done)
+		}
+	}
+	if !wanted && explicit {
+		_ = os.Remove(dir)
+	}
+	return nil
 }
 
 // adoptName gives a binary that still runs under the tool's earlier name its present one, next to itself.

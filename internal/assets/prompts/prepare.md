@@ -12,6 +12,8 @@ they name. Do not read secrets or the contents of environment files.
 ## What you return
 
 - `status`: `READY` with a complete `plan`, or `BLOCKED` with `questions`.
+- `name`: a short name for the plan in English, two to five words in lowercase joined by dashes
+  (`withdrawal-throttle`), whatever language the request is in. Null when you revise a plan.
 - `summary`: what you found and decided, for the lead. Facts with locations; no praise, no narration.
 - `questions`: decisions only the user can make, each `{id, question, options, recommended}` — a short stable
   `id`, two to four concrete options, and the one you recommend with its reason in the question. Empty when
@@ -28,6 +30,9 @@ returning BLOCKED for them wastes a round:
 - a check or a test cannot be run by you — plan it; the lead authorizes it;
 - a generator will choose a file name later — own its output directory (see scope);
 - a routine technical choice within the accepted scope — make it and say so in `summary`.
+
+`attachments`, when present, are files the user gave with the request: a brief, a specification, reference
+pictures. Read every one; a picture shows what the user means. They are part of the request.
 
 When later input arrives (answers, notes, problems found by the validator), you continue this same
 conversation: everything you read is still yours. Read again only what the new input makes necessary.

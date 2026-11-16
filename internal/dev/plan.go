@@ -1,6 +1,7 @@
 package dev
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/knaus94/agentgate/internal/config"
 )
@@ -102,6 +104,7 @@ type Stage struct {
 // top-level streams is one stage; the tool gives every plan that one shape before it runs it.
 type Plan struct {
 	Request          string        `json:"request"`
+	Mode             string        `json:"mode,omitempty"` // light, medium, heavy or ultra: stronger than a flag in the request
 	Brief            string        `json:"brief"`
 	Assessment       *Assessment   `json:"assessment,omitempty"`
 	Requirements     []Requirement `json:"requirements,omitempty"`
@@ -180,7 +183,11 @@ const (
 	timeoutDefault = 1200
 	timeoutMin     = 120
 	timeoutMax     = 7200
+	writerCeiling  = 3600 // a writer's default ceiling; silence, not the clock, ends a writer that stopped working
 )
+
+// writerIdle is how long a writer may go without an event before it is stopped.
+var writerIdle = 10 * time.Minute
 
 // allStreams is every stream of every stage.
 func (p *Plan) allStreams() []Stream {
@@ -360,6 +367,9 @@ func Resolve(cfg *config.Config, source *Plan) (*Resolved, error) {
 	resolved := &Resolved{Plan: plan, Request: request, Config: cfg}
 	if strings.TrimSpace(plan.Brief) == "" {
 		add("brief is required: the accepted requirements, invariants and acceptance criteria")
+	}
+	if plan.Mode != "" && !slices.Contains(config.ModeNames, plan.Mode) {
+		add("mode is one of %s, not %q", strings.Join(config.ModeNames, ", "), plan.Mode)
 	}
 	if err := validateRequirements(plan.Requirements); err != nil {
 		add("%v", err)
@@ -566,13 +576,28 @@ func (r *Resolved) decideStage(stage Stage) (Decision, error) {
 	if r.Request.Action == "research" || r.Request.Action == "verify" {
 		return Decision{"medium", "read-only", []string{"read-only consultation"}}, nil
 	}
-	if r.Request.Mode != "" {
-		return Decision{r.Request.Mode, "flag", []string{"selected explicitly in the request"}}, nil
-	}
 	a := stage.Assessment
 	if a == nil {
 		a = r.Plan.Assessment
 	}
+	// A mode given by the plan, or by a flag in the request, is final. When the facts call for more, the reasons
+	// say so: the lead tells the user what the lower mode leaves out.
+	if chosen := cmp.Or(r.Plan.Mode, r.Request.Mode); chosen != "" {
+		decision := Decision{chosen, "flag", []string{"selected explicitly in the request"}}
+		if r.Plan.Mode != "" {
+			decision = Decision{chosen, "plan", []string{"set in the plan"}}
+		}
+		if assessed, err := r.assess(stage, a); err == nil && modeRank[assessed.Mode] > modeRank[chosen] {
+			decision.Because = append(decision.Because, fmt.Sprintf("the assessment alone gives %s (%s); tell the user the mode is below what the facts call for",
+				assessed.Mode, strings.Join(assessed.Because, "; ")))
+		}
+		return decision, nil
+	}
+	return r.assess(stage, a)
+}
+
+// assess computes a stage's mode from the facts of its assessment.
+func (r *Resolved) assess(stage Stage, a *Assessment) (Decision, error) {
 	if a == nil || strings.TrimSpace(a.Evidence) == "" || !slices.Contains([]string{"trivial", "ordinary", "complex"}, a.Size) {
 		return Decision{}, errors.New("without a mode flag the plan needs assessment {size: trivial|ordinary|complex, risks, irreversible, uncertainty, evidence}")
 	}

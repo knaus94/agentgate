@@ -1,6 +1,8 @@
 package dev
 
 import (
+	"cmp"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -200,6 +202,231 @@ func Amend(cfg *config.Config, gate *Gate, source *Plan) (any, error) {
 		return nil, err
 	}
 	return gate.report(cfg, did), nil
+}
+
+// Operations change named parts of the plan of an active task, instead of sending the complete plan. They are
+// applied to a copy of the present plan, which is then amended like a complete one: the same validation, the
+// same rules for accepted stages and changed requirements.
+type Operations struct {
+	Update       string              `json:"update"`
+	Authorized   string              `json:"authorized,omitempty"`
+	Rework       []string            `json:"rework,omitempty"`
+	Mode         string              `json:"mode,omitempty"`         // light, medium, heavy or ultra, above the request's flag
+	Scope        []ScopeChange       `json:"scope,omitempty"`        // files a stream gets
+	Checks       []CheckChange       `json:"checks,omitempty"`       // checks added to or removed from the plan or a stage
+	Requirements []RequirementChange `json:"requirements,omitempty"` // requirements added, changed, or moved to the stage they are due at
+	Timeouts     *Timeouts           `json:"timeouts,omitempty"`
+	Design       []DesignChange      `json:"design,omitempty"`
+}
+
+// ScopeChange gives a stream more files.
+type ScopeChange struct {
+	Stream string   `json:"stream"`
+	Stage  string   `json:"stage,omitempty"` // default: the present stage
+	Add    []string `json:"add"`
+}
+
+// CheckChange adds checks to, or removes them from, the plan's own list or a stage's.
+type CheckChange struct {
+	Stage  string   `json:"stage,omitempty"` // default: the plan's checks, which every stage runs
+	Add    []Check  `json:"add,omitempty"`
+	Remove []string `json:"remove,omitempty"` // a check's id, or a part of its command only it contains
+}
+
+// RequirementChange adds a requirement, changes one, or says at which stage it is due.
+type RequirementChange struct {
+	ID     string `json:"id"`
+	Text   string `json:"text,omitempty"`   // a new requirement, or a changed one: that needs authorized
+	Method string `json:"method,omitempty"` // code, check or browser
+	Stage  string `json:"stage,omitempty"`  // the stage it is due at; a new one is due at the last stage by default
+}
+
+// Timeouts are the process ceilings of the task, in seconds.
+type Timeouts struct {
+	WriterS   int `json:"writer_s,omitempty"`
+	ReviewerS int `json:"reviewer_s,omitempty"`
+}
+
+// DesignChange adds a design, or changes or removes the one it names.
+type DesignChange struct {
+	Add    *DesignRef `json:"add,omitempty"`
+	Design string     `json:"design,omitempty"` // the entry to change or remove: its screen, name or figma link
+	Set    *DesignRef `json:"set,omitempty"`    // the fields that change
+	Remove bool       `json:"remove,omitempty"`
+}
+
+// AmendOperations applies named operations to the plan of an active task.
+func AmendOperations(cfg *config.Config, gate *Gate, operations Operations) (any, error) {
+	if err := gate.can(ActAmend); err != nil {
+		return nil, err
+	}
+	next, err := operations.apply(gate.Plan, gate.stageIndex())
+	if err != nil {
+		return nil, err
+	}
+	return Amend(cfg, gate, next)
+}
+
+// apply makes the plan the operations describe; every problem is reported at once.
+func (o Operations) apply(current *Plan, present int) (*Plan, error) {
+	next := &Plan{}
+	raw, _ := json.Marshal(current)
+	_ = json.Unmarshal(raw, next)
+	var problems PlanProblems
+	fail := func(format string, values ...any) { problems = append(problems, fmt.Sprintf(format, values...)) }
+	names := make([]string, len(next.Stages))
+	for index, stage := range next.Stages {
+		names[index] = stage.Name
+	}
+	stage := func(name string, fallback int) int {
+		if name == "" {
+			return fallback
+		}
+		if index := slices.Index(names, name); index >= 0 {
+			return index
+		}
+		fail("no stage is called %q; stages: %s", name, strings.Join(names, ", "))
+		return -1
+	}
+	last := len(next.Stages) - 1
+	if present < 0 {
+		present = last
+	}
+	for _, change := range o.Scope {
+		index := stage(change.Stage, present)
+		if index < 0 {
+			continue
+		}
+		streams := next.Stages[index].Streams
+		position := slices.IndexFunc(streams, func(stream Stream) bool { return stream.Name == change.Stream })
+		if position < 0 {
+			var known []string
+			for _, stream := range streams {
+				known = append(known, stream.Name)
+			}
+			fail("stage %s has no stream %q; its streams: %s", names[index], change.Stream, strings.Join(known, ", "))
+			continue
+		}
+		for _, file := range change.Add {
+			if !slices.Contains(streams[position].Files, file) {
+				streams[position].Files = append(streams[position].Files, file)
+			}
+		}
+	}
+	for _, change := range o.Checks {
+		target := &next.Checks
+		if change.Stage != "" {
+			index := stage(change.Stage, -1)
+			if index < 0 {
+				continue
+			}
+			target = &next.Stages[index].Checks
+		}
+		for _, ref := range change.Remove {
+			var matches, valid []string
+			for _, check := range *target {
+				label := strings.Join(check.Argv, " ")
+				if checkID(check.Argv) == ref || strings.Contains(label, ref) {
+					matches = append(matches, checkID(check.Argv))
+				}
+				valid = append(valid, checkID(check.Argv)+" ("+checkLabel(check.Argv)+")")
+			}
+			if len(matches) != 1 {
+				fail("remove %q must name one check of that list, by its id or a part of its command only it contains: %s", ref, strings.Join(valid, ", "))
+				continue
+			}
+			*target = slices.DeleteFunc(*target, func(check Check) bool { return checkID(check.Argv) == matches[0] })
+		}
+		*target = append(*target, change.Add...)
+	}
+	for _, change := range o.Requirements {
+		position := slices.IndexFunc(next.Requirements, func(r Requirement) bool { return r.ID == change.ID })
+		switch {
+		case position < 0 && strings.TrimSpace(change.Text) == "":
+			fail("requirement %q is new: give its text", change.ID)
+			continue
+		case position < 0:
+			next.Requirements = append(next.Requirements, Requirement{ID: change.ID, Text: change.Text, Method: change.Method})
+			if change.Stage == "" {
+				change.Stage = names[last]
+			}
+		default:
+			if change.Text != "" {
+				next.Requirements[position].Text = change.Text
+			}
+			if change.Method != "" {
+				next.Requirements[position].Method = change.Method
+			}
+		}
+		if change.Stage == "" {
+			continue
+		}
+		due := stage(change.Stage, -1)
+		if due < 0 {
+			continue
+		}
+		// Due at that stage: it covers the requirement, and no stage after it does.
+		for index := range next.Stages {
+			covers := &next.Stages[index].Covers
+			switch {
+			case index == due && !slices.Contains(*covers, change.ID):
+				*covers = append(*covers, change.ID)
+			case index > due:
+				*covers = slices.DeleteFunc(*covers, func(id string) bool { return id == change.ID })
+			}
+		}
+	}
+	if o.Timeouts != nil {
+		if o.Timeouts.WriterS != 0 {
+			next.WriterTimeoutS = o.Timeouts.WriterS
+		}
+		if o.Timeouts.ReviewerS != 0 {
+			next.ReviewerTimeoutS = o.Timeouts.ReviewerS
+		}
+	}
+	for _, change := range o.Design {
+		if change.Add != nil {
+			next.Design = append(next.Design, *change.Add)
+			continue
+		}
+		position := slices.IndexFunc(next.Design, func(design DesignRef) bool {
+			return change.Design != "" && (design.Screen == change.Design || design.Name == change.Design || design.Figma == change.Design)
+		})
+		if position < 0 {
+			var known []string
+			for _, design := range next.Design {
+				known = append(known, cmp.Or(design.Name, design.Screen, design.Figma))
+			}
+			fail("design %q names no design of the plan; designs: %s", change.Design, strings.Join(known, ", "))
+			continue
+		}
+		switch {
+		case change.Remove:
+			next.Design = slices.Delete(next.Design, position, position+1)
+		case change.Set != nil:
+			merged, _ := json.Marshal(next.Design[position])
+			fields, _ := json.Marshal(change.Set)
+			var base, set map[string]any
+			_ = json.Unmarshal(merged, &base)
+			_ = json.Unmarshal(fields, &set)
+			for key, value := range set {
+				base[key] = value
+			}
+			raw, _ := json.Marshal(base)
+			next.Design[position] = DesignRef{}
+			_ = json.Unmarshal(raw, &next.Design[position])
+		default:
+			fail("design %q: give set {fields} or remove: true", change.Design)
+		}
+	}
+	if o.Mode != "" {
+		next.Mode = o.Mode
+	}
+	if len(problems) > 0 {
+		return nil, problems
+	}
+	next.Update, next.Authorized, next.Rework = o.Update, o.Authorized, o.Rework
+	return next, nil
 }
 
 // restream brings an unfinished round in line with an amended plan: the streams it holds get their new

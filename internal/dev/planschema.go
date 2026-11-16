@@ -52,6 +52,7 @@ var planSchema = object(map[string]any{
 
 var prepareSchema = object(map[string]any{
 	"status":       enum("READY", "BLOCKED"),
+	"name":         nullable(text),
 	"summary":      text,
 	"questions":    items(map[string]any{"id": text, "question": text, "options": list(text), "recommended": text}),
 	"setup":        list(text),

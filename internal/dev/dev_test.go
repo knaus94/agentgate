@@ -58,6 +58,10 @@ func newFixture(t *testing.T) *fixture {
 	}
 	cfg, err := config.Load()
 	must(t, err)
+	// The fixtures exercise the lead's own review in light mode: the configuration that has it is review: [].
+	light := cfg.Modes["light"]
+	light.Review = nil
+	cfg.Modes["light"] = light
 	f.cfg = cfg
 	return f
 }
@@ -257,7 +261,7 @@ func fixtureQuality(packet map[string]any) *QualityReport {
 		}
 		result := RequirementResult{ID: requirement.ID, Status: "verified", Reason: "fixture evidence", Evidence: []Proof{proof}}
 		if proof.Ref == "" {
-			result.Status, result.Reason, result.Evidence = "missing", "no proof source", nil
+			result.Status, result.Cause, result.Reason, result.Evidence = "missing", "proof", "no proof source", nil
 		}
 		report.Requirements = append(report.Requirements, result)
 	}
@@ -354,6 +358,12 @@ func (f *fixture) proceed() map[string]any {
 func (f *fixture) decide(input DecideInput) map[string]any {
 	f.t.Helper()
 	return f.do("decide", func() (any, error) { return Decide(f.cfg, Current(), input) })
+}
+
+// resultOf is what a command answered of its own, under result.
+func resultOf(answer map[string]any) map[string]any {
+	result, _ := answer["result"].(map[string]any)
+	return result
 }
 
 // needs lists the kinds of what an answer says only a person can settle.
@@ -715,7 +725,7 @@ func TestExhaustedPoolFallsBackAndIsReported(t *testing.T) {
 	}
 	summary := f.start(f.plan("change the line"))
 	lane := Current().Reviews[0].Lanes[0]
-	if lane.Route.Alias != "fable" || lane.Route.SubstitutedFrom != "astra:medium" || len(summary["substitutions"].([]any)) != 1 {
+	if receipt := summary["receipt"].(map[string]any); lane.Route.Alias != "fable" || lane.Route.SubstitutedFrom != "astra:medium" || len(receipt["substitutions"].([]any)) != 1 {
 		t.Fatalf("the declared alternate must run and be reported: %+v %v", lane.Route, summary["substitutions"])
 	}
 	f.model = func(kind string, packet map[string]any, call provider.Call) (string, error) {
@@ -796,8 +806,8 @@ func TestBaselineFailureIsRecordedButDoesNotWaiveCurrentFailures(t *testing.T) {
 	if first == nil || second == nil || !first.Preexisting || second.Preexisting || passed(first) {
 		t.Fatalf("only the check that was red before the task is marked preexisting, and it still fails: %+v %+v", first, second)
 	}
-	f.decide(DecideInput{Reassessment: &Reassessment{Evidence: "the checks cannot pass here", ChangedApproach: "repair the fixture"}})
-	if gate = Current(); gate.Boost != 1 || gate.Corrections[len(gate.Corrections)-1].Reassessment == nil {
+	f.decide(DecideInput{Work: []WorkOrder{{Stream: "core", Note: "the checks cannot pass here: repair the fixture"}}})
+	if gate = Current(); gate.Boost != 1 || len(gate.Corrections[len(gate.Corrections)-1].Work) != 1 {
 		t.Fatalf("a new diagnosis earns the writers one step of effort: boost %d", gate.Boost)
 	}
 }
@@ -846,7 +856,7 @@ func TestStopCancelsTheRealProcessAndParksTheTask(t *testing.T) {
 	if !ops.IsCancelled(err) {
 		t.Fatalf("want a cancellation, got %v", err)
 	}
-	if value := (<-stopped).(map[string]any); value["cancellation_requested"] != true {
+	if value := (<-stopped).(map[string]any); resultOf(value)["cancellation_requested"] != true {
 		t.Fatalf("stop must request cancellation: %v", value)
 	}
 	gate := Current()

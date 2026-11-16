@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,14 +17,17 @@ import (
 	"github.com/knaus94/agentgate/internal/assets"
 	"github.com/knaus94/agentgate/internal/config"
 	"github.com/knaus94/agentgate/internal/dev"
+	"github.com/knaus94/agentgate/internal/ops"
 	"github.com/knaus94/agentgate/internal/provider"
 	"github.com/knaus94/agentgate/internal/update"
 )
 
-// gated runs an operation on this session's task. A command that is not legal now is not an error of the
-// tool: it answers with the task as it is, why the command was refused and what is possible instead.
+// gated runs an operation on this session's task. A command that is not legal now, or that could not do what
+// it was asked, still answers with the task as it is: why the command was refused or failed, and what is
+// possible instead.
 func gated(cfg *config.Config, action string, run func(gate *dev.Gate) (any, error)) (any, int, error) {
 	var refused *dev.Refusal
+	var failed map[string]any
 	value, err := dev.Execute(action, func() (any, error) {
 		gate, err := dev.LoadCurrent()
 		if err != nil {
@@ -36,12 +40,30 @@ func gated(cfg *config.Config, action string, run func(gate *dev.Gate) (any, err
 		if errors.As(err, &refused) {
 			return dev.Refused(cfg, gate, refused), nil
 		}
+		if err != nil && !ops.IsCancelled(err) {
+			// The task as it was saved, not as the failed command left it in memory.
+			if saved, loadErr := dev.LoadCurrent(); loadErr == nil && saved != nil {
+				failed = dev.Failed(cfg, saved, err)
+			}
+		}
 		return value, err
 	})
-	if err == nil && refused != nil {
+	switch {
+	case err == nil && refused != nil:
 		return value, 1, nil
+	case err != nil && failed != nil:
+		return failed, 1, nil
 	}
 	return value, 0, err
+}
+
+// replaced are the inputs of `decide` before 0.17, with what took their place.
+var replaced = map[string]string{
+	"requirements": "work: [{stream, requirement, note}] gives an unmet criterion to a writer",
+	"reassessment": "work: [{stream, note}] carries the new diagnosis and the changed approach; effort rises by itself after a stall",
+	"brief":        "work: [{stream, note}] carries a decision or constraint to a writer",
+	"streams":      "work: [{stream, note}] names the streams that repair a failing check",
+	"escalate":     "work: [{stream, note, escalate: true}] raises one writer's effort",
 }
 
 // renamed are the commands of the protocol before 0.16. A lead session that began under it is told the
@@ -195,6 +217,10 @@ func run(args arguments) (any, int, error) {
 		if err != nil && !args.flags["all"] {
 			return nil, 0, err
 		}
+		if gate == nil && args.action == "show" && len(args.rest) > 0 && args.rest[0] == "architecture" {
+			value, err := dev.ArchitectureView(nil) // before a task, the newest pass of this checkout
+			return value, 0, err
+		}
 		if gate == nil || args.flags["all"] {
 			return dev.Overview(), 0, nil
 		}
@@ -229,8 +255,13 @@ func run(args arguments) (any, int, error) {
 		if gate == nil {
 			return nil, 0, errors.New("there is no /dev task for this session in this checkout")
 		}
-		value, err := dev.Tell(gate, input)
-		return value, 0, err
+		posted, err := dev.Tell(gate, input)
+		if err != nil {
+			return nil, 0, err
+		}
+		var value any
+		gate.Inside(func() { value = dev.Respond(cfg, gate, posted) })
+		return value, 0, nil
 	case "architecture":
 		plan, err := loadPlan()
 		if err != nil {
@@ -252,9 +283,25 @@ func run(args arguments) (any, int, error) {
 		}
 		return gated(cfg, "run", func(gate *dev.Gate) (any, error) { return dev.Run(cfg, gate, input) })
 	case "amend":
-		plan, err := loadPlan()
+		raw, err := args.read()
 		if err != nil {
 			return nil, 0, err
+		}
+		if len(bytes.TrimSpace(raw)) == 0 {
+			return nil, 0, errors.New("amend needs --file <path>, --file - or --plan <name>")
+		}
+		// A complete plan has a brief and its streams or stages; named operations have neither.
+		var keys map[string]json.RawMessage
+		if args.plan == "" && json.Unmarshal(raw, &keys) == nil && keys["brief"] == nil && keys["streams"] == nil && keys["stages"] == nil {
+			operations := dev.Operations{}
+			if err := decodeInput(raw, &operations); err != nil {
+				return nil, 0, fmt.Errorf("amend input: %w", err)
+			}
+			return gated(cfg, "amend", func(gate *dev.Gate) (any, error) { return dev.AmendOperations(cfg, gate, operations) })
+		}
+		plan := &dev.Plan{}
+		if err := decodeInput(raw, plan); err != nil {
+			return nil, 0, fmt.Errorf("amend input: %w", err)
 		}
 		return gated(cfg, "amend", func(gate *dev.Gate) (any, error) { return dev.Amend(cfg, gate, plan) })
 	case "design":
@@ -280,6 +327,11 @@ func run(args arguments) (any, int, error) {
 	case "decide":
 		input := dev.DecideInput{}
 		if err := args.input(&input, true); err != nil {
+			for field, instead := range replaced {
+				if strings.Contains(err.Error(), `unknown field "`+field+`"`) {
+					return nil, 0, fmt.Errorf("decide {%s} was replaced in 0.17: %s. `agentgate reference` has the input", field, instead)
+				}
+			}
 			return nil, 0, err
 		}
 		return gated(cfg, "decide", func(gate *dev.Gate) (any, error) { return dev.Decide(cfg, gate, input) })
@@ -291,8 +343,15 @@ func run(args arguments) (any, int, error) {
 		failed := false
 		value, code, err := gated(cfg, "check", func(gate *dev.Gate) (any, error) {
 			result, err := dev.RunChecks(gate, input)
-			failed = err == nil && result.Failed
-			return result, err
+			if err != nil {
+				return nil, err
+			}
+			failed = result.Failed
+			receipts := []map[string]any{}
+			for _, receipt := range result.Receipts {
+				receipts = append(receipts, map[string]any{"check": strings.Join(receipt.Argv, " "), "returncode": receipt.ReturnCode, "reused": receipt.Reused, "log": receipt.Log})
+			}
+			return dev.Respond(cfg, gate, map[string]any{"receipts": receipts, "failed": result.Failed}), nil
 		})
 		if failed {
 			code = 2
@@ -318,6 +377,19 @@ func run(args arguments) (any, int, error) {
 		return gated(cfg, "pause", func(gate *dev.Gate) (any, error) { return dev.Pause(cfg, gate, input) })
 	case "resume":
 		return gated(cfg, "resume", func(gate *dev.Gate) (any, error) { return dev.Resume(cfg, gate) })
+	case "drop":
+		input := dev.DropInput{}
+		if err := args.input(&input, true); err != nil {
+			return nil, 0, err
+		}
+		return gated(cfg, "drop", func(gate *dev.Gate) (any, error) { return dev.Drop(cfg, gate, input) })
+	case "forget":
+		input := dev.ForgetInput{}
+		if err := args.input(&input, true); err != nil {
+			return nil, 0, err
+		}
+		value, err := dev.Forget(input)
+		return value, 0, err
 	}
 	return nil, 0, fmt.Errorf("unknown command %q; run `agentgate help`", args.action)
 }

@@ -32,11 +32,16 @@ When the packet contains `quality`, you also own its structured assessment. Retu
 object with `requirements` and `rules` arrays, each requested id exactly once. This is a judgement of the
 supplied evidence, not permission to run commands or delegate.
 
-- Requirements: `{id, status: verified|partial|missing, reason, evidence: [{kind, ref, detail}]}`. `verified`
-  needs adequate evidence and must use the requirement's `method` when specified. `partial` and `missing`
-  remain incomplete. Never remove or rewrite a criterion to make it pass. A requirement with `due: true` must
-  be complete now. One with `due_at` is completed by that later stage: judge honestly how far this change
-  takes it — `partial` is the expected verdict there and does not hold the stage back.
+- Requirements: `{id, status: verified|partial|missing, cause, reason, evidence: [{kind, ref, detail}]}`.
+  `verified` needs adequate evidence and must use the requirement's `method` when specified. `partial` and
+  `missing` remain incomplete. Never remove or rewrite a criterion to make it pass. A requirement with
+  `due: true` must be complete now. One with `due_at` is completed by that later stage: judge honestly how far
+  this change takes it — `partial` is the expected verdict there and does not hold the stage back.
+- `cause` says whose an incomplete requirement is, and it decides where it goes: `code` — the code does not do
+  what is asked (it goes to the writer as a finding does; cite the code that is missing it); `proof` — the
+  code may well do it and the evidence is missing (it goes to the lead, who collects the proof); `plan` — the
+  plan puts it where it cannot be met, for example at a stage before the one that builds it (it goes to the
+  lead). Null when verified.
 - Evidence kind `code`: ref is a scoped `file:line` or `file:first-last`, detail explains the inspected behavior. `check`: ref is
   an id in `quality.checks` (the same ids as in `checks`), detail says what the recorded command proves. Read
   its log. The check's `kind`
@@ -56,6 +61,9 @@ supplied evidence, not permission to run commands or delegate.
   informational; defects under your ordinary axes still use the usual severities.
 - Reassess every criterion on later passes using the current packet, including those previously verified.
   Do not infer completion from an author's summary, an old result or a plausible-looking screenshot.
+
+`attachments`, when present, are files the user gave with the request — a specification, reference pictures.
+They are part of what was asked.
 
 `context_pack`, when present, maps the area as it was when the task was planned: callers, invariants,
 conventions. Use it to find what the change could break instead of exploring from scratch; verify what you
@@ -167,6 +175,9 @@ lists those files. `patch` still holds the whole change.
   because it was disputed, and do not keep one because it was yours.
 - Never rename an unresolved defect. A finding that reappears keeps its `id`.
 - `prior_decisions` holds findings the lead rejected or deferred. Do not repeat them without new evidence.
+- `open_notes` are notes raised earlier at this position that nobody acted on. Do not raise one again under a
+  new id: report it under its `id` only when it got worse or you have new evidence, otherwise leave it out. A
+  finding at the same path and line on the same axis is joined to the earlier one anyway.
 - `contract_changed` says the plan was amended since your last pass: judge against the brief as it is now.
 - Report new defects introduced by the correction; do not restart the whole audit.
 
