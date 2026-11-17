@@ -62,7 +62,7 @@
 ## Изменение маршрута
 
 ```sh
-agentgate config set models.sol.model gpt-6.1-sol
+agentgate config set models.sol.model gpt-6.2-sol
 agentgate config set modes.medium.backend sol:high
 agentgate config set modes.medium.frontend sol:high
 agentgate config validate

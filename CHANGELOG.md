@@ -2,6 +2,14 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.21.2
+
+**Changed**
+
+- The built-in model `sol` is `gpt-6.2-sol` (was `gpt-6.1-sol`): every route on Sol — the light and medium
+  writers, and the Codex profile's roles — runs on it. A personal `models.sol` in
+  `~/.config/agentgate/config.json` still wins.
+
 ## 0.21.1
 
 The release of 0.21.0 stopped in CI before anything was published: two of its new scenario tests recorded what

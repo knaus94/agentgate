@@ -8,7 +8,7 @@ by key. `agentgate config show` prints the effective settings, `config validate`
 
 ```json
 {
-  "models": {"sol": {"provider": "codex", "model": "gpt-6.1-sol", "pool": "codex"}},
+  "models": {"sol": {"provider": "codex", "model": "gpt-6.2-sol", "pool": "codex"}},
   "fallbacks": {"sol": ["sonnet", "opus"]},
   "modes": {"medium": {"backend": "sonnet:high",
                        "review": [{"axes": ["correctness", "architecture", "simplicity"], "route": "astra:medium"}]}},

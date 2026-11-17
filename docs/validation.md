@@ -4,6 +4,18 @@ This record distinguishes live integrations from controlled provider fixtures an
 model quality, arbitrary specification size or every possible execution environment. It has two parts: what
 was run for the 0.16.0 source, and the release validation of 0.14.0, which is kept as it was written.
 
+## 0.21.2
+
+Checked on 2026-11-17 against `667d7f6` (0.21.1). Only the model of the built-in alias `sol`, its examples in
+the documentation and the version changed.
+
+| Check | Actual result |
+|---|---|
+| `gpt-6.2-sol` in the local Codex model list (`~/.codex/models_cache.json`) | present |
+| `go test ./internal/config ./cmd/agentgate` | PASS |
+
+The release workflow runs the full suite with `-race` before publication. No model was run.
+
 ## 0.21.1
 
 Checked on 2026-11-17 against `3d4696d`. The release workflow of 0.21.0 failed in `go test -race ./...`: two of
