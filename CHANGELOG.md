@@ -6,9 +6,10 @@
 
 **Changed**
 
-- The built-in model `sol` is `gpt-6.2-sol` (was `gpt-6.1-sol`): every route on Sol — the light and medium
-  writers, and the Codex profile's roles — runs on it. A personal `models.sol` in
-  `~/.config/agentgate/config.json` still wins.
+- The built-in models move to the 6.2 generation: `sol` is `gpt-6.2-sol` (was `gpt-6.1-sol`) and `astra` is
+  `gpt-6.2-astra` (was `gpt-6-astra`). Every route on them runs on the new model: preparation, consultations,
+  the writers of every mode, the second architect of heavy and ultra, and the Codex profile's roles. A personal
+  `models.sol` or `models.astra` in `~/.config/agentgate/config.json` still wins.
 
 ## 0.21.1
 

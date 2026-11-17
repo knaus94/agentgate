@@ -38,7 +38,7 @@
     },
     "astra": {
       "provider": "codex",
-      "model": "gpt-6-astra",
+      "model": "gpt-6.2-astra",
       "pool": "codex"
     }
   },
