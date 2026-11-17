@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/knaus94/agentgate/internal/provider"
@@ -44,6 +45,7 @@ func TestInterfaceIsDesignedForItsJobsBeforeAnyoneWritesIt(t *testing.T) {
 	// A designer that did not walk a job did not design for it.
 	f.fails("architecture", "without walking jobs find", func() (any, error) { return Architecture(f.cfg, plan) })
 	var architects []map[string]any
+	var mu sync.Mutex // the two architects design in parallel
 	f.model = func(kind string, packet map[string]any, _ provider.Call) (string, error) {
 		switch kind {
 		case "design":
@@ -52,7 +54,9 @@ func TestInterfaceIsDesignedForItsJobsBeforeAnyoneWritesIt(t *testing.T) {
 			}
 			return designer("find"), nil
 		case "architecture":
+			mu.Lock()
 			architects = append(architects, packet)
+			mu.Unlock()
 		}
 		return "", nil
 	}
@@ -180,8 +184,11 @@ func TestPendingAdditionReachesTheReview(t *testing.T) {
 		t.Fatalf("status lists what waits: %v", waiting)
 	}
 	var judged []string
+	var mu sync.Mutex // review lanes run in parallel
 	f.model = func(kind string, packet map[string]any, _ provider.Call) (string, error) {
 		if kind == "review" && packet["quality"] != nil {
+			mu.Lock()
+			defer mu.Unlock()
 			for _, requirement := range packet["quality"].(map[string]any)["requirements"].([]any) {
 				judged = append(judged, requirement.(map[string]any)["id"].(string))
 			}
