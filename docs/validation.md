@@ -4,6 +4,19 @@ This record distinguishes live integrations from controlled provider fixtures an
 model quality, arbitrary specification size or every possible execution environment. It has two parts: what
 was run for the 0.16.0 source, and the release validation of 0.14.0, which is kept as it was written.
 
+## 0.21.1
+
+Checked on 2026-11-17 against `3d4696d`. The release workflow of 0.21.0 failed in `go test -race ./...`: two of
+the new scenario tests appended what parallel architects and reviewers saw to a shared slice without a lock.
+The local `make check` of 0.21.0 had passed; the race did not show there.
+
+| Check | Actual result |
+|---|---|
+| `go vet ./internal/dev` | PASS |
+| `go test -race -count=20 ./internal/dev -run 'TestInterface|TestPrerequisite|TestEnvFile|TestPending|TestFurther'` | PASS |
+
+Only the tests changed. The release workflow runs the full suite with `-race` before publication.
+
 ## 0.21.0
 
 Checked on 2026-11-17 against `a5e07d5` (the 0.21 brief on 0.20.2).

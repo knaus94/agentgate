@@ -2,6 +2,12 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.21.1
+
+The release of 0.21.0 stopped in CI before anything was published: two of its new scenario tests recorded what
+parallel architects and reviewers saw without a lock, and the race detector failed them. The tests are fixed;
+the tool is 0.21.0 as described below.
+
 ## 0.21.0
 
 An interface the change adds is designed for the jobs people come to it for before anyone writes it, and what

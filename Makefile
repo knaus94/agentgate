@@ -1,4 +1,4 @@
-VERSION ?= 0.21.0
+VERSION ?= 0.21.1
 GO ?= go
 LDFLAGS = -s -w -X github.com/knaus94/agentgate/internal/update.Version=$(VERSION)
 
