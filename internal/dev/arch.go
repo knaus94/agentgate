@@ -65,6 +65,7 @@ type Receipt struct {
 	Design        *uiDesign               `json:"design,omitempty"`
 	Route         *config.Route           `json:"route,omitempty"`
 	Revision      int                     `json:"revision,omitempty"`
+	UI            string                  `json:"ui,omitempty"` // an architecture pass: the interface design it ran first and designed on
 	Dir           string                  `json:"dir"`
 }
 
@@ -100,6 +101,11 @@ func (r *Receipt) save() error {
 // held a one-stage plan to its files.
 func (r *Resolved) fingerprint(rules []reviewRule, withFiles bool) string {
 	parts := map[string]any{"brief": r.Plan.Brief, "ui": r.Plan.UI, "mode": r.Mode}
+	if ui := r.Plan.UI; ui != nil && ui.Usage != nil {
+		// An interface with jobs is designed in the same pass: the architecture answers the jobs, not the lead's
+		// acceptance of the design that came out of the pass.
+		parts["ui"] = map[string]any{"usage": ui.Usage}
+	}
 	if withFiles && len(r.Plan.Stages) == 1 {
 		parts["files"] = r.Plan.Files()
 	}
@@ -257,6 +263,20 @@ func Architecture(cfg *config.Config, plan *Plan) (any, error) {
 		return nil, err
 	}
 	mode := resolved.ModeConfig()
+	// An interface with jobs is designed first: the architects then design what it needs, on the design itself.
+	var ui *Receipt
+	if needed := plan.UI; needed != nil && needed.Usage != nil && needed.Design == "" && !resolved.Request.ReviewFirst() {
+		if ui, err = designInterface(cfg, DesignInput{Task: resolved.Request.Task, Brief: resolved.Plan.Brief, Usage: needed.Usage,
+			Files: resolved.Plan.Files(), Context: resolved.Plan.Context, Mode: resolved.Mode}); err != nil {
+			return nil, fmt.Errorf("interface design: %w", err)
+		}
+		if ui.Design.Status != "READY" || len(mode.Architecture) == 0 {
+			return interfaceAnswer(resolved.Mode, ui), nil
+		}
+		designed := *plan
+		designed.UI = &UI{Design: ui.ID, Acceptance: "Designed in this pass for the jobs in usage; the user has not seen it yet.", Usage: needed.Usage}
+		plan = &designed
+	}
 	if len(mode.Architecture) == 0 {
 		return map[string]any{"mode": resolved.Mode, "decision": resolved.Decision,
 			"next": "This mode has no architecture pass: the brief is the design. Launch directly."}, nil
@@ -285,6 +305,9 @@ func Architecture(cfg *config.Config, plan *Plan) (any, error) {
 		return nil, incomplete(err)
 	}
 	p.receipt.Lanes = designs
+	if ui != nil {
+		p.receipt.UI = ui.ID
+	}
 	last := &designs[0] // the first architect's session as it stands
 	var against []Issue // blockers raised against the first design
 	if mode.Critique {
@@ -365,15 +388,24 @@ func ArchitectureRevise(cfg *config.Config, input ArchitectureInput) (any, error
 		if err := json.Unmarshal(raw, plan); err != nil {
 			return nil, err
 		}
-	case gate != nil && gate.active():
+	case gate != nil && (gate.active() || gate.Step == StepDone && gate.Landed == "" && !gate.Dropped):
+		// A finished task that is not landed yet still takes new work: what the revision changes becomes its next stage.
 		plan = gate.Plan
 		var accepted []string
 		for _, record := range gate.Accepted {
 			accepted = append(accepted, record.Name)
 		}
 		extra["task"] = map[string]any{"step": gate.Step, "position": gate.position(), "accepted_stages": accepted}
+	case gate != nil:
+		state := gate.Step
+		if gate.Landed != "" {
+			state += ", landed (" + gate.Landed + ")"
+		} else if gate.Dropped {
+			state += ", dropped"
+		}
+		return nil, fmt.Errorf("this session's task is %s: its design is no longer revised; a new task starts from a saved plan named in `plan`", state)
 	default:
-		return nil, errors.New("no task is open in this session: name the saved plan in `plan`")
+		return nil, errors.New("this session has no task: name the saved plan in `plan`")
 	}
 	base := ""
 	if plan.Architecture != nil && plan.Architecture.ID == previous.ID {
@@ -561,11 +593,72 @@ func ArchitectureView(plan *Plan) (map[string]any, error) {
 	if receipt == nil {
 		return nil, errors.New("no architecture pass has run in this checkout: `agentgate architecture --plan <name>` runs one")
 	}
-	return receipt.view(), nil
+	return receipt.render(true), nil
 }
 
-// view is the receipt as a person reads it, with the input that accepts it.
-func (r *Receipt) view() map[string]any {
+// interfaceView is an interface design as the lead tells it to the user: the jobs as the designer walked them,
+// the screens, what it rejected and what it could not decide.
+func interfaceView(ui *Receipt) map[string]any {
+	var spec struct {
+		Summary string    `json:"summary"`
+		Jobs    []jobWalk `json:"jobs"`
+		Screens []struct {
+			Name     string `json:"name"`
+			Location string `json:"location"`
+			Purpose  string `json:"purpose"`
+		} `json:"screens"`
+		Rejected []struct {
+			Option string `json:"option"`
+			Reason string `json:"reason"`
+		} `json:"rejected_alternatives"`
+		Questions []string `json:"open_questions"`
+	}
+	_ = json.Unmarshal(ui.Design.Spec, &spec)
+	screens, rejected := []string{}, []string{}
+	for _, screen := range spec.Screens {
+		screens = append(screens, screen.Name+" ("+screen.Location+"): "+oneLine(screen.Purpose))
+	}
+	for _, option := range spec.Rejected {
+		rejected = append(rejected, option.Option+" — "+oneLine(option.Reason))
+	}
+	out := map[string]any{"id": ui.ID, "status": ui.Design.Status, "summary": spec.Summary, "jobs": spec.Jobs, "screens": screens,
+		"rejected_alternatives": rejected, "receipt_file": filepath.Join(ui.Dir, "receipt.json")}
+	if ui.Route != nil {
+		out["by"] = ui.Route.String()
+	}
+	if len(spec.Questions) > 0 {
+		out["open_questions"] = spec.Questions
+	}
+	return out
+}
+
+// interfaceAccept is the plan entry that accepts an interface design.
+func interfaceAccept(ui *Receipt) map[string]any {
+	return map[string]any{"design": ui.ID, "acceptance": "<what the user approved of the interface, in their words>", "usage": ui.Design.Usage}
+}
+
+// interfaceAnswer is the answer of a design pass that stopped at the interface: its designer is waiting for
+// the user, or the mode has no architect to design the rest.
+func interfaceAnswer(mode string, ui *Receipt) map[string]any {
+	out := map[string]any{"mode": mode, "ui_design": interfaceView(ui)}
+	if ui.Design.Status != "READY" {
+		out["next"] = fmt.Sprintf("The designer cannot finish the interface without the user's decisions (`open_questions`). Ask them as written, "+
+			"then `design` with {revise: %q, notes: <the user's words>}. Put the READY design into the plan as ui {design, acceptance, usage} "+
+			"(`plan save`) and run `architecture --plan` again: it designs the rest on it.", ui.ID)
+		return out
+	}
+	out["input"] = map[string]any{"ui": interfaceAccept(ui)}
+	out["next"] = fmt.Sprintf("Show the user the interface: every job as the designer walked it, the screens, what it rejected. Put `input.ui` into "+
+		"the plan with the user's words in acceptance (`plan save`), then `start`. A doubt about the interface goes to its designer: "+
+		"`design` with {revise: %q, notes: <the user's words>}.", ui.ID)
+	return out
+}
+
+// view is the receipt as a person reads it, with the input that accepts it. The answer of a pass shows the
+// design the task follows in full and every other round in one line; `show architecture` has them all.
+func (r *Receipt) view() map[string]any { return r.render(false) }
+
+func (r *Receipt) render(full bool) map[string]any {
 	issues := func(list []Issue) []string {
 		out := []string{}
 		for _, issue := range list {
@@ -575,7 +668,16 @@ func (r *Receipt) view() map[string]any {
 	}
 	lanes := []map[string]any{}
 	var bases []string
-	for _, lane := range r.Lanes {
+	followed := r.accepted("")
+	for index := range r.Lanes {
+		lane := &r.Lanes[index]
+		if lane.Round == "design" {
+			bases = append(bases, lane.Route.Alias)
+		}
+		if !full && lane != followed && (followed == nil || followed.Round != "design" || lane.Round != "design") {
+			lanes = append(lanes, map[string]any{"round": lane.Round, "by": lane.Route.String(), "summary": clipText(oneLine(lane.Report.Summary), 300)})
+			continue
+		}
 		item := map[string]any{"round": lane.Round, "by": lane.Route.String(), "summary": lane.Report.Summary}
 		if lane.Report.Design != "" {
 			item["design"] = lane.Report.Design
@@ -601,13 +703,20 @@ func (r *Receipt) view() map[string]any {
 		if lane.Report.Agreements != "" {
 			item["agreements"] = lane.Report.Agreements
 		}
-		if lane.Round == "design" {
-			bases = append(bases, lane.Route.Alias)
-		}
 		lanes = append(lanes, item)
 	}
 	out := map[string]any{"id": r.ID, "mode": r.Mode, "lanes": lanes, "substitutions": r.Substitutions, "receipt_file": filepath.Join(r.Dir, "receipt.json")}
+	if !full {
+		out["history"] = "`agentgate show architecture` prints every round in full"
+	}
 	accept := map[string]any{"id": r.ID}
+	var ui *Receipt
+	if r.UI != "" {
+		if loaded, err := loadReceipt(r.UI, "ui"); err == nil {
+			ui = loaded
+			out["ui_design"] = interfaceView(ui)
+		}
+	}
 	raised := r.blockers()
 	decide := map[string]string{}
 	design := r.accepted("")
@@ -657,7 +766,13 @@ func (r *Receipt) view() map[string]any {
 	}
 	next += fmt.Sprintf(" (`plan save`), then `start`; an active task takes the same with `amend`. An answer other than the recommended one, and anything else the user says about the design, goes back to the "+
 		"architect, not into the plan: `architecture` with {revise: %q, answers, notes}.", r.ID)
-	out["input"], out["next"] = map[string]any{"architecture": accept}, next
+	input := map[string]any{"architecture": accept}
+	if ui != nil {
+		input["ui"] = interfaceAccept(ui)
+		next = "The interface was designed first and the architecture on it (`ui_design`): show the user every job as the designer walked it and " +
+			"the screens, with the user's words in `input.ui.acceptance`. " + next + " A doubt about the interface goes to its designer: `design` with {revise, notes}."
+	}
+	out["input"], out["next"] = input, next
 	return out
 }
 

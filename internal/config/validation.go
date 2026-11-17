@@ -22,8 +22,8 @@ func (c *Config) validate() error {
 	if c.Version != 1 {
 		return fmt.Errorf("config: unsupported version %d (supported: 1)", c.Version)
 	}
-	if c.RetentionDays < 0 {
-		return errors.New("config: retention_days must not be negative")
+	if c.RetentionDays < 0 || c.MinFreeGiB < 0 {
+		return errors.New("config: retention_days and min_free_gib must not be negative")
 	}
 	for name, rule := range c.ReviewRules {
 		if !configName.MatchString(name) || len(rule.Instructions) == 0 {

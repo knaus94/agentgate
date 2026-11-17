@@ -29,7 +29,8 @@ section.
   the script itself wait that long; without it the script yields after 30 seconds. If it still yields with a
   cell id, continue it with `wait` and `yield_time_ms: 300000`. Never poll with a short `yield_time_ms`, never
   call `agentgate status` to see whether a command is still running, and do not start a second `agentgate`
-  command while one runs: it would be rejected, not queued. When your shell tool returns only after the
+  command while one runs: it would be rejected, not queued — except an `amend` that only adds requirements or
+  checks, which waits for it. When your shell tool returns only after the
   command has ended, as it does in a non-interactive session, there is nothing to wait for: call the command
   once.
 - **The workers are agentgate's.** Do not use your own sub-agents, `codex review` or plan mode for this task.

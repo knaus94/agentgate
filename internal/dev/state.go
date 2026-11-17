@@ -227,12 +227,15 @@ func requireLead(gate *Gate) error {
 	return nil
 }
 
+// ErrBusy is the refusal of a command started while another operation of the same session runs.
+var ErrBusy = errors.New("an operation is already running; inspect status")
+
 // lock serializes operations of one session in one checkout. A second operation is rejected, not queued.
 func lock() (func(), error) {
 	if err := os.MkdirAll(home(), 0o700); err != nil {
 		return nil, err
 	}
-	return flock(filepath.Join(home(), "lock"), syscall.LOCK_EX|syscall.LOCK_NB, "an operation is already running; inspect status")
+	return flock(filepath.Join(home(), "lock"), syscall.LOCK_EX|syscall.LOCK_NB, ErrBusy)
 }
 
 // scopeLock makes claiming files atomic across the sessions of one checkout.
@@ -240,18 +243,19 @@ func scopeLock() (func(), error) {
 	if err := os.MkdirAll(checkoutDir(""), 0o700); err != nil {
 		return nil, err
 	}
-	return flock(filepath.Join(checkoutDir(""), "scope.lock"), syscall.LOCK_EX, "")
+	return flock(filepath.Join(checkoutDir(""), "scope.lock"), syscall.LOCK_EX, nil)
 }
 
-func flock(path string, how int, busy string) (func(), error) {
+// flock takes a lock on a file. busy, when given, is the error of a lock somebody else holds.
+func flock(path string, how int, busy error) (func(), error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}
 	if err := syscall.Flock(int(file.Fd()), how); err != nil {
 		file.Close()
-		if busy != "" {
-			return nil, errors.New(busy)
+		if busy != nil {
+			return nil, busy
 		}
 		return nil, err
 	}

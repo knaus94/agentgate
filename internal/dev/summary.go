@@ -33,6 +33,9 @@ func (g *Gate) needs(cfg *config.Config) []Need {
 				"A design that cannot be had is taken out of the plan with `amend`, with the user's word in `authorized`."})
 	}
 	if g.Step == StepWrite {
+		if waiting := g.unprepared(true); len(waiting) > 0 {
+			return prerequisiteNeeds(waiting)
+		}
 		if g.Round == nil {
 			return out
 		}
@@ -70,12 +73,15 @@ func (g *Gate) next(needs []Need) string {
 	if g.Landed == "" && len(g.leftNotes()) > 0 {
 		notes = " The task left notes (`notes`): tell the user; on their word decide {findings: [{id, decision: accepted, evidence}]} fixes one in this task."
 	}
+	if g.Step == StepDone && g.Landed == "" {
+		notes += " New work the user asks for before it lands stays in this task: `amend` with named operations adds it as a stage."
+	}
 	switch {
 	case g.Dropped:
 		return "The task was dropped. `forget` removes it from the record, on the user's word."
 	case g.Step == StepDone && g.Worktree != "" && g.Landed == "":
 		return "Done in an isolated worktree; the checkout is untouched. Report the work and the diff (`git diff HEAD..." + g.Branch +
-			"` in the checkout), then ask the user how to bring it in and `land` {how}: apply (uncommitted, default), commit, branch or drop. Never land without the user's word." + notes
+			"` in the checkout), then ask the user whether anything is left and how to bring it in: `land` {how}: apply (uncommitted, default), commit, branch or drop. Never land without the user's word." + notes
 	case g.Step == StepDone:
 		return "Done. Report the work from `receipt`: the models that ran, the checks and their results, substitutions and remaining risks." + notes
 	case g.Step == StepCancelled:
@@ -316,6 +322,25 @@ func (g *Gate) picture(cfg *config.Config, did []string) map[string]any {
 	if position := g.position(); position != nil {
 		out["stage"] = position
 	}
+	// The checks and findings below are the present stage's: what the earlier ones came to is said here.
+	if len(g.Accepted) > 0 && g.active() {
+		var lines []string
+		for _, record := range g.Accepted {
+			passed := 0
+			for _, line := range record.Checks {
+				if strings.Contains(line, " — passed") {
+					passed++
+				}
+			}
+			reviewers := strings.Join(record.Reviewers, " + ")
+			if reviewers == "" {
+				reviewers = "nobody"
+			}
+			lines = append(lines, fmt.Sprintf("%s: %d of %d checks passed, reviewed by %s, %d findings, %d left as notes",
+				record.Name, passed, len(record.Checks), reviewers, record.Findings, len(record.Notes)))
+		}
+		out["accepted_stages"] = lines
+	}
 	if g.Pause != nil {
 		out["paused"] = map[string]string{"kind": g.Pause.Kind, "reason": g.Pause.Reason}
 	}
@@ -370,11 +395,18 @@ func (g *Gate) picture(cfg *config.Config, did []string) map[string]any {
 	if notes := g.notes(); len(notes) > 0 && g.Step == StepDone && g.Landed == "" {
 		out["notes"] = notes
 	}
+	if pending := g.pendingUpdates(); len(pending) > 0 {
+		out["pending_amendments"] = pending
+	}
 	actions := g.actions()
 	if actions == nil {
 		actions = []Action{}
 	}
 	out["actions"], out["next"] = actions, g.next(needs)
+	if _, waiting := out["pending_amendments"]; waiting && !g.active() {
+		out["next"] = "An amendment sent while the task ran arrived after it finished (`pending_amendments`). Before landing, `amend` opens a stage " +
+			"for new work and applies it there. " + out["next"].(string)
+	}
 	return out
 }
 

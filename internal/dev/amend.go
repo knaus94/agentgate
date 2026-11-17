@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/knaus94/agentgate/internal/config"
+	"github.com/knaus94/agentgate/internal/ops"
 )
 
 // A large specification is not fully known when the work starts. Amending the plan is therefore an ordinary
@@ -42,9 +45,12 @@ func Amend(cfg *config.Config, gate *Gate, source *Plan) (any, error) {
 		return nil, errors.New("an amendment keeps the task's action and write authority")
 	}
 	if gate.Request.Writes() && !gate.Request.ReviewFirst() {
-		if err := resolved.requireArchitecture(); err != nil {
+		if err := errors.Join(resolved.requireArchitecture(), resolved.requireInterfaceDesign()); err != nil {
 			return nil, err
 		}
+	}
+	if gate.Step == StepDone {
+		return gate.further(cfg, resolved, reason, strings.TrimSpace(source.Authorized))
 	}
 	old, next := gate.Plan, resolved.Plan
 	if _, err := loadReviewRules(cfg, next.Files()); err != nil {
@@ -237,6 +243,105 @@ func Amend(cfg *config.Config, gate *Gate, source *Plan) (any, error) {
 	return gate.report(cfg, did), nil
 }
 
+// withFurther is a plan with one more stage, for new work on a finished task: the streams of its last stage,
+// whose writers continue in their own sessions, working on what the amendment says.
+func withFurther(plan *Plan, update string) *Plan {
+	next := &Plan{}
+	raw, _ := json.Marshal(plan)
+	_ = json.Unmarshal(raw, next)
+	taken := func(name string) bool {
+		return slices.ContainsFunc(next.Stages, func(stage Stage) bool { return stage.Name == name })
+	}
+	name := "further"
+	for number := 2; taken(name); number++ {
+		name = fmt.Sprintf("further-%d", number)
+	}
+	streams := slices.Clone(next.Stages[len(next.Stages)-1].Streams)
+	for index := range streams {
+		streams[index].Done, streams[index].Except = false, nil
+	}
+	next.Stages = append(next.Stages, Stage{Name: name, Goal: strings.TrimSpace(update), Streams: streams})
+	return next
+}
+
+// further opens new work on a finished task that is not landed, as stages after its accepted ones. The task
+// keeps its plan, context pack, accepted design and receipts, and the writers of its last stage continue in
+// their own sessions. A landed task is closed: its code is the user's, and new work there is a new task.
+func (g *Gate) further(cfg *config.Config, resolved *Resolved, reason, authorized string) (any, error) {
+	old, next := g.Plan, resolved.Plan
+	if len(next.Stages) <= len(old.Stages) {
+		return nil, errors.New("a finished task takes new work as a stage after its accepted ones: named operations add that stage by themselves; " +
+			"a complete plan has to add it")
+	}
+	for index, stage := range old.Stages {
+		if digest(stage) != digest(next.Stages[index]) {
+			return nil, fmt.Errorf("stage %q is accepted and cannot change; the new work goes into the stages after it", stage.Name)
+		}
+	}
+	for _, requirement := range old.Requirements {
+		position := slices.IndexFunc(next.Requirements, func(other Requirement) bool { return other.ID == requirement.ID })
+		if position < 0 || next.Requirements[position] != requirement {
+			return nil, fmt.Errorf("requirement %q belongs to an accepted stage and cannot change; add a new one beside it", requirement.ID)
+		}
+	}
+	if _, err := loadReviewRules(cfg, next.Files()); err != nil {
+		return nil, err
+	}
+	if added := subtract(next.Files(), old.Files()); len(added) > 0 && g.Worktree == "" {
+		unlock, err := scopeLock()
+		if err != nil {
+			return nil, err
+		}
+		defer unlock()
+		if err := checkOwnership(added); err != nil {
+			return nil, err
+		}
+	}
+	now, err := g.snapshot()
+	if err != nil {
+		return nil, err
+	}
+	notes, err := g.inspectInputs(next.checksFor(-1), now)
+	if err != nil {
+		return nil, err
+	}
+	// The writers of the last stage know the code best: the streams of the new stage continue their sessions.
+	last := g.Accepted[len(g.Accepted)-1]
+	sessions := map[string]WriterRef{}
+	for name, ref := range last.Writers {
+		sessions[name] = ref
+	}
+	for name, writer := range g.latest() {
+		if writer.Session != "" {
+			sessions[strings.TrimPrefix(name, last.Name+".")] = WriterRef{Route: writer.Route, Dir: writer.Dir, Session: writer.Session}
+		}
+	}
+	changes := planChanges(old, next)
+	next.Update, next.Authorized, next.Rework = "", "", nil
+	g.Plan, g.Modes = next, resolved.Modes
+	g.Stage, g.Whole, g.Mode, g.StageTree = len(old.Stages), false, resolved.Modes[len(old.Stages)], now
+	g.Final, g.Reported, g.Pause = nil, false, nil
+	g.Writers, g.Reviews, g.ReviewError, g.Reading = nil, nil, "", nil
+	g.VisualRuns, g.VisualSkip = nil, ""
+	g.Dispositions, g.Resolutions, g.Baselines, g.Disputes = map[string]Disposition{}, map[string]string{}, map[string]int{}, map[string]Dispute{}
+	g.Checks, g.Corrections, g.Round, g.Demands = nil, nil, nil, nil
+	g.Rounds, g.Iteration, g.Boost, g.AutoRounds = 0, 0, 0, 0
+	g.Signals, g.Conflicts, g.Foreign, g.Continue = nil, nil, nil, sessions
+	if err := g.setStep(StepWrite); err != nil {
+		return nil, err
+	}
+	g.Revisions = append(g.Revisions, Revision{Number: len(g.Revisions) + 1, At: time.Now().Unix(), Reason: reason, Authorized: authorized,
+		Digest: digest(next), Changes: changes})
+	did := []string{fmt.Sprintf("plan amended (revision %d): %s", len(g.Revisions), reason)}
+	did = append(append(did, changes...), notes...)
+	did = append(did, fmt.Sprintf("the finished task goes on with stage %s; `run` starts its writers", next.Stages[g.Stage].Name))
+	did = append(did, g.applyPending(cfg)...) // what was sent while the task finished belongs to this work too
+	if err := g.save(); err != nil {
+		return nil, err
+	}
+	return g.report(cfg, did), nil
+}
+
 // withoutAdditions is a revised accepted stage with the additions the pass over the whole change may make taken
 // back out: files its streams gained and new requirements its covers gained. What is left differs from the
 // accepted stage only by changes that pass may not make.
@@ -273,6 +378,7 @@ type Operations struct {
 	Timeouts     *Timeouts           `json:"timeouts,omitempty"`
 	Design       []DesignChange      `json:"design,omitempty"`
 	Architecture *Accepted           `json:"architecture,omitempty"` // the receipt the task follows from now on, with the user's decisions
+	EnvFile      string              `json:"env_file,omitempty"`     // the private file of the checks' variables
 }
 
 // ScopeChange gives a stream more files.
@@ -316,7 +422,12 @@ func AmendOperations(cfg *config.Config, gate *Gate, operations Operations) (any
 	if err := gate.can(ActAmend); err != nil {
 		return nil, err
 	}
-	next, err := operations.apply(gate.Plan, gate.stageIndex())
+	plan, present := gate.Plan, gate.stageIndex()
+	if gate.Step == StepDone {
+		// New work on a finished task is a stage of its own, after the accepted ones; the operations shape it.
+		plan, present = withFurther(gate.Plan, operations.Update), len(gate.Plan.Stages)
+	}
+	next, err := operations.apply(plan, present)
 	if err != nil {
 		return nil, err
 	}
@@ -490,6 +601,9 @@ func (o Operations) apply(current *Plan, present int) (*Plan, error) {
 	if o.Mode != "" {
 		next.Mode = o.Mode
 	}
+	if o.EnvFile != "" {
+		next.EnvFile = o.EnvFile
+	}
 	if len(problems) > 0 {
 		return nil, problems
 	}
@@ -618,4 +732,140 @@ func planChanges(old, next *Plan) []string {
 		add("the accepted architecture changed")
 	}
 	return out
+}
+
+// An amendment the user asks for while an operation runs used to be refused, and the operation could finish the
+// task before anyone sent it again: the reviewers never saw the requirement. One that only adds — a requirement,
+// a check — now waits beside the task, and the running operation applies it before its next review starts and
+// before it would finish the task. Everything else is still refused while an operation runs.
+
+// pendingAmendment is an amendment waiting for the running operation.
+type pendingAmendment struct {
+	At         int64      `json:"at"`
+	Operations Operations `json:"operations"`
+}
+
+func pendingDir(cwd, session string) string {
+	return filepath.Join(sessionDir(cwd, session), "pending")
+}
+
+// additive says why operations cannot wait for the running operation, or nil when all they do is add.
+func (o Operations) additive(current *Plan) error {
+	var other []string
+	for name, set := range map[string]bool{"mode": o.Mode != "", "scope": len(o.Scope) > 0, "timeouts": o.Timeouts != nil,
+		"design": len(o.Design) > 0, "architecture": o.Architecture != nil, "rework": len(o.Rework) > 0, "authorized": o.Authorized != "",
+		"env_file": o.EnvFile != ""} {
+		if set {
+			other = append(other, name)
+		}
+	}
+	for _, change := range o.Checks {
+		if len(change.Remove) > 0 {
+			other = append(other, "removing a check")
+		}
+	}
+	for _, change := range o.Requirements {
+		if slices.ContainsFunc(current.Requirements, func(r Requirement) bool { return r.ID == change.ID }) {
+			other = append(other, "requirement "+change.ID+", which exists")
+		}
+	}
+	if len(other) > 0 {
+		slices.Sort(other)
+		return fmt.Errorf("while an operation runs, an amendment can only add requirements and checks; this one also changes %s. "+
+			"Send it when the operation has ended (`status` says when)", strings.Join(other, ", "))
+	}
+	if len(o.Requirements) == 0 && len(o.Checks) == 0 {
+		return errors.New("the amendment adds no requirement and no check")
+	}
+	return nil
+}
+
+// Pend keeps an amendment that only adds, sent while an operation of the session runs, for that operation to
+// apply. It is checked now against the plan as it was saved, so a wrong one is refused while the lead is there.
+func Pend(cfg *config.Config, operations Operations) (any, error) {
+	if err := requireLead(nil); err != nil {
+		return nil, err
+	}
+	gate, err := LoadCurrent()
+	if err != nil {
+		return nil, err
+	}
+	if gate == nil || !gate.active() {
+		return nil, ErrBusy
+	}
+	if strings.TrimSpace(operations.Update) == "" {
+		return nil, errors.New("an amendment needs update: what changed and why")
+	}
+	if err := operations.additive(gate.Plan); err != nil {
+		return nil, err
+	}
+	next, err := operations.apply(gate.Plan, gate.stageIndex())
+	if err != nil {
+		return nil, err
+	}
+	if _, err := Resolve(cfg, next); err != nil {
+		return nil, err
+	}
+	path := filepath.Join(pendingDir(gate.Cwd, gate.Session), fmt.Sprintf("%d-%s.json", time.Now().UnixNano(), newID()[:8]))
+	if err := writePacket(path, pendingAmendment{At: time.Now().Unix(), Operations: operations}); err != nil {
+		return nil, err
+	}
+	running := "the running operation"
+	if record := ops.Status(sessionDir(gate.Cwd, gate.Session)); record != nil && record.Action != "" {
+		running = "`" + record.Action + "`"
+	}
+	return map[string]any{"task": gate.ID[:8], "step": gate.Step, "pending": operations.Update,
+		"next": "The amendment waits for " + running + ", which applies it before the next review starts and before it could finish the task; " +
+			"its answer says so under `did`. `status` lists it under `pending_amendments` until then."}, nil
+}
+
+// pendingUpdates are the amendments waiting for the running operation, by what they change.
+func (g *Gate) pendingUpdates() []string {
+	entries, _ := os.ReadDir(pendingDir(g.Cwd, g.Session))
+	var out []string
+	for _, entry := range entries {
+		var item pendingAmendment
+		raw, err := os.ReadFile(filepath.Join(pendingDir(g.Cwd, g.Session), entry.Name()))
+		if err == nil && json.Unmarshal(raw, &item) == nil {
+			out = append(out, item.Operations.Update)
+		}
+	}
+	return out
+}
+
+// applyPending applies the amendments sent while this operation ran, oldest first. One that no longer applies
+// is reported, not kept.
+func (g *Gate) applyPending(cfg *config.Config) []string {
+	dir := pendingDir(g.Cwd, g.Session)
+	entries, _ := os.ReadDir(dir)
+	var did []string
+	for _, entry := range entries {
+		path := filepath.Join(dir, entry.Name())
+		var item pendingAmendment
+		raw, err := os.ReadFile(path)
+		if err == nil {
+			err = json.Unmarshal(raw, &item)
+		}
+		if err == nil {
+			err = item.Operations.additive(g.Plan)
+		}
+		var answer any
+		if err == nil {
+			answer, err = AmendOperations(cfg, g, item.Operations)
+		}
+		if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			err = errors.Join(err, removeErr)
+		}
+		if err != nil {
+			did = append(did, "the amendment sent while the task ran was not applied ("+clipText(oneLine(item.Operations.Update), 200)+"): "+err.Error())
+			continue
+		}
+		did = append(did, "applied the amendment sent while the task ran: "+clipText(oneLine(item.Operations.Update), 300))
+		if report, ok := answer.(map[string]any); ok {
+			if lines := stringList(report["did"]); len(lines) > 1 {
+				did = append(did, lines[1:]...) // the first line says again that the plan was amended
+			}
+		}
+	}
+	return did
 }

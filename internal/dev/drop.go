@@ -175,7 +175,7 @@ func Forget(input ForgetInput) (any, error) {
 		path = found[0]
 	}
 	dir := filepath.Dir(path)
-	unlock, err := flock(filepath.Join(dir, "lock"), syscall.LOCK_EX|syscall.LOCK_NB, "an operation is running for that task; wait for it, or `stop` it")
+	unlock, err := flock(filepath.Join(dir, "lock"), syscall.LOCK_EX|syscall.LOCK_NB, errors.New("an operation is running for that task; wait for it, or `stop` it"))
 	if err != nil {
 		return nil, err
 	}

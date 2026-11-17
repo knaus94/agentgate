@@ -73,7 +73,7 @@ it is invalid. Configuration edits still use `config set`, `unset` and `profile`
 | `run` | Write, check, review, correct, accept — until a person is needed |
 | `answer` | Reply to a blocked writer in its own session, then run on |
 | `decide` | Rule on findings, give the lead's own review, give work to the writers of named streams; then run on |
-| `amend` | Change the plan of the active task — named operations or the complete plan — with a reason |
+| `amend` | Change the plan of the task — named operations or the complete plan — with a reason; an addition waits for a running command, and a finished task gets a new stage |
 | `status [--full]`, `show <part>` | The compact picture, or one part in full: findings, plan, stage, checks, review, architecture, receipt |
 | `pause`, `resume`, `stop` | Park the task with the true reason; lift a pause; cancel the running operation |
 | `check`, `visual`, `land` | Run declared checks; browser verification; land an isolated task |

@@ -283,7 +283,7 @@ func Land(cfg *config.Config, gate *Gate, input LandInput) (any, error) {
 		return nil, errors.New("land {how: commit} needs message: the commit message, written in the repository's convention (read its recent `git log`)")
 	}
 	main := gate.Cwd
-	unlockLanding, err := flock(filepath.Join(checkoutDir(main), "land.lock"), syscall.LOCK_EX|syscall.LOCK_NB, "another task is landing in this checkout; retry after it finishes")
+	unlockLanding, err := flock(filepath.Join(checkoutDir(main), "land.lock"), syscall.LOCK_EX|syscall.LOCK_NB, errors.New("another task is landing in this checkout; retry after it finishes"))
 	if err != nil {
 		return nil, err
 	}

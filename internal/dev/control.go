@@ -113,6 +113,7 @@ func PromptHook(cwd, sessionID string) map[string]any {
 			"{\"notes\": \"<the user's words>\"} — and apply the plan it returns with `amend --plan`. Do not answer it from your own reading of the "+
 			"code, and do not write a mechanism into a requirement. A question about how the code works today is `agentgate consult`.", gate.Step)
 	}
+	note += " Answer the user in the language of their message, also after long answers of the tool in English."
 	return map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": "UserPromptSubmit", "additionalContext": note}}
 }
 
@@ -126,7 +127,7 @@ func StopHook(cwd, sessionID string) map[string]any {
 	if gate == nil {
 		return map[string]any{}
 	}
-	unlock, err := flock(filepath.Join(sessionDir(cwd, sessionID), "lock"), syscall.LOCK_EX|syscall.LOCK_NB, "operation running")
+	unlock, err := flock(filepath.Join(sessionDir(cwd, sessionID), "lock"), syscall.LOCK_EX|syscall.LOCK_NB, errors.New("operation running"))
 	if err != nil {
 		return map[string]any{} // the operation owner reports its own completion
 	}
@@ -181,6 +182,12 @@ func StopHook(cwd, sessionID string) map[string]any {
 	// What the task needs is read from the state as it was loaded. A command the lead starts meanwhile must find
 	// the session free, not refused as "already running" by this hook.
 	release()
+	kinds := gate.needKinds(cwd)
+	// Making a prerequisite exist — a database, a stand — takes the lead minutes of waiting on its own commands.
+	// Ending a turn in those first minutes is that waiting, not a task left behind.
+	if record != nil && slices.Equal(kinds, []string{"setup"}) && time.Since(time.Unix(int64(record.EndedAt), 0)) < setupGrace {
+		return map[string]any{}
+	}
 	reason := "/dev task is at " + gate.Step + "."
 	// The lead often believes a command is still running when it ended, or was refused, within a second.
 	if record != nil {
@@ -194,12 +201,15 @@ func StopHook(cwd, sessionID string) map[string]any {
 		reason += fmt.Sprintf(" agentgate was %s at this task's last command and is %s now: read `agentgate guide` in full before the next command.",
 			gate.toolBefore, update.Version)
 	}
-	if kinds := gate.needKinds(cwd); len(kinds) > 0 {
+	if len(kinds) > 0 {
 		reason += " It needs: " + strings.Join(kinds, ", ") + "."
 	}
 	return map[string]any{"decision": "block", "reason": reason + " Settle it with one of the `actions` that `agentgate status` lists. " +
 		"If you are waiting for the user's decision, `agentgate pause` with the true reason and report INCOMPLETE. Do not claim it is done."}
 }
+
+// setupGrace is how long after the last command the lead may end a turn while it makes a prerequisite exist.
+const setupGrace = 15 * time.Minute
 
 // needKinds lists the kinds of what the task needs, read in its own checkout; nothing when they cannot be read.
 func (g *Gate) needKinds(cwd string) []string {

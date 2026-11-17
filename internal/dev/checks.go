@@ -295,6 +295,13 @@ func (g *Gate) execCheck(check *Check, label string) (int, string, error) {
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Stdout, cmd.Stderr = output, output
+	if g.Plan.EnvFile != "" {
+		pairs, err := readEnvFile(g.Plan.EnvFile)
+		if err != nil {
+			return 0, log, fmt.Errorf("the task's env_file: %w", err)
+		}
+		cmd.Env = append(os.Environ(), pairs...)
+	}
 	err = ops.Run(cmd, seconds(check.TimeoutS))
 	if err != nil && cmd.ProcessState == nil {
 		return 0, log, err

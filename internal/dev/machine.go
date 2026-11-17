@@ -61,7 +61,7 @@ var legal = map[string][]Action{
 	StepWrite:     {ActRun, ActAnswer, ActDecide, ActAmend, ActCheck, ActVisual, ActPause, ActStop},
 	StepVerify:    {ActRun, ActDecide, ActAmend, ActCheck, ActVisual, ActPause, ActStop},
 	StepDecide:    {ActDecide, ActRun, ActAmend, ActCheck, ActVisual, ActPause, ActStop},
-	StepDone:      {ActLand, ActDecide}, // decide fixes the notes a finished task left
+	StepDone:      {ActLand, ActDecide, ActAmend}, // decide fixes the notes a finished task left; amend adds new work as a stage
 	StepCancelled: {ActLand},
 }
 
@@ -70,7 +70,7 @@ var transitions = map[string][]string{
 	StepWrite:     {StepWrite, StepVerify, StepCancelled},
 	StepVerify:    {StepVerify, StepWrite, StepDecide, StepDone, StepCancelled},
 	StepDecide:    {StepDecide, StepWrite, StepVerify, StepDone, StepCancelled},
-	StepDone:      {StepVerify, StepCancelled}, // reopened, or dropped
+	StepDone:      {StepVerify, StepWrite, StepCancelled}, // reopened, given a further stage, or dropped
 	StepCancelled: {},
 }
 
@@ -139,9 +139,9 @@ func (g *Gate) can(action Action) error {
 			return refuse("this task's worktree is not landed or dropped yet: `land` it, or `drop` it")
 		}
 		return nil
-	case ActDecide:
+	case ActDecide, ActAmend:
 		if g.Step == StepDone && g.Landed != "" {
-			return refuse("this task is landed (%s): its changes are the checkout's now; a new task fixes what it left", g.Landed)
+			return refuse("this task is landed (%s): its changes are the checkout's now; a new task fixes what it left or adds what is new", g.Landed)
 		}
 	}
 	if !slices.Contains(legal[g.Step], action) && action != ActResume {

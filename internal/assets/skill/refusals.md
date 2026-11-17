@@ -6,7 +6,12 @@ what it was asked answers with `error`. Nothing half-done is left: the object sh
 
 | The text says | Why | What to do |
 |---|---|---|
-| `an operation is already running` | another call of this session is at work | wait for its answer; `status` shows `running`; `tell` reaches running writers; `stop` ends it |
+| `an operation is already running` | another call of this session is at work | wait for its answer; `status` shows `running`; `tell` reaches running writers; `stop` ends it. An `amend` that only adds requirements or checks is not refused: it waits (`pending_amendments`) |
+| `while an operation runs, an amendment can only add requirements and checks` | an `amend` that changes something, sent while a call runs | send it when that call has ended |
+| `the plan adds an interface (ui.usage): it is designed …` | `start` or `amend` of a plan whose interface has no accepted design | `architecture --plan <name>`; put its `input.ui` into the plan |
+| `a finished task takes new work as a stage after its accepted ones` | a complete plan sent to a finished task without a new stage | `amend` with named operations: they add the stage |
+| `this task is landed (…)` | `decide` or `amend` after `land` | new work is a new task: `prepare` |
+| `"…" is not a prerequisite of the plan` | `run {prepared}` with a wrong id | use one the need names |
 | `there is no blocked writer to answer` | no writer waits for an answer | settle `needs`, or `run` |
 | `work is given once the writers of the round have reported` | `decide {work}` while writers are at work or blocked | `answer` a blocked writer, `run` a failed one, then give work |
 | `… is not a stream of the present position; streams: …` | a stream name of another stage, or a typo | use one of those listed |

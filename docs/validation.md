@@ -4,6 +4,31 @@ This record distinguishes live integrations from controlled provider fixtures an
 model quality, arbitrary specification size or every possible execution environment. It has two parts: what
 was run for the 0.16.0 source, and the release validation of 0.14.0, which is kept as it was written.
 
+## 0.21.0
+
+Checked on 2026-11-17 against `a5e07d5` (the 0.21 brief on 0.20.2).
+
+| Check | Actual result |
+|---|---|
+| `make check`: `gofmt`, `go vet ./...`, `go test -race ./...`, Node core suite | PASS; Node core suite 19 of 19 |
+| `go test ./internal/dev` without `-race` | PASS |
+| Dry run | not run: not authorized for this release; its preparation scenarios still send `setup` as a list |
+
+Six scenario tests are new (`internal/dev/interfaces_test.go`): a plan with `ui.usage` is refused at `start`,
+and `architecture` designs the interface first — a designer that did not walk a job is refused — then the
+architects on it, and the accepted design keeps the architecture valid; the first review lane of a stage that
+writes interface code gets `usability`, and none without `usage`; a prerequisite holds the writers, one made
+from a stream holds the checks after it, and `run {prepared}` releases them; a check gets the variables of
+`env_file` and the task keeps none of their values, while a file others can read is refused; an `amend` that
+only adds, sent while the session is busy, waits and reaches the reviewer's criteria before the task finishes,
+while one that changes the mode is refused; `amend` on a finished task opens the stage `further`, whose writer
+continues the last stage's session. Existing tests changed with the protocol: scripted preparation answers send
+`setup` as an object.
+
+Not checked: what real models do with the new prompts — the designer walking jobs, the architect and the
+preparation worker answering a question with a comparison, the reviewer judging `usability`. That shows only
+in real sessions. No model was run.
+
 ## 0.20.2
 
 Checked on 2026-11-17 against `6ffe342` (0.20.1). Only the built-in table, the Codex profile, tests and

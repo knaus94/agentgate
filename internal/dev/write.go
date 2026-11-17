@@ -153,7 +153,7 @@ func (g *Gate) admit(cfg *config.Config) (*Resolved, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := resolved.requireArchitecture(); err != nil {
+	if err := errors.Join(resolved.requireInterfaceDesign(), resolved.requireArchitecture()); err != nil {
 		return nil, err
 	}
 	if _, err := loadReviewRules(cfg, g.scope()); err != nil {
@@ -318,6 +318,9 @@ func (g *Gate) previousWriter(stream string) *WriterRef {
 	if last := g.latest()[stream]; last != nil {
 		return &WriterRef{Route: last.Route, Dir: last.Dir, Session: last.Session}
 	}
+	if ref, known := g.Continue[stream]; known && dirExists(ref.Dir) {
+		return &ref
+	}
 	if !g.Whole {
 		return nil
 	}
@@ -356,6 +359,11 @@ func (g *Gate) assignment(stream Stream) map[string]any {
 	}
 	if len(g.Attachments) > 0 {
 		packet["attachments"] = g.Attachments
+	}
+	if waiting := g.madeFrom(stream.Name); len(waiting) > 0 {
+		packet["prepared_after_you"] = map[string]any{"prerequisites": waiting,
+			"rule": "The lead makes these exist from what you write, after your stream reports: do not block on them. Write the code, run what " +
+				"needs none of them, and say in your summary what you could not run without them."}
 	}
 	if previous := g.lastReport(stream.Name); previous != nil {
 		packet["your_previous_report"] = map[string]any{"status": previous.Status, "summary": previous.Summary,

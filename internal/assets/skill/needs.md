@@ -99,8 +99,13 @@ Its writers get one more step of effort by themselves. `pause` and ask the user 
 `show findings` shows what keeps coming back. `run` continues; `amend` or `pause` when the plan or a decision
 is what is wrong.
 
-## setup — the cause is outside the code
+## setup — something outside the code is missing
 
+- A prerequisite of the plan does not exist yet (`id` names it, `detail.command` how it is made): a database,
+  a migration applied to it, a stand. Make it exist — with the user's word where `setup.authorizations` of the
+  preparation asks for it — then `{"prepared": ["<id>", …]}` to `run`. The writers of the stage, or the checks
+  after the stream it is made from, wait for nothing else. While you make it exist, ending your turn in the
+  first minutes is not held against you by the Stop hook.
 - A check that passed on these same files fails now: the last line of its log comes first. Repair what it
   names — a stopped service, a stand, the machine — and `run`: the check runs again, no writer starts. If the
   code is at fault after all, `{"work": [{"stream": "<stream>", "note": "<what is wrong>"}]}` sends the failure
@@ -118,11 +123,15 @@ hidden tab, controlled time — is a test's to prove, not a scenario's.
 
 ## scope — an isolated task changed files no stream owns
 
-`amend` gives them to a stream, or remove them from the worktree; then `run`:
+`amend` gives them to a stream when the task means to change them:
 
 ```json
 {"update": "the generator writes the client next to the schema", "scope": [{"stream": "api", "add": ["src/generated/client.ts"]}]}
 ```
+
+Generator output a tool rewrote on its own — a service started from the worktree rewrites its schema — is put
+back instead: the need's `input` is `{"restore": [paths]}` to `run`, which restores them as the position found
+them and goes on.
 
 ## conflict — a review without --fix found conflict markers
 
@@ -131,7 +140,8 @@ Report them: a read-only review cannot change code.
 ## Giving work without a need
 
 `decide {"work": [...]}` gives work to the writers of named streams at any step after the round of writers
-reported, and also at `done`. An item is `{stream, note, requirement?, escalate?}`: `note` is what to do;
+reported, and also at `done`. New work on a finished task — a revised design, requirements the user adds — is
+`amend` with named operations instead: it adds a stage (the `finished` page). An item is `{stream, note, requirement?, escalate?}`: `note` is what to do;
 `requirement` names an unmet requirement or rule — the work is tracked until the criterion is met; `escalate`
 raises that writer one step of effort. Failing checks go to the streams you name. A correction opens at once
 with everything outstanding: accepted findings, failing checks and your work.

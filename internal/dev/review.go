@@ -213,7 +213,30 @@ func (g *Gate) lanes(cfg *config.Config, subs *substitutions) ([]laneSpec, func(
 	if len(g.designs()) > 0 && len(out) > 0 {
 		out[0].Axes = append(slices.Clone(out[0].Axes), "design")
 	}
+	// An interface the change adds is judged for the jobs it is for, wherever its code is written.
+	if g.usage() != nil && g.writesInterface() && len(out) > 0 && !slices.ContainsFunc(out, func(lane laneSpec) bool { return slices.Contains(lane.Axes, "usability") }) {
+		out[0].Axes = append(slices.Clone(out[0].Axes), "usability")
+	}
 	return out, skip, nil
+}
+
+// usage is the jobs of an interface the change adds, or nil.
+func (g *Gate) usage() *Usage {
+	if g.Plan.UI == nil || g.Plan.UI.Skip != "" {
+		return nil
+	}
+	return g.Plan.UI.Usage
+}
+
+// writesInterface says whether the present position writes interface code: a frontend stream, or a file of
+// an interface kind in its scope.
+func (g *Gate) writesInterface() bool {
+	for _, stream := range g.streams() {
+		if stream.Domain == "frontend" || slices.ContainsFunc(stream.Files, func(file string) bool { return slices.Contains(uiSuffixes, filepath.Ext(file)) }) {
+			return true
+		}
+	}
+	return false
 }
 
 // LeadReview is the lead's own reading of the patch, used in light mode instead of a reviewer process.

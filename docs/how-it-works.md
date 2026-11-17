@@ -48,9 +48,9 @@ What follows a verification is determined, so the tool does it:
 | `requirement`, `rule` | a criterion that is due is not verified, and the cause is not code a writer can add: the proof is missing, or the plan put it where it cannot be met |
 | `stall` | a correction made no verified progress: a new diagnosis is needed, not another attempt |
 | `limit` | three corrections ran in a row without the lead looking |
-| `setup` | a verification tool could not observe the result |
+| `setup` | a prerequisite of the plan — a database, a stand — does not exist yet, or a verification tool could not observe the result |
 | `scenarios` | opted-in browser scenarios were not observed |
-| `scope` | an isolated task changed a file that no stream owns |
+| `scope` | an isolated task changed a file that no stream owns; generator output a tool rewrote is put back with `run {restore}` |
 
 Each need carries the call that settles it — `command` and `input`, with the real ids, streams and valid
 references filled in — so the lead does not look the shape up. Every answer also lists `actions`: the
@@ -93,7 +93,20 @@ why: named operations — files for a stream, checks added or removed, a require
 designs, the mode — or the complete plan. Accepted stages are frozen. A requirement may be added, or moved to the stage that completes it;
 changing or removing one needs `authorized`. An amendment makes stale only what it touches: moving a
 requirement has the reviewer reassess the criteria in its own session and does not re-read the code
-([decision 0006](decisions/0006-amendment-is-ordinary.md)).
+([decision 0006](decisions/0006-amendment-is-ordinary.md)). An amendment that only adds requirements or checks
+may be sent while a command runs: it waits beside the task and the running command applies it before its next
+review, so a requirement said in the middle of the work reaches the reviewers. A finished task that is not
+landed takes new work the same way: named operations add a stage after the accepted ones, whose writers
+continue the last stage's sessions.
+
+### What the work needs that no writer makes
+
+A plan lists its `prerequisites`: a disposable database, a migration applied to it, a running service. Before
+the writers of a stage start — or, for one made from what a stream writes, before the checks after that
+stream — the tool stops with a need `setup` naming each one and how it is made; the lead makes it exist and
+says so with `run {prepared}`. A writer is told what will be made from its work and does not block on it. The
+variables the checks need go into a private file the plan's `env_file` names: every declared check gets them,
+and no answer shows their values.
 
 What is deliberately not there: a separate explorer before the writers (the preparation worker already read
 the repository and hands over its map), a separate test-writing agent (tests belong to the stream that

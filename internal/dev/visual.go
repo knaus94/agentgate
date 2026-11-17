@@ -1,6 +1,7 @@
 package dev
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -190,6 +191,10 @@ func (g *Gate) prepareVisual(cfg *config.Config, input VisualInput, now, key str
 	node, nodeErr := exec.LookPath("node")
 	if _, err := os.Stat(cli); err != nil || nodeErr != nil {
 		return nil, fmt.Errorf("browser tooling is missing: node and %s", cli)
+	}
+	if expected, install := browserMissing(cfg); expected != "" {
+		return nil, fmt.Errorf("the browser the pass drives is not installed (expected %s); nothing was observed. With the user's word, `%s` "+
+			"installs it; then run the pass again", expected, install)
 	}
 	origins, err := standOrigins(input.Origins)
 	if err != nil {
@@ -437,6 +442,39 @@ func (g *Gate) observed(took string) string {
 		line += "; not established: " + clipText(strings.Join(run.Limits, "; "), 600)
 	}
 	return line
+}
+
+// browserMissing says where the browser the pass drives is expected and how to install it, when it is not there.
+// Both are "" when it is there, or when the tooling does not say which browser it needs.
+func browserMissing(cfg *config.Config) (expected, install string) {
+	modules := filepath.Dir(filepath.Dir(filepath.Dir(config.ExpandHome(cfg.PlaywrightMCP)))) // node_modules/@playwright/mcp/cli.js
+	raw, err := os.ReadFile(filepath.Join(modules, "playwright-core", "browsers.json"))
+	if err != nil {
+		return "", ""
+	}
+	var listing struct {
+		Browsers []struct {
+			Name     string `json:"name"`
+			Revision string `json:"revision"`
+		} `json:"browsers"`
+	}
+	if json.Unmarshal(raw, &listing) != nil {
+		return "", ""
+	}
+	home, _ := os.UserHomeDir()
+	for _, browser := range listing.Browsers {
+		if browser.Name != "chromium" {
+			continue
+		}
+		dir := filepath.Join(home, ".cache", "ms-playwright", "chromium-"+browser.Revision)
+		for _, build := range []string{"chrome-linux64", "chrome-linux"} {
+			if fileExists(filepath.Join(dir, build, "chrome")) {
+				return "", ""
+			}
+		}
+		return filepath.Join(dir, "chrome-linux64", "chrome"), "node " + filepath.Join(modules, "playwright", "cli.js") + " install chromium"
+	}
+	return "", ""
 }
 
 func dirExists(path string) bool { info, err := os.Stat(path); return err == nil && info.IsDir() }

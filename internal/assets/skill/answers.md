@@ -24,6 +24,8 @@ Every command about the task answers with one object. Read it as it is; do not p
 | `writers` | the latest writer of each stream. A running one adds `running_s`, `quiet_s` (seconds since its last event) and `last_event` |
 | `needs` | what only a person can settle: the `needs` page |
 | `checks` | the declared checks of the present position; `failing` names them by a short label |
+| `accepted_stages` | what each accepted stage came to, one line each: its checks, its reviewers, its findings and notes |
+| `pending_amendments` | amendments sent while a call ran, waiting for it: it applies them before its next review |
 | `findings` | open findings, how many block, how many are notes |
 | `isolated` | `{worktree, branch, landed?, ready_since?}` of an isolated task |
 | `unchecked_tests` | test files the task added or changed that no declared check runs: nothing here shows they pass — `amend {checks}` adds one, or tell the user |
@@ -47,7 +49,7 @@ Every command about the task answers with one object. Read it as it is; do not p
 | `show stage` | `{position, stages, accepted, brief}` |
 | `show checks` | `{checks: [{id, argv, kind, status, returncode, log}], failing}` |
 | `show review` | what to judge in a review and the input to answer it with |
-| `show architecture` | the design the task follows, the questions it asks the user, every round of the pass and the plan entry that accepts it |
+| `show architecture` | the design the task follows, the questions it asks the user, every round of the pass in full and the plan entry that accepts it |
 | `show receipt` | the receipt, also before `done` |
 | `check` | `{receipts: [{check, returncode, reused, log}], failed}`; exit 2 when one failed |
 | `tell` | `{posted}` |
@@ -56,8 +58,10 @@ Every command about the task answers with one object. Read it as it is; do not p
 | `stop` | `{cancellation_requested, operation}` |
 
 Commands before a task answer in their own shape: `prepare` (`status`, `summary`, `plan`, `brief`, `mode`,
-`because`, `stages`, `checks`, `setup`, `questions`, `next`), `architecture` (what `show architecture`
-prints), `route`, `modes`, `preview`, `consult`, `design`. `forget` answers `{forgot, task, removed}`. Errors
+`because`, `stages`, `checks`, `setup {authorizations, prerequisites, notes}`, `questions`, `next`),
+`architecture` (the design the task follows in full, every other round in one line, the interface design when
+there is one, and `input`), `route`, `modes`, `preview`, `consult`, `design`. An `amend` that waits for a
+running call answers `{task, step, pending, next}`. `forget` answers `{forgot, task, removed}`. Errors
 without a task go to stderr. While a preparation waits on you (`BLOCKED`), `status` carries its answer under
 `preparation` and its `next`, also when an earlier task of the session is done.
 
@@ -65,5 +69,6 @@ without a task go to stderr. While a preparation waits on you (`BLOCKED`), `stat
 
 `prepare`, `architecture`, `start`, `run`, `answer` and `decide` run model workers and take minutes; the
 command prints nothing until it ends. One call runs at a time per session: "already running" means your
-command was not started, not that it was queued. `status` shows what runs (`running`) and how the last call
+command was not started, not that it was queued. The one exception is an `amend` that only adds requirements
+or checks: it waits for the running call. `status` shows what runs (`running`) and how the last call
 ended (`last`).

@@ -334,7 +334,13 @@ func run(args arguments) (any, int, error) {
 			if err := decodeInput(raw, &operations); err != nil {
 				return nil, 0, fmt.Errorf("amend input: %w", err)
 			}
-			return gated(cfg, "amend", func(gate *dev.Gate) (any, error) { return dev.AmendOperations(cfg, gate, operations) })
+			value, code, err := gated(cfg, "amend", func(gate *dev.Gate) (any, error) { return dev.AmendOperations(cfg, gate, operations) })
+			if errors.Is(err, dev.ErrBusy) {
+				// What only adds waits for the running operation instead of being lost to the refusal.
+				value, err = dev.Pend(cfg, operations)
+				return value, 0, err
+			}
+			return value, code, err
 		}
 		plan := &dev.Plan{}
 		if err := decodeInput(raw, plan); err != nil {

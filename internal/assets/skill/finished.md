@@ -30,6 +30,22 @@ again. A note of an earlier stage, listed as `[stage] …`, has no id here: give
 `{"work": [{"stream": "<stream>", "note": "<the note>"}]}` to `decide`. A landed task is closed: what it left is
 a new task.
 
+## New work before landing
+
+The user asks for more once the task is done — a revised design, a requirement they add. While the task is not
+landed it stays in this task: `amend` with named operations adds a stage after the accepted ones, with the
+streams of the last stage, whose writers continue in their own sessions.
+
+```json
+{"update": "The user: «streamers are found without a code»", "architecture": {"id": "<revised receipt>"},
+ "requirements": [{"id": "R9", "text": "A streamer is found by Steam link, id or page address"}],
+ "scope": [{"stream": "ui", "add": ["src/features/streamers/"]}]}
+```
+
+`run` then writes, checks and reviews that stage like any other, and the task finishes again. A complete plan
+sent instead has to add the stage itself. Ask the user whether anything is left before you `land`: after it,
+new work is a new task.
+
 ## Landing an isolated task
 
 On the user's word only: `land {"how": "apply"}` (uncommitted, the default), `{"how": "commit", "message":

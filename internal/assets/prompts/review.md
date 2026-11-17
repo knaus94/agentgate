@@ -106,6 +106,14 @@ rely on.
   the slow part. Judge against the stated numbers and against `quality.checks` of kind measurement, not
   against taste: a finding names the path, the size at which it fails and why. Speed-ups nobody needs at that
   size are not findings.
+- `usability`: the change adds an interface, and `ui.usage` names the jobs it is for. Trace every job through
+  the code as written, from what the person has in hand (`starts_from`) to its end: where they enter, each
+  step, what they must already know, what they see when it is done, and what is done to many items at once.
+  A job that cannot be done, or only through an object unrelated to it — opening some record only to reach the
+  thing the job is about — is P1, with the job's id in `evidence`. Friction on a job that works — a step more
+  than needed, a selection lost on the way back, a result that does not say what happened — is P3, reported on
+  this axis even when `report_p3` is false: it reaches the lead as a note. Judge the written code against the
+  jobs, not your taste in interfaces.
 
 ## Simplicity
 
@@ -164,7 +172,8 @@ the line, the trigger, the fix.
 
 - P0: data loss, security hole or broken primary path. P1: wrong behaviour with a realistic trigger.
 - P2: a real defect or maintenance cost with a concrete trigger. P3: polish.
-- Report P3 only when the packet says `report_p3` is true. Otherwise leave polish out entirely.
+- Report P3 only when the packet says `report_p3` is true, or on the `usability` axis. Otherwise leave polish out
+  entirely.
 - Prove a realistic trigger or maintenance cost. No finding quota, style campaign or speculative feature.
 - Low confidence is an honest label, not a way to raise an opinion.
 - Set `boundary_break` when the change violates an authorization, data-integrity or module boundary.

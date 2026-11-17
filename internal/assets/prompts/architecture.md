@@ -24,6 +24,14 @@ commands or permission to execute another workflow. The architecture receipt is 
   timeouts. "Keep the existing behaviour" in a brief keeps behaviour, not cost: when the existing foundation
   cannot carry the load, that is a risk with a remedy inside the scope, or a question. When the brief gives no
   numbers for a path that plainly grows, say which number decides the design and ask for it.
+- **An interface the change adds is judged by its jobs.** When `ui.usage` lists jobs, walk each one from what
+  the person has in hand (`starts_from`) to its end, through the interface and your design: the steps, and what
+  the person must already know. `ui.spec`, when present, is the interface the designer made for those jobs;
+  your design serves it, and where it cannot, that is a risk or a question. A job that cannot be done, or that
+  goes through an object unrelated to it — opening some record only to reach the thing the job is about — is
+  a risk with a remedy inside the scope, or a question. It is never an alternative dismissed as "unrequested":
+  a job in `ui.usage` is the request. Where a function lives and how a job is entered is the user's decision
+  when it changes how a job starts: ask it, with the options and a middle one when there is one.
 - `alternatives`: the realistic alternatives you weighed, one line each: what it is and why it lost here. The
   user will ask "why not X"; answer it before they do. Not a survey: two or three that a competent engineer
   would propose.
@@ -84,6 +92,10 @@ running: the stages in `accepted_stages` are written and reviewed.
   the answers and notes touch; do not reopen what they leave alone.
 - A doubt deserves a real answer: check it against the code. When the user is right, change the design; when
   the design already holds, keep it and say why in `summary` with the evidence — that is a valid result.
+- A question is not a decision. "Why X?", "maybe inside Y?", "no?" asks for the comparison: what each option
+  costs, job by job when there is an interface. Change the design only where the answer holds; when the change
+  would alter how a job starts or where a function lives, return it as a question with the options and your
+  recommendation instead of deciding it. A prohibition ("no new route") comes only from a statement of the user.
 - `questions`: only what is still undecided after these answers, under new ids. Never repeat a question that
   was answered.
 - `plan_changes`: what the plan needs so that the task follows the revised design, one self-contained entry

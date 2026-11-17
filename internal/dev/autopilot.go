@@ -106,6 +106,10 @@ func (g *Gate) classify(cfg *config.Config) (string, []Need, error) {
 		return verdictLead, []Need{{Kind: "conflict", What: "conflict markers remain in " + strings.Join(conflicts, ", "),
 			Resolve: "A review without --fix cannot change code: report it, or `stop`."}}, nil
 	}
+	// Checks of code that needs what the lead has not made yet would fail for that reason alone.
+	if waiting := g.unprepared(false); len(waiting) > 0 {
+		return verdictLead, prerequisiteNeeds(waiting), nil
+	}
 	now, err := g.snapshot()
 	if err != nil {
 		return "", nil, err
@@ -117,10 +121,21 @@ func (g *Gate) classify(cfg *config.Config) (string, []Need, error) {
 	// Nobody but the task writes in its own worktree, and what it holds is what lands: a file no stream owns
 	// would land unreviewed. It is settled before anything is paid to review the rest.
 	if g.Worktree != "" && len(foreign) > 0 {
-		return verdictLead, []Need{{Kind: "scope", What: "the isolated task changed files outside its plan: " + strings.Join(foreign, ", "),
-			Resolve: "`amend` {scope} gives them to a stream, so they are reviewed with the rest; or remove them from the worktree. Then `run`.",
+		need := Need{Kind: "scope", What: "the isolated task changed files outside its plan: " + strings.Join(foreign, ", "),
+			Resolve: "`amend` {scope} gives them to a stream, so they are reviewed with the rest; or `run {restore: [paths]}` puts them back as the " +
+				"position found them. Then the task goes on.",
 			Command: "amend", Input: map[string]any{"update": "<why these files belong to the task>",
-				"scope": []map[string]any{{"stream": g.oneOf(g.streamNames()), "add": foreign}}}}}, nil
+				"scope": []map[string]any{{"stream": g.oneOf(g.streamNames()), "add": foreign}}}}
+		// Generator output nobody writes on purpose — a service started from the worktree rewrites its schema — is
+		// put back, not adopted.
+		marked := markedGenerated(foreign)
+		if !slices.ContainsFunc(foreign, func(path string) bool { return g.generatedPath(path, marked) == "" }) {
+			need.What = "a tool rewrote generated files no stream owns (a service or generator run from the worktree): " + strings.Join(foreign, ", ")
+			need.Resolve = "`run {restore}` puts them back as the position found them and the task goes on. When the task means to change them, " +
+				"`amend` {scope} gives them to the stream whose generator makes them."
+			need.Command, need.Input = "run", map[string]any{"restore": foreign}
+		}
+		return verdictLead, []Need{need}, nil
 	}
 	receipts := g.currentReceipts()
 	failing := g.failingReceipts(receipts)
@@ -413,7 +428,7 @@ func Start(cfg *config.Config, plan *Plan, name string, implement bool, input Ru
 		return nil, err
 	}
 	if !resolved.Request.ReviewFirst() {
-		if err := resolved.requireArchitecture(); err != nil {
+		if err := errors.Join(resolved.requireInterfaceDesign(), resolved.requireArchitecture()); err != nil {
 			return nil, err
 		}
 		if _, err := loadUI(resolved.Plan); err != nil {
@@ -426,6 +441,9 @@ func Start(cfg *config.Config, plan *Plan, name string, implement bool, input Ru
 	gate, err := begin(resolved, name)
 	if err != nil {
 		return nil, err
+	}
+	if warning := lowSpace(cfg, gate.Cwd); warning != "" {
+		gate.said = append(gate.said, "warning: "+warning)
 	}
 	if proposal := loadProposal(name); proposal != nil && proposal.Digest == digest(plan) {
 		gate.Preparation = proposal.Preparation
@@ -481,6 +499,20 @@ func Run(cfg *config.Config, gate *Gate, input RunInput) (any, error) {
 	}
 	did := append([]string{}, gate.said...)
 	gate.said = nil
+	if len(input.Prepared) > 0 {
+		note, err := gate.markPrepared(input.Prepared)
+		if err != nil {
+			return nil, err
+		}
+		did = append(did, note)
+	}
+	if len(input.Restore) > 0 {
+		note, err := gate.restoreForeign(input.Restore)
+		if err != nil {
+			return nil, err
+		}
+		did = append(did, note)
+	}
 	stale := 0
 	first := true
 	for {
@@ -489,6 +521,10 @@ func Run(cfg *config.Config, gate *Gate, input RunInput) (any, error) {
 		}
 		switch gate.Step {
 		case StepWrite:
+			// What the stage needs that no writer makes comes first: its baseline checks may need it too.
+			if len(gate.unprepared(true)) > 0 {
+				return gate.report(cfg, did), gate.save()
+			}
 			if gate.Round == nil {
 				if err := gate.openStage(cfg); err != nil {
 					if failure := (*designError)(nil); errors.As(err, &failure) {
@@ -515,6 +551,8 @@ func Run(cfg *config.Config, gate *Gate, input RunInput) (any, error) {
 				return nil, err
 			}
 		case StepVerify, StepDecide:
+			// What the user added while this operation ran is judged with the rest, not after it.
+			did = append(did, gate.applyPending(cfg)...)
 			verdict, needs, err := gate.classify(cfg)
 			if err != nil {
 				return nil, err
@@ -556,6 +594,10 @@ func Run(cfg *config.Config, gate *Gate, input RunInput) (any, error) {
 				}
 				did = append(did, note)
 			case verdictClean:
+				if late := gate.applyPending(cfg); len(late) > 0 {
+					did = append(did, late...)
+					continue // an amendment arrived while the evidence was judged: what it adds is judged before anything is accepted
+				}
 				note, err := gate.accept(cfg)
 				if err != nil {
 					return nil, err
@@ -793,7 +835,7 @@ func (g *Gate) accept(cfg *config.Config) (string, error) {
 	g.Dispositions, g.Resolutions, g.Baselines, g.Disputes = map[string]Disposition{}, map[string]string{}, map[string]int{}, map[string]Dispute{}
 	g.Checks, g.Corrections, g.Round, g.Demands = nil, nil, nil, nil
 	g.Rounds, g.Iteration, g.Boost, g.AutoRounds = 0, 0, 0, 0
-	g.Signals, g.Conflicts, g.Foreign = nil, nil, nil
+	g.Signals, g.Conflicts, g.Foreign, g.Continue = nil, nil, nil, nil
 	g.Stage++
 	// The lead reports an accepted stage to the user: what its writers did travels with the news.
 	done := oneLine(record.Summary)

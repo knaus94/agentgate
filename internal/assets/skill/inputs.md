@@ -18,6 +18,14 @@ they are copied, shown to the worker — pictures as pictures — and carried in
 reviewers. With an active task the worker revises that task's plan; apply the result with `amend --plan
 <name>`. `fresh: true` abandons the open preparation and explores again.
 
+`{"mode": "heavy"}` alone changes the mode of the plan the preparation saved; no worker runs. During a task
+the mode is changed with `amend {update, mode}`. Never put a stop, a mode or a step of your own into `notes`:
+the worker writes the brief from them. To stop after the design, do not call `start`.
+
+`setup` in the answer: `authorizations` — `{what, argv, catches}`, each a thing to ask the user to allow, with
+what running it would catch; `prerequisites` — the plan's, what has to exist before the work goes on (a
+database, a stand), which you make exist when a need asks; `notes`.
+
 ## run
 
 ```json
@@ -28,16 +36,28 @@ All optional. `recheck: true` asks for a fresh judgement of unchanged evidence; 
 When a check fails for a cause that may lie outside the code (a stand, a service), `run` runs the failing
 checks again; nothing else is repeated.
 
-## architecture (a mode with architects)
+- `prepared: ["db"]` — you made these prerequisites exist (a need `setup` names them): the writers, or the
+  checks, that waited for them go on.
+- `restore: ["generated/schema.graphql"]` — an isolated task: files no stream owns, put back as the position
+  found them. The need `scope` offers it for generator output a tool rewrote.
 
-`agentgate architecture --plan <name>`. Each architect reads the code and designs from the plan and its
+## architecture (a mode with architects, or an interface to design)
+
+`agentgate architecture --plan <name>`. A plan whose `ui` has `usage` adds an interface: the call runs the
+mode's designer first, in every mode, and the architects design on its design. The answer then adds
+`ui_design` — every job as the designer walked it, the screens, what it rejected — and `input.ui`
+(`{design, acceptance, usage}`): put it into the plan with the user's words in `acceptance`. A `BLOCKED`
+designer answers alone, with its `open_questions`: ask the user, then `design {revise, notes}`, put the
+`READY` design into the plan and run `architecture --plan` again.
+
+ Each architect reads the code and designs from the plan and its
 assessment. With two architects (heavy, ultra) they design independently; in ultra
 each then looks for blockers in the other's design; the first architect closes the pass in its own session with
 the one design the task follows, having read the other design and answered every blocker. You choose nothing
 between designs.
 
-The answer: `lanes` (every round, for the record; the last design is the one followed), `questions` the
-architect asks the user, `disputed` (a blocker the architects disagree about), and `input` — the plan entry
+The answer: `lanes` (the design followed in full, every other round in one line; `show architecture` has them
+all), `questions` the architect asks the user, `disputed` (a blocker the architects disagree about), and `input` — the plan entry
 that accepts the design:
 
 ```json
@@ -62,7 +82,7 @@ it:
  "plan": "export-limits"}
 ```
 
-`plan` names the saved plan; leave it out during a task, whose plan is used. The architect continues its
+`plan` names the saved plan; leave it out during a task — also a finished one that is not landed — whose plan is used. The architect continues its
 session and returns a new receipt: the design as it stands now — changed, or kept with the evidence that it
 holds — new `questions` if any, and `plan_changes`: what the plan needs, in the plan's terms. Accept the new
 receipt the same way; a running task takes it with
@@ -71,17 +91,21 @@ plan changes. `start` and `amend` refuse a design whose questions wait, or whose
 was built on.
 
 A receipt is bound to the brief, the UI contract, the mode and the project rules; when one of them changed, a
-revision brings the design to the present contract. Adding a requirement or a stage does not unbind it.
+revision brings the design to the present contract. Adding a requirement or a stage does not unbind it. For an
+interface with `usage` the receipt is bound to the jobs, not to the design you accept for them.
 
 ## design (new screens and flows)
 
 ```json
 {"task": "...", "brief": "...", "usage_context": "Roles, frequency, decisions, data", "files": [], "context": [],
- "mode": "heavy", "revise": "<design id>", "notes": "Lead notes for the revision"}
+ "mode": "heavy"}
+{"revise": "<design id>", "notes": "The user: «the streamer is found by their Steam link, not by a code»"}
 ```
 
-`mode` is the task's mode: its `ui_designer` runs. Accept only a `READY` design, as
-`ui {design: "<id>", acceptance}` in the plan; at most two revisions. Exact
+A plan with `ui.usage` gets its interface design from `architecture`; `design` is for revising it, and for an
+interface outside such a plan. A revision continues from what the design was given before: `revise` and the
+user's words in `notes` are enough. `mode` is the task's mode: its `ui_designer` runs. Accept only a `READY`
+design, as `ui {design: "<id>", acceptance, usage}` in the plan; at most two revisions. Exact
 local edits need no designer: `ui {summary, criteria, preserve}` written by you. Non-visual edits of UI files:
 `ui {skip}`.
 

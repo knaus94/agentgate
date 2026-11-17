@@ -12,14 +12,15 @@ first:
 ## Changing it
 
 - **Before preparation:** put the flag in the request.
-- **After preparation, before `start`:** `prepare` with the mode; the same worker continues and the plan it
-  saves carries it:
+- **After preparation, before `start`:** `prepare` with the mode alone: the saved plan takes it and no worker
+  runs.
 
   ```json
-  {"mode": "heavy", "notes": "The user asked for the thorough mode."}
+  {"mode": "heavy"}
   ```
 
-  Or edit `mode` in `.agentgate/plans/<name>/plan.json` and `agentgate plan save <name> --file <that file>`.
+  With `notes` beside it the worker continues and revises the plan for that mode. A mode with architects needs
+  its design pass again: the architecture is bound to the mode.
 - **During the task:** `amend`:
 
   ```json

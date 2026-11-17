@@ -1,6 +1,7 @@
 package dev
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -198,6 +199,11 @@ func Doctor() map[string]any {
 	}
 	err = os.MkdirAll(Root(), 0o700)
 	add("state", err == nil, true, Root()+suffix(err))
+	if cfg != nil {
+		here, _ := os.Getwd()
+		warning := lowSpace(cfg, here)
+		add("free space", warning == "", false, cmp.Or(warning, fmt.Sprintf("at least %d GiB free here (min_free_gib)", cfg.MinFreeGiB)))
+	}
 	hint := "run `agentgate install` when this is not ok"
 	hooked := func(path string) bool {
 		var settings struct {
@@ -241,6 +247,14 @@ func Doctor() map[string]any {
 	if cfg != nil {
 		_, statErr := os.Stat(config.ExpandHome(cfg.PlaywrightMCP))
 		add("browser tooling", statErr == nil, false, "optional, for browser verification: "+config.ExpandHome(cfg.PlaywrightMCP))
+		if statErr == nil {
+			expected, install := browserMissing(cfg)
+			detail := "the browser browser verification drives is installed"
+			if expected != "" {
+				detail = "not installed at " + expected + "; `" + install + "` installs it"
+			}
+			add("browser", expected == "", false, detail)
+		}
 		home, _ := os.UserHomeDir()
 		cache, _ := os.ReadFile(filepath.Join(home, ".codex", "models_cache.json"))
 		for alias, model := range cfg.Models {

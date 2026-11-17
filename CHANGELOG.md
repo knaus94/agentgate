@@ -2,6 +2,54 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.21.0
+
+An interface the change adds is designed for the jobs people come to it for before anyone writes it, and what
+the work needs outside the code is in the plan instead of in a blocked writer. From
+[the 0.21 brief](docs/briefs/0.21-interfaces-and-environment.md).
+
+**Added**
+
+- `ui.usage` in a plan: who uses the interface the change adds and their jobs, each with what the person has in
+  hand when they begin. `architecture --plan` runs the mode's UI designer first, in every mode, and the
+  architects design on its design; the designer walks every job through the interface (`jobs`) and asks the user
+  where a job cannot be done. The answer carries `ui_design` and `input.ui`. `start`, `amend` and every writer
+  round refuse such a plan without an accepted design.
+- The review axis `usability`: the first lane of a stage that writes interface code traces every job through the
+  written code. A job that cannot be done is P1; friction is a P3 note.
+- `prerequisites` in a plan: what the work needs to exist that no writer makes. The writers of a stage, or the
+  checks after the stream one is made from, wait for it with a need `setup`; `run {prepared: [ids]}` says it
+  exists. A writer is told what will be made from its work.
+- `env_file`: a private file of `NAME=value` lines outside the repository; every declared check gets its
+  variables. Answers show the names, never the values.
+- `run {restore: [paths]}` puts back generator output a tool rewrote in an isolated task's worktree; the need
+  `scope` offers it for such files.
+- An `amend` that only adds requirements or checks, sent while a command runs, waits for it and is applied
+  before the next review and before the task could finish (`pending_amendments`).
+- `amend` on a finished task that is not landed adds a stage after the accepted ones; its writers continue the
+  sessions of the last stage.
+- `doctor` checks the browser browser verification drives, and a browser pass says how to install it before
+  it starts. `doctor` and `start` warn when the checkout's disk has less than `min_free_gib` (default 5) free.
+- `status` lists what each accepted stage came to (`accepted_stages`).
+
+**Changed**
+
+- The `setup` of a preparation is an object: `authorizations` (`{what, argv, catches}`), the plan's
+  `prerequisites` and `notes`. Process instructions belong in neither setup nor the brief.
+- `prepare {mode}` alone changes the mode of the saved plan without a worker.
+- The answer of `architecture` shows the followed design in full and every other round in one line;
+  `show architecture` keeps every round.
+- `design {revise, notes}` continues from what the design was given before.
+- Prompts: a question of the user is answered with a comparison, not taken as a decision; the architect and the
+  designer walk the jobs of an interface; the preparation worker states the jobs and may ask how an interface
+  will be used.
+- The Stop hook lets the lead end a turn in the first minutes of making a prerequisite exist; the reminder on a
+  user's message says to answer in the user's language.
+
+**Fixed**
+
+- `architecture {revise}` on a finished task said no task was open.
+
 ## 0.20.2
 
 The built-in table divides the work by what each model family is for: Claude models design and review, Codex

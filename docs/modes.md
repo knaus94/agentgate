@@ -110,6 +110,13 @@ it stands, or the evidence that it already holds, and what the plan needs. The p
 architect the named risks and, for a path whose cost grows with data, the `load` it has to carry; with `load`
 the review lane that judges correctness also reports the axis `performance`.
 
+An interface the change adds is planned with `ui.usage`: who uses it and the jobs they come for, each with what
+the person has in hand when they begin. Such a plan gets its interface from the mode's UI designer inside the
+same `architecture` call, in every mode, before the architects design on it; the designer walks every job
+through its interface, and a job that cannot be done is a question to the user, not a detail. `start` refuses
+the plan until that design is accepted, and the first review lane of a stage that writes interface code also
+reports the axis `usability`: a job the code cannot do blocks, friction is a note.
+
 Design reports are asked to stay near 800 words, and every mode sets its own process ceilings
 (`architecture_timeout_s`, `writer_timeout_s`, `reviewer_timeout_s`): generous in ultra, where `max` effort
 means long turns, tight elsewhere so a pass cannot quietly take half an hour.

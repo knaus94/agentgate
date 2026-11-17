@@ -1,12 +1,15 @@
 package dev
 
 import (
-	"github.com/knaus94/agentgate/internal/config"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
+
+	"github.com/knaus94/agentgate/internal/config"
 )
 
 // resourceCapacity is how many workers fit in the free CPU and memory, honouring cgroup limits.
@@ -48,3 +51,19 @@ func resourceCapacity(cfg *config.Config) int {
 }
 
 func readOr(path string) []byte { raw, _ := os.ReadFile(path); return raw }
+
+// lowSpace warns when the disk of a directory has less free space than the configuration asks for: a full disk
+// breaks installs and generators without saying so, and their failures look like defects of the code. "" when
+// there is enough, or the configuration asks for no warning.
+func lowSpace(cfg *config.Config, dir string) string {
+	var stat syscall.Statfs_t
+	if cfg.MinFreeGiB <= 0 || syscall.Statfs(dir, &stat) != nil {
+		return ""
+	}
+	free := float64(stat.Bavail) * float64(stat.Bsize) / (1 << 30)
+	if free >= float64(cfg.MinFreeGiB) {
+		return ""
+	}
+	return fmt.Sprintf("only %.1f GiB free on the disk of %s (min_free_gib %d): installs and generators fail without saying so when it fills; "+
+		"tell the user before the work goes on", free, dir, cfg.MinFreeGiB)
+}

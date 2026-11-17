@@ -17,7 +17,7 @@ func prepared(status, summary string, plan any, questions []Question, pack any) 
 	if questions == nil {
 		questions = []Question{}
 	}
-	raw, _ := json.Marshal(map[string]any{"status": status, "summary": summary, "questions": questions, "setup": []string{}, "plan": plan, "context_pack": pack})
+	raw, _ := json.Marshal(map[string]any{"status": status, "summary": summary, "questions": questions, "setup": Setup{}, "plan": plan, "context_pack": pack})
 	return string(raw)
 }
 
@@ -246,13 +246,13 @@ func TestATechnicalBlockerAndAFailedCatalogueReachTheLeadAsTheyAre(t *testing.T)
 	f.model = func(kind string, _ map[string]any, _ provider.Call) (string, error) {
 		if kind == "prepare" {
 			raw, _ := json.Marshal(map[string]any{"status": "BLOCKED", "summary": "measurement requires a supported mobile context", "questions": []Question{},
-				"setup": []string{"Enable mobile emulation"}, "plan": nil, "context_pack": nil})
+				"setup": Setup{Notes: []string{"Enable mobile emulation"}}, "plan": nil, "context_pack": nil})
 			return string(raw), nil
 		}
 		return "", nil
 	}
 	result := f.prepare(PrepareInput{Request: "-m repair measurement", Name: "technical-blocker"})
-	if result["status"] != "BLOCKED" || f.count("prepare") != 1 || len(asStrings(result["setup"])) != 1 || !strings.Contains(result["next"].(string), "prerequisite") {
+	if result["status"] != "BLOCKED" || f.count("prepare") != 1 || len(asStrings(result["setup"].(map[string]any)["notes"])) != 1 || !strings.Contains(result["next"].(string), "prerequisite") {
 		t.Fatalf("a technical blocker without product questions is returned, not retried: %v", result)
 	}
 	command := filepath.Join(t.TempDir(), "catalogue")

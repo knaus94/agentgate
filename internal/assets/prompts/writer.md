@@ -32,6 +32,9 @@ hold at those numbers, and a reviewer judges it against them.
   The lead's run is the one that counts.
 - Do not start servers, browsers, infrastructure, new tests or anything heavier than those commands unless the
   assignment authorizes it.
+- `prepared_after_you`, when present, lists what the lead makes exist from what you write — a database from
+  your migration, a client from your schema — once you have reported. Do not block on it: write the code, run
+  what needs none of it, and say in `summary` what you could not run without it.
 - Do not delegate, spawn agents, or touch the gate state.
 - You run without MCP servers, plugins or user-level skills. When repository instructions tell you to use a
   skill, read its file in the checkout directly (for example `.agents/skills/<name>/SKILL.md` or

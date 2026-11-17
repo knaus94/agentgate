@@ -13,7 +13,7 @@ var Efforts = []string{"low", "medium", "high", "xhigh", "max"}
 var Severities = []string{"P0", "P1", "P2", "P3"}
 
 // Axes a review lane may cover.
-var Axes = []string{"correctness", "architecture", "simplicity", "security", "performance", "design"}
+var Axes = []string{"correctness", "architecture", "simplicity", "security", "performance", "design", "usability"}
 
 type Model struct {
 	Provider string `json:"provider"`
@@ -105,6 +105,7 @@ type Config struct {
 	MaxParallel       int                   `json:"max_parallel"`
 	WorkerMemoryMiB   int                   `json:"worker_memory_mib"`
 	RetentionDays     int                   `json:"retention_days"`
+	MinFreeGiB        int                   `json:"min_free_gib"` // below this much free space on the checkout's disk, doctor and start warn; 0: never
 	Models            map[string]Model      `json:"models"`
 	Fallbacks         map[string][]string   `json:"fallbacks"`
 	ReviewersExcluded []string              `json:"reviewers_excluded"`

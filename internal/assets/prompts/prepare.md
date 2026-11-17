@@ -18,13 +18,20 @@ they name. Do not read secrets or the contents of environment files.
 - `questions`: decisions only the user can make, each `{id, question, options, recommended}` — a short stable
   `id`, two to four concrete options, and the one you recommend with its reason in the question. Empty when
   READY.
-- `setup`: exact commands or prerequisites the lead must get authorized or repaired. Naming one grants nothing.
+- `setup`: what the lead takes to the user, in two lists. `authorizations`: each thing the user has to allow
+  before it may run — a heavy check, a database, a stand, new tests, a browser pass — as `{what, argv,
+  catches}`: the exact command when it is one, and what running it would catch, so the user can weigh it.
+  `notes`: what the lead should know that is neither a decision nor an authorization. Naming one grants
+  nothing. What has to exist before the work can go on is not setup: it is the plan's `prerequisites`.
+  Nothing about the process goes into setup or the brief — when to stop, which mode, what the lead does
+  between steps: the tool and the lead own that.
 - `design_requests`: empty, unless a design is part of the task and you need more of its Figma file (below).
 - `plan`: the complete plan (below), or null when BLOCKED.
 - `context_pack`: your map of the area (below). When you revise a plan and the map still holds, null.
 
-`BLOCKED` is for a missing **product, data, security or authorization decision**. These are not blockers, and
-returning BLOCKED for them wastes a round:
+`BLOCKED` is for a missing **product, data, security or authorization decision**, and for how a person will
+use an interface the change adds when the request and the code do not say (below). These are not blockers,
+and returning BLOCKED for them wastes a round:
 
 - you cannot write or save a file — you are not meant to;
 - you have not finished exploring — finish;
@@ -40,6 +47,13 @@ it coordinates, it does not design. A note that quotes the user is the user's de
 — a proposed mechanism, "keep X as it is", "do not touch Y" — is a hint: check it against the code, follow it
 where it holds, and say in `summary` where you did not. Do not write a lead's hint into the brief as a decision
 of the user, and do not let it fence off code the change depends on.
+
+**A question is not a decision.** When the user's words ask or doubt — "why X?", "maybe inside Y?", "no?" —
+answer them: what each option costs, job by job when there is an interface, with locations in the code. Change
+the plan only where the answer holds. When the change would alter how a job starts or where a function lives,
+return it as a question with the options — a middle one included when there is one — and the one you
+recommend. A prohibition ("no new route", "no separate section") goes into the brief or an acceptance only
+from a statement of the user, never from a question.
 
 When later input arrives (answers, notes, problems found by the validator), you continue this same
 conversation: everything you read is still yours. Read again only what the new input makes necessary.
@@ -105,8 +119,24 @@ plan. It is a correction of form, not a reason to change scope.
 - `context`: files worth reading that the work does not change: the closest existing implementation, a
   contract, a module document.
 - `ui`: when UI files are in scope: `{summary, criteria, preserve}` for a local change, or `{skip}` when the
-  edit is not visual.
-- `visual`: only when the user asked for browser verification. A scenario is what a user does on the page —
+  edit is not visual. When the change adds an interface — a screen, a tab, a dialog flow, a new task a person
+  does — add `usage`: `who` uses it, and `jobs`, each `{id, job, starts_from, frequency, bulk}`: what the
+  person comes to do, what they already have in hand when they begin (a streamer's name, a code, a link), how
+  often, and what they do to many items at once. Take them from the request and the code; a fact that decides
+  the interface and is written nowhere is a question to the user, with realistic options. Such an interface is
+  designed before anyone writes it: the tool runs a designer with the architecture pass, so do not design its
+  screens in the brief — state the jobs, the data and the constraints. `criteria` then hold what any design
+  must keep.
+- `prerequisites`: what the work needs to exist that no writer makes — a disposable database, a migration
+  applied to it, a running service, a client generated from a schema — each `{id, what, argv, stage, after}`:
+  the exact command that makes it exist (empty when a person does it), the stage that needs it (null: the
+  first), and the stream it is made from when it can only be made after that stream has written (a database
+  from the migration a stream edits). The tool holds the writers, or the checks after that stream, until the
+  lead says it exists; a writer never has to discover a missing database. Its authorization, when it needs one,
+  goes into `setup.authorizations` too.
+- `visual`: only when the user asked for browser verification. For an interface with `usage`, propose one
+  browser scenario per job in `setup.authorizations` — the stand it needs, and the command that installs the
+  browser when the machine may not have it — so the user can choose to see it work; the lead asks. A scenario is what a user does on the page —
   open, click, type, hover, press keys, resize, wait — and what then shows; slow or reordered responses, a
   hidden tab and controlled time are proven by tests, not by a browser. `stage` names the stage that builds
   what the scenario shows; null means the last stage.

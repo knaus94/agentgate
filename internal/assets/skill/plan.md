@@ -88,7 +88,19 @@ A plan has `streams` or `stages`, not both. Validation reports every problem at 
   it came from, not its lines. Lock files and `generated/`, `dist/`, `*.gen.*`, `*.min.*` are recognised
   without being listed, as is `linguist-generated` in `.gitattributes`.
 - **`ui`**: exactly one of `{summary, criteria, preserve}`, `{design, acceptance}` or `{skip}`. Required when
-  UI files (`.tsx .jsx .vue .svelte .html .css .scss .sass .less`) are in scope.
+  UI files (`.tsx .jsx .vue .svelte .html .css .scss .sass .less`) are in scope. An interface the change adds
+  carries `usage`: `{who, jobs: [{id, job, starts_from, frequency?, bulk?}]}` — what a person comes to do and
+  what they have in hand when they begin. Such a plan starts only with an accepted design
+  (`ui {design, acceptance, usage}`, from `architecture`), and its reviewers judge the code by those jobs on
+  the axis `usability`.
+- **`prerequisites`**: `[{id, what, argv?, stage?, after?}]` — what the work needs to exist that no writer
+  makes: a disposable database, a migration applied to it, a running service. `argv` is how it is made;
+  `stage` the stage that needs it (the first by default); `after` a stream of that stage it is made from. The
+  writers of the stage wait for one without `after`; the checks after that stream wait for one with it. A need
+  `setup` asks you for it; `run {prepared: [ids]}` says it exists.
+- **`env_file`**: the absolute path of a private file (mode 600) outside the repository, with `NAME=value`
+  lines: every declared check gets those variables. The plan keeps the path; answers show the names only. Set
+  it in the saved plan, or with `amend {update, env_file}`.
 - **`visual`**: `{enabled, reason, scenarios: [{id, screen, state, viewport: "1440x900", role, expected}]}`.
   Browser verification is opt-in and off unless the user asks for it.
 - **`architecture`**: `{id, answers?, blockers?, acceptance?}` — the design the task follows and the user's
@@ -101,7 +113,7 @@ A plan has `streams` or `stages`, not both. Validation reports every problem at 
 Limits: a one-stage plan with more than `staging.max_files` exact files or `staging.max_streams` streams is
 refused with the advice to stage it; `--single` in the request allows it, `--staged` demands stages.
 
-## Amending the plan of an active task
+## Amending the plan of a task
 
 `agentgate amend` takes named operations on the present plan, or the complete revised plan. Both carry
 `update` — what changed and why — and the same rules hold for both.
@@ -128,7 +140,12 @@ refused with the advice to stage it; `--single` in the request allows it, `--sta
   that change, or `remove: true`.
 - `architecture`: the receipt the task follows from now on — a revision the architect returned — with the
   user's answers. Name in `rework` the streams whose written code the revised design changes.
+- `env_file`: the private file of the checks' variables.
 - The complete plan: `agentgate show plan` prints it under `result.plan`; send it back changed, with `update`.
+
+While a call runs, an `amend` that only adds requirements or checks waits for it (`pending_amendments`) and is
+applied before the next review; anything else is refused until it ends. A finished task that is not landed
+takes named operations as a new stage after its accepted ones (the `finished` page).
 
 - Accepted stages are frozen, and so is every requirement an accepted stage covers. The pass over the whole
   change takes additions only: more files for the stream of an accepted stage (`scope`), a new requirement, a

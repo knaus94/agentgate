@@ -1,9 +1,11 @@
 package dev
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -17,14 +19,17 @@ import (
 type uiDesign struct {
 	Status       string          `json:"status"` // READY or BLOCKED
 	UsageContext string          `json:"usage_context"`
+	Usage        *Usage          `json:"usage,omitempty"` // the jobs it was designed for
 	Spec         json.RawMessage `json:"spec"`
 }
 
-// uiContract is what writers, architects and reviewers receive: the specification and the lead's acceptance.
+// uiContract is what writers, architects and reviewers receive: the specification, the lead's acceptance and
+// the jobs the interface is for.
 type uiContract struct {
 	Spec         any    `json:"spec"`
 	Acceptance   string `json:"acceptance"`
 	UsageContext string `json:"usage_context,omitempty"`
+	Usage        *Usage `json:"usage,omitempty"`
 }
 
 // loadUI normalizes the two UI routes so every role sees the same effective contract.
@@ -34,7 +39,9 @@ func loadUI(plan *Plan) (*uiContract, error) {
 	case ui == nil || ui.Skip != "":
 		return nil, nil
 	case ui.Summary != "":
-		return &uiContract{Spec: ui, Acceptance: "Lead-authored local contract; preserve existing behaviour outside the stated change."}, nil
+		local := *ui
+		local.Usage = nil
+		return &uiContract{Spec: local, Usage: ui.Usage, Acceptance: "Lead-authored local contract; preserve existing behaviour outside the stated change."}, nil
 	}
 	receipt, err := loadReceipt(ui.Design, "ui")
 	if err != nil {
@@ -43,13 +50,25 @@ func loadUI(plan *Plan) (*uiContract, error) {
 	if receipt.Design.Status != "READY" {
 		return nil, errors.New("a blocked UI design cannot be accepted; resolve its open questions first")
 	}
-	return &uiContract{Spec: receipt.Design.Spec, Acceptance: ui.Acceptance, UsageContext: receipt.Design.UsageContext}, nil
+	return &uiContract{Spec: receipt.Design.Spec, Acceptance: ui.Acceptance, UsageContext: receipt.Design.UsageContext,
+		Usage: cmp.Or(ui.Usage, receipt.Design.Usage)}, nil
+}
+
+// requireInterfaceDesign refuses to let writers build an interface nobody designed for its jobs.
+func (r *Resolved) requireInterfaceDesign() error {
+	ui := r.Plan.UI
+	if ui == nil || ui.Usage == nil || ui.Design != "" || r.Request.ReviewFirst() {
+		return nil
+	}
+	return errors.New("the plan adds an interface (ui.usage): it is designed for its jobs before anyone writes it. `agentgate architecture` " +
+		"with the plan runs the mode's designer, and its architects, and answers with the ui entry that accepts the design")
 }
 
 type DesignInput struct {
 	Task         string   `json:"task"`
 	Brief        string   `json:"brief"`
 	UsageContext string   `json:"usage_context"` // roles, frequency, the decisions users make and the data they need
+	Usage        *Usage   `json:"usage,omitempty"`
 	Files        []string `json:"files,omitempty"`
 	Context      []string `json:"context,omitempty"`
 	Revise       string   `json:"revise,omitempty"`
@@ -57,6 +76,12 @@ type DesignInput struct {
 	Mode         string   `json:"mode,omitempty"`   // the task's mode: its ui_designer runs; default: the global one
 	Effort       string   `json:"effort,omitempty"` // an effort for this design instead of the route's
 	TimeoutS     int      `json:"timeout_s,omitempty"`
+}
+
+// jobWalk is one job of the usage as the designer walked it through the proposed interface.
+type jobWalk struct {
+	ID    string   `json:"id"`
+	Steps []string `json:"steps"`
 }
 
 const designRevisions = 2
@@ -67,6 +92,8 @@ var uiSchema = object(map[string]any{
 	"status": enum("READY", "BLOCKED"), "summary": text, "users_and_goals": list(text),
 	"existing_patterns": items(map[string]any{"path": text, "reuse": text}),
 	"flows":             items(map[string]any{"name": text, "steps": list(text)}),
+	// jobs walks every job of the usage through the proposed interface, from what the person has in hand.
+	"jobs": items(map[string]any{"id": text, "steps": list(text), "must_know": list(text)}),
 	"screens": items(map[string]any{"name": text, "location": text, "purpose": text, "layout": text, "wireframe": text,
 		"components":   items(map[string]any{"name": text, "source": text, "justification": text, "behavior": text}),
 		"states":       items(map[string]any{"state": text, "presentation": text}),
@@ -76,11 +103,48 @@ var uiSchema = object(map[string]any{
 	"rejected_alternatives": items(map[string]any{"option": text, "reason": text}),
 	"open_questions":        list(text), "assumptions": list(text), "revision_notes": list(text)})
 
-// Design asks a read-only designer for the specification of a new screen or flow.
-// Exact local edits do not need it: the lead writes a short contract instead.
+// Design asks a read-only designer for the specification of a new screen or flow, or for a revision of one.
+// Exact local edits do not need it: the lead writes a short contract instead. A plan that names its jobs
+// (ui.usage) gets its design from `architecture`, which calls the same designer.
 func Design(cfg *config.Config, input DesignInput) (any, error) {
-	if strings.TrimSpace(input.Task) == "" || strings.TrimSpace(input.Brief) == "" || strings.TrimSpace(input.UsageContext) == "" {
-		return nil, errors.New("provide task, brief and usage_context (roles, frequency, decisions and the data they need)")
+	receipt, err := designInterface(cfg, input)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"design": receipt.ID, "status": receipt.Design.Status, "revision": receipt.Revision, "route": receipt.Route,
+		"spec": receipt.Design.Spec}, nil
+}
+
+// designInterface runs the designer and stores its receipt. A revision continues from the packet of the design
+// it revises: what the lead does not give again is what the designer had before.
+func designInterface(cfg *config.Config, input DesignInput) (*Receipt, error) {
+	receipt := &Receipt{ID: newID(), Kind: "ui"}
+	var previous *Receipt
+	if input.Revise != "" {
+		var err error
+		if previous, err = loadReceipt(input.Revise, "ui"); err != nil {
+			return nil, err
+		}
+		if receipt.Revision = previous.Revision + 1; receipt.Revision > designRevisions {
+			return nil, errors.New("the design was revised twice already; take the open points to the user")
+		}
+		if strings.TrimSpace(input.Notes) == "" {
+			return nil, errors.New("a revision needs notes: what the user decided or said about the design")
+		}
+		var before DesignInput
+		raw, _ := os.ReadFile(filepath.Join(previous.Dir, "packet.json"))
+		_ = json.Unmarshal(raw, &before)
+		input.Task, input.Brief = cmp.Or(input.Task, before.Task), cmp.Or(input.Brief, before.Brief)
+		input.UsageContext, input.Usage = cmp.Or(input.UsageContext, before.UsageContext), cmp.Or(input.Usage, before.Usage, previous.Design.Usage)
+		if len(input.Files) == 0 {
+			input.Files = before.Files
+		}
+		if len(input.Context) == 0 {
+			input.Context = before.Context
+		}
+	}
+	if strings.TrimSpace(input.Task) == "" || strings.TrimSpace(input.Brief) == "" || strings.TrimSpace(input.UsageContext) == "" && input.Usage == nil {
+		return nil, errors.New("provide task, brief and usage_context (roles, frequency, decisions and the data they need) or usage {who, jobs}")
 	}
 	files, err := cleanPaths(input.Files)
 	if err != nil {
@@ -104,7 +168,6 @@ func Design(cfg *config.Config, input DesignInput) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	receipt := &Receipt{ID: newID(), Kind: "ui"}
 	receipt.Dir = filepath.Join(designsDir(), receipt.ID)
 	rules, err := loadReviewRules(cfg, files)
 	if err != nil {
@@ -112,21 +175,25 @@ func Design(cfg *config.Config, input DesignInput) (any, error) {
 	}
 	packet := map[string]any{"task": input.Task, "brief": input.Brief, "usage_context": input.UsageContext, "files": files, "context": context,
 		"review_rules": rules}
+	if input.Usage != nil {
+		packet["usage"] = input.Usage
+	}
 	if len(files) == 0 {
 		packet["review_rule_catalogue"] = reviewRuleCatalogue(cfg)
 	}
-	if input.Revise != "" {
-		previous, err := loadReceipt(input.Revise, "ui")
-		if err != nil {
-			return nil, err
-		}
-		if receipt.Revision = previous.Revision + 1; receipt.Revision > designRevisions {
-			return nil, errors.New("the design was revised twice already; take the open points to the user")
-		}
-		if strings.TrimSpace(input.Notes) == "" {
-			return nil, errors.New("a revision needs the lead's notes")
-		}
+	if previous != nil {
 		packet["previous_design"], packet["lead_notes"] = previous.Design.Spec, input.Notes
+	}
+	// The same question to the same designer is not paid for twice: an architecture pass that failed after its
+	// interface was designed runs again on that design.
+	cache := filepath.Join(designsDir(), "cache", "ui-"+digest(map[string]any{"route": route.String(), "packet": packet})+".json")
+	var known struct {
+		ID string `json:"id"`
+	}
+	if raw, err := os.ReadFile(cache); err == nil && json.Unmarshal(raw, &known) == nil {
+		if earlier, err := loadReceipt(known.ID, "ui"); err == nil {
+			return earlier, nil
+		}
 	}
 	path := filepath.Join(receipt.Dir, "packet.json")
 	if err := writePacket(path, packet); err != nil {
@@ -143,6 +210,7 @@ func Design(cfg *config.Config, input DesignInput) (any, error) {
 		Status        string            `json:"status"`
 		Screens       []json.RawMessage `json:"screens"`
 		OpenQuestions []string          `json:"open_questions"`
+		Jobs          []jobWalk         `json:"jobs"`
 	}
 	if err := decode(result.Answer, &parsed); err != nil {
 		return nil, err
@@ -153,10 +221,23 @@ func Design(cfg *config.Config, input DesignInput) (any, error) {
 	if parsed.Status != "READY" && parsed.Status != "BLOCKED" {
 		return nil, fmt.Errorf("the designer reported an unknown status %q", parsed.Status)
 	}
-	receipt.Design = &uiDesign{Status: parsed.Status, UsageContext: input.UsageContext, Spec: json.RawMessage(result.Answer)}
+	if parsed.Status == "READY" && input.Usage != nil {
+		var unwalked []string
+		for _, job := range input.Usage.Jobs {
+			if !slices.ContainsFunc(parsed.Jobs, func(walk jobWalk) bool { return walk.ID == job.ID && len(walk.Steps) > 0 }) {
+				unwalked = append(unwalked, job.ID)
+			}
+		}
+		if len(unwalked) > 0 {
+			return nil, fmt.Errorf("the designer reported READY without walking jobs %s through the interface; run it again", strings.Join(unwalked, ", "))
+		}
+	}
+	receipt.Design = &uiDesign{Status: parsed.Status, UsageContext: input.UsageContext, Usage: input.Usage, Spec: json.RawMessage(result.Answer)}
 	receipt.Route, receipt.Substitutions = &used, subs.list
-	return map[string]any{"design": receipt.ID, "status": parsed.Status, "revision": receipt.Revision, "route": used,
-		"spec": receipt.Design.Spec}, receipt.save()
+	if err := receipt.save(); err != nil {
+		return nil, err
+	}
+	return receipt, writePacket(cache, map[string]string{"id": receipt.ID})
 }
 
 type ConsultLane struct {

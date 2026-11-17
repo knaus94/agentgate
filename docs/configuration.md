@@ -137,7 +137,7 @@ for a particular model's effort range.
 | `ui_designer`, `visual_reviewer`, `consultant` | Routes for scoped UI design, optional browser review and consultations |
 
 Modes are `light`, `medium`, `heavy` and `ultra`. Review axes are `correctness`, `architecture`, `simplicity`,
-`performance`, `security` and `design`. Local `review_rules` attach acceptance instructions without granting extra tools;
+`performance`, `security`, `design` and `usability`. Local `review_rules` attach acceptance instructions without granting extra tools;
 see [extensions](extensions.md).
 
 `reviewers_excluded` lists aliases forbidden from reviewing. The default excludes `sol` as a routing
@@ -203,6 +203,7 @@ sharing. Complete examples and review-rule configuration are in [extensions](ext
 | `max_parallel` | `4` | Worker process ceiling when the request has no `-N` |
 | `worker_memory_mib` | `512` | Memory budget per worker used to reduce concurrency; cgroup limits are considered |
 | `retention_days` | `14` | Retention for old finished state; `0` disables pruning; active and unlanded tasks are retained |
+| `min_free_gib` | `5` | Below this much free space on the checkout's disk, `doctor` and `start` warn; `0` never warns |
 | `worktree` | `{"default":false,"copy":[],"setup":[],"setup_timeout_s":1800}` | Isolation and fresh-worktree preparation; see [isolation](isolation.md) |
 | `staging` | `{"max_files":25,"max_streams":5,"isolate":"auto"}` | Stage thresholds and isolation policy; a threshold of `0` removes that threshold; see [stages](stages.md) |
 | `plans_home` | unset | Shared plan-storage folder selected with `agentgate plan link <folder>` |

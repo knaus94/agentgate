@@ -299,7 +299,7 @@ func TestPreparationOfAnActiveDesignReusesItsHostContext(t *testing.T) {
 			if packet["design_context"] == nil || packet["design_source"] == nil {
 				t.Fatal("no reusable host context")
 			}
-			return `{"status":"BLOCKED","summary":"one explicit mapping is needed","questions":[],"setup":["Select the existing artwork element"],"plan":null,"context_pack":null}`, nil
+			return `{"status":"BLOCKED","summary":"one explicit mapping is needed","questions":[],"setup":{"authorizations":[],"notes":["Select the existing artwork element"]},"plan":null,"context_pack":null}`, nil
 		}
 		return "", nil
 	}

@@ -165,8 +165,10 @@ type Reading struct {
 // RunInput tunes one run of the task.
 type RunInput struct {
 	ReviewerTimeoutS int          `json:"reviewer_timeout_s,omitempty"`
-	Visual           *VisualInput `json:"visual,omitempty"`  // observe the opted-in browser scenarios in this run
-	Recheck          bool         `json:"recheck,omitempty"` // ask for a fresh judgement of unchanged evidence; bypasses no condition
+	Visual           *VisualInput `json:"visual,omitempty"`   // observe the opted-in browser scenarios in this run
+	Recheck          bool         `json:"recheck,omitempty"`  // ask for a fresh judgement of unchanged evidence; bypasses no condition
+	Prepared         []string     `json:"prepared,omitempty"` // prerequisites the lead made exist
+	Restore          []string     `json:"restore,omitempty"`  // files an isolated task changed outside its plan, to put back
 }
 
 // verify brings the evidence of the present position up to date: declared checks first, then independent

@@ -128,6 +128,11 @@ worker sees the task's position and what it waits for, and returns the revised p
   reading the code again. A change that touches neither leaves every receipt valid.
 - **An unfinished round stays unfinished**: finished streams keep their reports, blocked writers are still
   answered in their sessions.
+- **An addition does not wait for its turn.** Named operations that only add requirements or checks may be
+  sent while a command runs; the running command applies them before its next review and before it could
+  finish the task.
+- **A finished task is not closed until it lands.** Named operations sent to it add a stage after the accepted
+  ones, with the streams of the last stage, whose writers continue in their own sessions.
 
 A file admitted late — a generator's output, a file a finding needs — always has its before-image: the task
 recorded the whole tree when it opened and at every stage boundary

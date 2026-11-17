@@ -248,11 +248,15 @@ type Gate struct {
 	Dispositions map[string]Disposition `json:"dispositions"`
 	Resolutions  map[string]string      `json:"resolutions"`
 	Disputes     map[string]Dispute     `json:"disputes,omitempty"`
-	Demands      []Finding              `json:"demands,omitempty"` // work sent to writers from an unmet criterion
-	Checks       []CheckReceipt         `json:"checks"`
-	Baselines    map[string]int         `json:"baselines,omitempty"` // check key -> exit code before any writing
-	Corrections  []Correction           `json:"corrections,omitempty"`
-	Ruled        bool                   `json:"ruled,omitempty"` // the lead ruled on a finding since the last correction: the next one is not a repetition
+	Demands      []Finding              `json:"demands,omitempty"`  // work sent to writers from an unmet criterion
+	Prepared     map[string]int64       `json:"prepared,omitempty"` // prerequisite id -> when the lead said it exists
+	// Continue are the sessions the writers of a stage added to a finished task continue: those of the stage
+	// before it, under the names of its streams.
+	Continue    map[string]WriterRef `json:"continue,omitempty"`
+	Checks      []CheckReceipt       `json:"checks"`
+	Baselines   map[string]int       `json:"baselines,omitempty"` // check key -> exit code before any writing
+	Corrections []Correction         `json:"corrections,omitempty"`
+	Ruled       bool                 `json:"ruled,omitempty"` // the lead ruled on a finding since the last correction: the next one is not a repetition
 	// DesignFailure is why a design of the present stage could not be imported or measured. It is the lead's to
 	// repair; the next run tries again.
 	DesignFailure string                  `json:"design_failure,omitempty"`

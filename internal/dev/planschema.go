@@ -41,16 +41,22 @@ var planSchema = object(map[string]any{
 	"checks":        list(checkSchema),
 	"checks_waiver": nullable(text),
 	"generated":     list(text),
-	"ui":            nullable(object(map[string]any{"summary": nullable(text), "criteria": list(text), "preserve": list(text), "skip": nullable(text)})),
+	"ui": nullable(object(map[string]any{"summary": nullable(text), "criteria": list(text), "preserve": list(text), "skip": nullable(text),
+		"usage": nullable(usageSchema)})),
 	"visual": nullable(object(map[string]any{"enabled": boolean, "reason": text,
 		"scenarios": items(map[string]any{"id": text, "screen": text, "state": text, "viewport": text, "role": text, "expected": text, "stage": nullable(text)})})),
 	"design": items(map[string]any{"figma": nullable(text), "name": nullable(text), "screen": nullable(text), "url": nullable(text), "root": nullable(text),
 		"stream": text, "viewport": nullable(text), "device": nullable(enum("desktop", "mobile")), "locale": nullable(text),
 		"steps":   items(map[string]any{"click": nullable(text), "fill": nullable(text), "value": nullable(text), "wait": nullable(text)}),
 		"compare": nullable(enum("measure", "review"))}),
-	"update": nullable(text),
-	"rework": list(text),
+	"prerequisites": items(map[string]any{"id": text, "what": text, "argv": list(text), "stage": nullable(text), "after": nullable(text)}),
+	"update":        nullable(text),
+	"rework":        list(text),
 })
+
+// usageSchema is who uses an interface the change adds and the jobs they come to it for.
+var usageSchema = object(map[string]any{"who": text,
+	"jobs": items(map[string]any{"id": text, "job": text, "starts_from": text, "frequency": nullable(text), "bulk": nullable(text)})})
 
 // questionsSchema is a decision a worker asks the user for: the preparation worker and the architect ask alike.
 var questionsSchema = items(map[string]any{"id": text, "question": text, "options": list(text), "recommended": text})
@@ -60,7 +66,10 @@ var prepareSchema = object(map[string]any{
 	"name":      nullable(text),
 	"summary":   text,
 	"questions": questionsSchema,
-	"setup":     list(text),
+	// setup is what the lead takes to the user or the machine: authorizations to ask for, and notes. What has to
+	// exist before work can go on is part of the plan, as its prerequisites.
+	"setup": object(map[string]any{"authorizations": items(map[string]any{"what": text, "argv": list(text), "catches": text}),
+		"notes": list(text)}),
 	// A preparation that needs more of a Figma file than the catalogue it was given asks for it; the tool reads it.
 	"design_requests": items(map[string]any{"node": text, "depth": integer}),
 	"plan":            nullable(planSchema),

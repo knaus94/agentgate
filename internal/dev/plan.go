@@ -55,6 +55,35 @@ type UI struct {
 	Design     string   `json:"design,omitempty"`
 	Acceptance string   `json:"acceptance,omitempty"`
 	Skip       string   `json:"skip,omitempty"`
+	// Usage is set when the change adds an interface: a screen, a tab, a dialog flow, a new task for a person.
+	// Such an interface is designed before anyone writes it, and its jobs are walked by everyone who judges it.
+	Usage *Usage `json:"usage,omitempty"`
+}
+
+// Usage is who uses an interface the change adds and the jobs they come to it for.
+type Usage struct {
+	Who  string `json:"who"`
+	Jobs []Job  `json:"jobs"`
+}
+
+// Job is one thing a person comes to the interface to do.
+type Job struct {
+	ID         string `json:"id"`
+	Job        string `json:"job"`
+	StartsFrom string `json:"starts_from"`         // what the person already has in hand when they begin
+	Frequency  string `json:"frequency,omitempty"` // how often it is done
+	Bulk       string `json:"bulk,omitempty"`      // what is done to many items at once, when anything is
+}
+
+// Prerequisite is something the work needs to exist that no writer makes: a database, a running service,
+// generated code from a migration a stream edits. The lead makes it exist; the tool holds the writers, or the
+// checks, until the lead says it does.
+type Prerequisite struct {
+	ID    string   `json:"id"`
+	What  string   `json:"what"`
+	Argv  []string `json:"argv,omitempty"`  // the command that makes it exist, as the lead runs it
+	Stage string   `json:"stage,omitempty"` // the stage that needs it; default: the first
+	After string   `json:"after,omitempty"` // a stream of that stage it is made from: needed once that stream has written
 }
 
 type Scenario struct {
@@ -105,30 +134,34 @@ type Stage struct {
 // Plan is what was agreed: the brief, the criteria and the stages that deliver them. A plan written with
 // top-level streams is one stage; the tool gives every plan that one shape before it runs it.
 type Plan struct {
-	Request          string        `json:"request"`
-	Mode             string        `json:"mode,omitempty"` // light, medium, heavy or ultra: stronger than a flag in the request
-	Brief            string        `json:"brief"`
-	Assessment       *Assessment   `json:"assessment,omitempty"`
-	Requirements     []Requirement `json:"requirements,omitempty"`
-	Stages           []Stage       `json:"stages,omitempty"`
-	Streams          []Stream      `json:"streams,omitempty"`     // a single-pass plan: one stage, written without the wrapper
-	Single           bool          `json:"single_pass,omitempty"` // set by the tool: the plan was written with top-level streams
-	Context          []string      `json:"context,omitempty"`
-	Checks           []Check       `json:"checks,omitempty"`
-	ChecksWaiver     string        `json:"checks_waiver,omitempty"` // why no command can verify this change
-	Generated        []string      `json:"generated,omitempty"`     // patterns of generator output: reviewed by provenance, not line by line
-	UI               *UI           `json:"ui,omitempty"`
-	Visual           *Visual       `json:"visual,omitempty"`
-	Design           []DesignRef   `json:"design,omitempty"`
-	Architecture     *Accepted     `json:"architecture,omitempty"`
-	Update           string        `json:"update,omitempty"`     // an amendment: what changed and why
-	Authorized       string        `json:"authorized,omitempty"` // an amendment that changes requirements: who allowed it, in what words
-	Rework           []string      `json:"rework,omitempty"`     // an amendment: streams of the current stage that get it as new work
-	BaseRef          string        `json:"base_ref,omitempty"`   // review and clean: the commit the diff starts from
-	WriterTimeoutS   int           `json:"writer_timeout_s,omitempty"`
-	ReviewerTimeoutS int           `json:"reviewer_timeout_s,omitempty"`
-	Revise           string        `json:"revise,omitempty"`          // 0.19 and earlier; a revision is `architecture` {revise, answers, notes}
-	ReviseBlockers   []string      `json:"revise_blockers,omitempty"` // 0.19 and earlier
+	Request       string         `json:"request"`
+	Mode          string         `json:"mode,omitempty"` // light, medium, heavy or ultra: stronger than a flag in the request
+	Brief         string         `json:"brief"`
+	Assessment    *Assessment    `json:"assessment,omitempty"`
+	Requirements  []Requirement  `json:"requirements,omitempty"`
+	Stages        []Stage        `json:"stages,omitempty"`
+	Streams       []Stream       `json:"streams,omitempty"`     // a single-pass plan: one stage, written without the wrapper
+	Single        bool           `json:"single_pass,omitempty"` // set by the tool: the plan was written with top-level streams
+	Context       []string       `json:"context,omitempty"`
+	Checks        []Check        `json:"checks,omitempty"`
+	ChecksWaiver  string         `json:"checks_waiver,omitempty"` // why no command can verify this change
+	Generated     []string       `json:"generated,omitempty"`     // patterns of generator output: reviewed by provenance, not line by line
+	UI            *UI            `json:"ui,omitempty"`
+	Visual        *Visual        `json:"visual,omitempty"`
+	Design        []DesignRef    `json:"design,omitempty"`
+	Prerequisites []Prerequisite `json:"prerequisites,omitempty"`
+	// EnvFile is a private file of KEY=VALUE lines outside the repository: its variables reach every declared
+	// check. The plan keeps the path; nobody is shown the values.
+	EnvFile          string    `json:"env_file,omitempty"`
+	Architecture     *Accepted `json:"architecture,omitempty"`
+	Update           string    `json:"update,omitempty"`     // an amendment: what changed and why
+	Authorized       string    `json:"authorized,omitempty"` // an amendment that changes requirements: who allowed it, in what words
+	Rework           []string  `json:"rework,omitempty"`     // an amendment: streams of the current stage that get it as new work
+	BaseRef          string    `json:"base_ref,omitempty"`   // review and clean: the commit the diff starts from
+	WriterTimeoutS   int       `json:"writer_timeout_s,omitempty"`
+	ReviewerTimeoutS int       `json:"reviewer_timeout_s,omitempty"`
+	Revise           string    `json:"revise,omitempty"`          // 0.19 and earlier; a revision is `architecture` {revise, answers, notes}
+	ReviseBlockers   []string  `json:"revise_blockers,omitempty"` // 0.19 and earlier
 }
 
 // Assessment is what was found in the code. The mode is computed from these facts, not chosen by taste.
@@ -477,6 +510,14 @@ func Resolve(cfg *config.Config, source *Plan) (*Resolved, error) {
 	for _, problem := range resolved.validateUI() {
 		add("%s", problem)
 	}
+	for _, problem := range validatePrerequisites(plan) {
+		add("%s", problem)
+	}
+	if plan.EnvFile != "" {
+		if _, err := readEnvFile(plan.EnvFile); err != nil {
+			add("env_file: %v", err)
+		}
+	}
 	if len(problems) > 0 {
 		return nil, problems
 	}
@@ -690,6 +731,9 @@ func (r *Resolved) validateUI() []string {
 		case ui.Design != "" && strings.TrimSpace(ui.Acceptance) == "":
 			problems = append(problems, "record why the lead accepted the UI design")
 		}
+		if ui.Usage != nil {
+			problems = append(problems, validateUsage(ui)...)
+		}
 	}
 	if plan.Visual != nil && plan.Visual.Enabled {
 		if plan.UI == nil || plan.UI.Skip != "" {
@@ -699,6 +743,59 @@ func (r *Resolved) validateUI() []string {
 		}
 	}
 	return problems
+}
+
+func validateUsage(ui *UI) []string {
+	if ui.Skip != "" {
+		return []string{"ui.usage describes an interface the change adds; a skipped ui has none"}
+	}
+	var problems []string
+	if strings.TrimSpace(ui.Usage.Who) == "" || len(ui.Usage.Jobs) == 0 {
+		problems = append(problems, "ui.usage needs who uses the interface and at least one job")
+	}
+	ids := map[string]bool{}
+	for _, job := range ui.Usage.Jobs {
+		if !safeName.MatchString(job.ID) || ids[job.ID] {
+			problems = append(problems, fmt.Sprintf("ui.usage job ids are unique names of letters, digits, dot, dash or underscore: %q", job.ID))
+		}
+		ids[job.ID] = true
+		if strings.TrimSpace(job.Job) == "" || strings.TrimSpace(job.StartsFrom) == "" {
+			problems = append(problems, fmt.Sprintf("ui.usage job %q needs job (what the person comes to do) and starts_from (what they already have in hand)", job.ID))
+		}
+	}
+	return problems
+}
+
+// validatePrerequisites checks that every prerequisite says what has to exist and names a stage and a stream
+// that exist.
+func validatePrerequisites(plan *Plan) []string {
+	var problems []string
+	ids := map[string]bool{}
+	for _, item := range plan.Prerequisites {
+		if !safeName.MatchString(item.ID) || ids[item.ID] {
+			problems = append(problems, fmt.Sprintf("prerequisite ids are unique names of letters, digits, dot, dash or underscore: %q", item.ID))
+		}
+		ids[item.ID] = true
+		if strings.TrimSpace(item.What) == "" {
+			problems = append(problems, fmt.Sprintf("prerequisite %q needs what: what has to exist", item.ID))
+		}
+		index := plan.prerequisiteStage(item)
+		switch {
+		case index < 0 || index >= len(plan.Stages):
+			problems = append(problems, fmt.Sprintf("prerequisite %q names no stage of the plan: %q", item.ID, item.Stage))
+		case item.After != "" && !slices.ContainsFunc(plan.Stages[index].Streams, func(stream Stream) bool { return stream.Name == item.After }):
+			problems = append(problems, fmt.Sprintf("prerequisite %q waits for %q, which is not a stream of stage %s", item.ID, item.After, plan.Stages[index].Name))
+		}
+	}
+	return problems
+}
+
+// prerequisiteStage is the index of the stage a prerequisite is needed for, or -1.
+func (p *Plan) prerequisiteStage(item Prerequisite) int {
+	if item.Stage == "" {
+		return 0
+	}
+	return slices.IndexFunc(p.Stages, func(stage Stage) bool { return stage.Name == item.Stage })
 }
 
 func validateScenarios(scenarios []Scenario, stages []Stage) error {

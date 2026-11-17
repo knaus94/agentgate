@@ -37,6 +37,35 @@ type PrepareInput struct {
 	Fresh          bool              `json:"fresh,omitempty"`           // abandon the open preparation and explore again
 }
 
+// Setup is what a preparation hands the lead besides the plan: what to ask the user to authorize, and what to
+// know. What has to exist before the work can go on is in the plan, as its prerequisites.
+type Setup struct {
+	Authorizations []Authorization `json:"authorizations"`
+	Notes          []string        `json:"notes"`
+}
+
+// Authorization is one thing the user has to allow: a heavy check, a database, a stand, new tests.
+type Authorization struct {
+	What    string   `json:"what"`
+	Argv    []string `json:"argv,omitempty"` // the exact command, when it is one
+	Catches string   `json:"catches"`        // what running it would catch, so the user can weigh it
+}
+
+// setupView is the setup as the lead reads it, with the plan's prerequisites beside it.
+func setupView(setup Setup, plan *Plan) map[string]any {
+	out := map[string]any{"authorizations": setup.Authorizations, "notes": setup.Notes}
+	if setup.Authorizations == nil {
+		out["authorizations"] = []Authorization{}
+	}
+	if setup.Notes == nil {
+		out["notes"] = []string{}
+	}
+	if plan != nil && len(plan.Prerequisites) > 0 {
+		out["prerequisites"] = plan.Prerequisites
+	}
+	return out
+}
+
 // Question is a decision only the user can make, in the shape a lead client's question tool takes.
 type Question struct {
 	ID          string   `json:"id"`
@@ -173,6 +202,15 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 	}
 	if input.Mode != "" && !slices.Contains(config.ModeNames, input.Mode) {
 		return nil, fmt.Errorf("mode is one of %s, not %q", strings.Join(config.ModeNames, ", "), input.Mode)
+	}
+	// A mode is the lead's setting, not something a worker has to find out: the saved plan takes it as it is.
+	if input.onlyMode(preparation) {
+		if revising {
+			return nil, errors.New("the task is under way: `amend` {update, mode} changes its mode; no worker is needed")
+		}
+		if preparation != nil && preparation.Status == "READY" && preparation.Name != "" {
+			return preparation.setMode(cfg, input.Mode)
+		}
 	}
 	if preparation == nil {
 		mode := cmp.Or(input.Mode, request.Mode, "medium")
@@ -340,7 +378,7 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 			Name      string          `json:"name"`
 			Summary   string          `json:"summary"`
 			Questions []Question      `json:"questions"`
-			Setup     []string        `json:"setup"`
+			Setup     Setup           `json:"setup"`
 			Requests  []designRequest `json:"design_requests"`
 			Plan      json.RawMessage `json:"plan"`
 			Pack      *contextPack    `json:"context_pack"`
@@ -370,7 +408,7 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 				next = fmt.Sprintf("The worker asked for more of the design than %d readings of the file gave it (design_requests). Tell the user; a narrower "+
 					"link to the frame in the request, or `prepare` with notes that name the frame, lets it continue.", designReads)
 			}
-			return preparation.answered(map[string]any{"status": "BLOCKED", "summary": answer.Summary, "questions": answer.Questions, "setup": answer.Setup,
+			return preparation.answered(map[string]any{"status": "BLOCKED", "summary": answer.Summary, "questions": answer.Questions, "setup": setupView(answer.Setup, nil),
 				"design_requests": answer.Requests, "preparation": preparation.ID, "route": used, "substitutions": subs.list, "next": next})
 		}
 		plan := &Plan{}
@@ -412,7 +450,7 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 		rules, err := loadReviewRules(cfg, resolved.Plan.Files())
 		if err != nil {
 			return preparation.answered(map[string]any{"status": "BLOCKED", "summary": err.Error(), "questions": []Question{},
-				"setup":        []string{"Make the named project instructions readable, then `prepare` again."},
+				"setup":        setupView(Setup{Notes: []string{"Make the named project instructions readable, then `prepare` again."}}, nil),
 				"review_rules": reviewRuleSummary(cfg, rules), "preparation": preparation.ID, "route": used,
 				"next": "Required project instructions are unavailable. Restore the named files; no plan was saved."})
 		}
@@ -422,6 +460,9 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 		}
 		if name == "" {
 			name = planNameFrom(answer.Name)
+		}
+		if previous := savedPlan(name); previous != nil && !revising {
+			plan.EnvFile = previous.EnvFile // the lead's file of the checks' variables is not the worker's to drop
 		}
 		saved, err := PlanSave(cfg, plan, name)
 		if err != nil {
@@ -444,7 +485,7 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 		}
 		out := map[string]any{"status": "READY", "summary": answer.Summary, "plan": saved.Name, "brief": saved.Brief, "mode": resolved.Mode,
 			"because": resolved.Decision.Because, "stages": outline(resolved), "requirements": len(resolved.Plan.Requirements),
-			"checks": checkLines(resolved.Plan), "setup": answer.Setup, "preparation": preparation.ID, "route": used}
+			"checks": checkLines(resolved.Plan), "setup": setupView(answer.Setup, resolved.Plan), "preparation": preparation.ID, "route": used}
 		if summary := reviewRuleSummary(cfg, rules); len(summary) > 0 {
 			out["review_rules"] = summary
 		}
@@ -463,8 +504,62 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 		return preparation.answered(out)
 	}
 	return preparation.answered(map[string]any{"status": "BLOCKED", "reason": "invalid_plan", "summary": "The preparation worker could not produce a valid plan in this call.",
-		"problems": []string(problems), "questions": []Question{}, "setup": []string{}, "preparation": preparation.ID,
+		"problems": []string(problems), "questions": []Question{}, "setup": setupView(Setup{}, nil), "preparation": preparation.ID,
 		"next": "Report the problems. No plan was saved. `prepare` again with notes continues the same worker; do not reconstruct the technical plan yourself."})
+}
+
+// savedPlan is the plan saved under a name, or nil.
+func savedPlan(name string) *Plan {
+	path, err := PlanFile(name)
+	if err != nil {
+		return nil
+	}
+	raw, err := os.ReadFile(path)
+	plan := &Plan{}
+	if err != nil || json.Unmarshal(raw, plan) != nil {
+		return nil
+	}
+	return plan
+}
+
+// onlyMode says that an input changes nothing but the mode of the plan the preparation already saved.
+func (input PrepareInput) onlyMode(preparation *Preparation) bool {
+	sameRequest := input.Request == "" || preparation != nil && input.Request == preparation.Request
+	return input.Mode != "" && sameRequest && input.Name == "" && len(input.Context) == 0 && len(input.Attachments) == 0 &&
+		strings.TrimSpace(input.Notes) == "" && len(input.Answers) == 0 && !input.RefreshDesigns && !input.Fresh
+}
+
+// setMode saves the plan of this preparation again with another mode, without its worker.
+func (p *Preparation) setMode(cfg *config.Config, mode string) (any, error) {
+	plan := savedPlan(p.Name)
+	if plan == nil {
+		return nil, fmt.Errorf("the saved plan %q cannot be read; `prepare` with notes has the worker save it again", p.Name)
+	}
+	proposal := loadProposal(p.Name)
+	ours := proposal != nil && proposal.Digest == digest(plan)
+	plan.Mode, p.Mode = mode, mode
+	saved, err := PlanSave(cfg, plan, p.Name)
+	if err != nil {
+		return nil, err
+	}
+	if ours {
+		proposal.Digest = digest(plan) // the same proposal: its worker and its map stay with it
+		if err := proposal.save(); err != nil {
+			return nil, err
+		}
+	}
+	resolved, err := Resolve(cfg, plan)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]any{"status": "READY", "summary": "The saved plan takes mode " + mode + "; no worker ran.", "plan": saved.Name, "brief": saved.Brief,
+		"mode": resolved.Mode, "because": resolved.Decision.Because, "stages": outline(resolved), "requirements": len(resolved.Plan.Requirements),
+		"checks": checkLines(resolved.Plan), "preparation": p.ID,
+		"next": "Tell the user the mode and why. A mode with architects needs its design pass (`architecture --plan " + saved.Name + "`) before `start`."}
+	if setup, ok := p.Answer["setup"]; ok {
+		out["setup"] = setup // what the worker asked to authorize does not depend on the mode
+	}
+	return p.answered(out)
 }
 
 // remember makes this preparation the one the lead session, or the active task, continues.
@@ -491,6 +586,7 @@ func carry(plan, current *Plan) {
 	plan.Architecture, plan.BaseRef = current.Architecture, current.BaseRef
 	plan.Mode = cmp.Or(plan.Mode, current.Mode)
 	plan.WriterTimeoutS, plan.ReviewerTimeoutS = current.WriterTimeoutS, current.ReviewerTimeoutS
+	plan.EnvFile = current.EnvFile
 	if plan.UI == nil || (current.UI != nil && current.UI.Design != "") {
 		plan.UI = current.UI
 	}
