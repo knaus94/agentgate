@@ -2,6 +2,11 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.21.3
+
+The release of 0.21.2 stopped in CI before anything was published: a provider test still expected the earlier
+Sol model of the built-in table. The test follows the table now; the tool is 0.21.2 as described below.
+
 ## 0.21.2
 
 **Changed**

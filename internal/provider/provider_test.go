@@ -100,7 +100,7 @@ func TestReviewerCannotWriteAndWriterCanOnlyWriteTheCheckout(t *testing.T) {
 		t.Fatal("a reviewer must not be able to write the checkout")
 	}
 	argv := read(t, filepath.Join(reviewer, "argv.txt"))
-	for _, want := range []string{"exec", "--ephemeral", "gpt-6.1-sol", `model_reasoning_effort="high"`, "--output-schema", "--ignore-user-config"} {
+	for _, want := range []string{"exec", "--ephemeral", "gpt-6.2-sol", `model_reasoning_effort="high"`, "--output-schema", "--ignore-user-config"} {
 		if !strings.Contains(argv, want) {
 			t.Errorf("reviewer argv lacks %s:\n%s", want, argv)
 		}

@@ -4,6 +4,19 @@ This record distinguishes live integrations from controlled provider fixtures an
 model quality, arbitrary specification size or every possible execution environment. It has two parts: what
 was run for the 0.16.0 source, and the release validation of 0.14.0, which is kept as it was written.
 
+## 0.21.3
+
+Checked on 2026-11-17 against `5231866` (the unpublished 0.21.2). Its release workflow failed in
+`internal/provider`: a test reads the built-in route `sol:high` and still expected `gpt-6.1-sol`. The 0.21.2
+check ran only `internal/config` and `cmd/agentgate`.
+
+| Check | Actual result |
+|---|---|
+| `go test -count=1 ./internal/provider ./internal/accounts ./internal/config ./cmd/agentgate` | PASS |
+
+The other tests that name a model declare their own routes. The release workflow runs the full suite with
+`-race` before publication.
+
 ## 0.21.2
 
 Checked on 2026-11-17 against `667d7f6` (0.21.1). Only the models of the built-in aliases `sol` and `astra`,
