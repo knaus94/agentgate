@@ -18,7 +18,7 @@ import (
 
 // interfacePlan adds a page for a streamer: a backend stream and an interface stream, with the jobs it is for.
 func interfacePlan(f *fixture, request string) *Plan {
-	plan := f.plan(request, Stream{Name: "core", Domain: "backend", Files: []string{"a.txt"}},
+	plan := f.plan(request, Stream{Name: "core", Domain: "backend", Files: []string{"a.txt", ".github/workflows/"}},
 		Stream{Name: "web", Domain: "frontend", Files: []string{"page.tsx"}})
 	plan.UI = &UI{Summary: "A page to give a streamer access", Criteria: []string{"access is given without SQL"}, Preserve: []string{"the promo list"},
 		Usage: &Usage{Who: "an operator", Jobs: []Job{{ID: "find", Job: "find a streamer", StartsFrom: "the streamer's Steam link"}}}}

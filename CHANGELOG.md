@@ -2,6 +2,16 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.21.4
+
+**Fixed**
+
+- `architecture` on a plan with `ui.usage` failed before any worker ran when a stream owned a directory or a
+  pattern (for example `.github/workflows/`): the interface designer took only exact file paths and refused
+  the plan's scopes with "an exact file path is needed here, not a pattern". The designer's `files`, in
+  `architecture` and in `design`, now take what a stream's `files` take: exact paths, directories and
+  patterns. `context` still takes exact paths.
+
 ## 0.21.3
 
 The release of 0.21.2 stopped in CI before anything was published: a provider test still expected the earlier

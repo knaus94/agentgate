@@ -4,6 +4,20 @@ This record distinguishes live integrations from controlled provider fixtures an
 model quality, arbitrary specification size or every possible execution environment. It has two parts: what
 was run for the 0.16.0 source, and the release validation of 0.14.0, which is kept as it was written.
 
+## 0.21.4
+
+Checked on 2026-11-17 against `36bf995` (0.21.3). The scenario fixture of an interface plan gives its backend
+stream the directory `.github/workflows/`; on 0.21.3 both architecture scenarios on it fail with "an exact
+file path is needed here, not a pattern", as in the reported session.
+
+| Check | Actual result |
+|---|---|
+| `go test -count=1 -run TestInterface ./internal/dev` on 0.21.3 with the fixture | FAIL (2 tests, the reported error) |
+| `gofmt -l internal/dev`, `go vet ./internal/dev` | clean |
+| `go test -count=1 ./internal/dev` | PASS |
+
+The release workflow runs the full suite with `-race` before publication.
+
 ## 0.21.3
 
 Checked on 2026-11-17 against `5231866` (the unpublished 0.21.2). Its release workflow failed in

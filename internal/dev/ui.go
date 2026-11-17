@@ -146,7 +146,7 @@ func designInterface(cfg *config.Config, input DesignInput) (*Receipt, error) {
 	if strings.TrimSpace(input.Task) == "" || strings.TrimSpace(input.Brief) == "" || strings.TrimSpace(input.UsageContext) == "" && input.Usage == nil {
 		return nil, errors.New("provide task, brief and usage_context (roles, frequency, decisions and the data they need) or usage {who, jobs}")
 	}
-	files, err := cleanPaths(input.Files)
+	files, err := normalizeScope(input.Files)
 	if err != nil {
 		return nil, err
 	}
