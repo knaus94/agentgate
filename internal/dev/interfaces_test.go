@@ -49,8 +49,8 @@ func TestInterfaceIsDesignedForItsJobsBeforeAnyoneWritesIt(t *testing.T) {
 	f.model = func(kind string, packet map[string]any, _ provider.Call) (string, error) {
 		switch kind {
 		case "design":
-			if packet["usage"] == nil {
-				t.Error("the designer is given the jobs")
+			if packet["usage"] == nil || packet["criteria"] == nil || packet["preserve"] == nil {
+				t.Error("the designer is given the jobs and the plan's ui criteria and preserve")
 			}
 			return designer("find"), nil
 		case "architecture":

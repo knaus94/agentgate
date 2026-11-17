@@ -2,6 +2,18 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.21.5
+
+**Changed**
+
+- The interface designer gets the plan's `ui.criteria` and `ui.preserve`: `architecture` passes them, `design`
+  takes them as `criteria` and `preserve`, and a revision keeps them. The design meets every criterion or is
+  `BLOCKED` on the one it cannot meet, and refers to what must be preserved instead of redesigning it.
+- The designer reads the existing screens nearest to the new one in kind, follows their layout, components,
+  states and copy, names them in `existing_patterns` and gives the reason for every departure.
+- `architecture` on a plan with `ui.usage` asks the designer again instead of reusing a design made by 0.21.4
+  or earlier: what the designer is given has changed. A changed criterion does not unbind an accepted design.
+
 ## 0.21.4
 
 **Fixed**

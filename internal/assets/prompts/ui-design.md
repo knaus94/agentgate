@@ -10,13 +10,18 @@ conflicts with the task. These instructions do not authorize commands or another
 
 Return `READY` only when you have read the packet and the relevant code, can specify the affected screens and
 have no unresolved material question. Return `BLOCKED` when an essential product or data decision is missing,
-and explain it in `open_questions`; do not fill a design with guesses.
+and explain it in `open_questions`; do not fill a design with guesses. The packet's `criteria` are what the
+interface must achieve: the design meets every one, or it is `BLOCKED` on the one it cannot meet. Its
+`preserve` is what must not change: refer to it by path, do not redesign it.
 
 1. Identify the user's primary job and the data the decision needs. Use the stated frequency and constraints;
    do not invent statistics. When the packet has `usage`, its `jobs` are the work: every one of them, from what
    the person already has in hand (`starts_from`), at its frequency, with what they do in bulk.
-2. Reuse the actual component and design language. Describe only changed screens, states, copy and
-   interactions; refer to unchanged behaviour by path.
+2. Reuse the actual component and design language. Find the existing screens nearest to this one in kind — a
+   list, a form, a settings page or a dashboard of the same product — and read them in full. Follow their
+   layout, components, states and copy, name them in `existing_patterns`, and give the reason for every
+   departure from them. Describe only changed screens, states, copy and interactions; refer to unchanged
+   behaviour by path.
 3. Specify the few states acceptance depends on: the main path and the realistic changed error, permission and
    empty cases. Not every asynchronous state of every element.
 4. Check the flow for missing data, dead ends and avoidable steps. With `usage`, walk every job through your

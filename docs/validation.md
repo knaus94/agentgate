@@ -4,6 +4,20 @@ This record distinguishes live integrations from controlled provider fixtures an
 model quality, arbitrary specification size or every possible execution environment. It has two parts: what
 was run for the 0.16.0 source, and the release validation of 0.14.0, which is kept as it was written.
 
+## 0.21.5
+
+Checked on 2026-11-18 against `aff28fb` (0.21.4). The interface scenario now requires the designer's packet to
+carry the plan's `ui.criteria` and `ui.preserve`; on 0.21.4 it fails there.
+
+| Check | Actual result |
+|---|---|
+| `go test -count=1 -run TestInterface ./internal/dev` on 0.21.4 with the stricter scenario | FAIL (the packet has neither key) |
+| `gofmt -l internal/dev`, `go vet ./internal/dev` | clean |
+| `go test -count=1 ./internal/dev ./internal/assets ./cmd/agentgate` | PASS |
+
+The prompt rule on neighbouring screens is text for the designer; no check verifies that a design follows it.
+The release workflow runs the full suite with `-race` before publication.
+
 ## 0.21.4
 
 Checked on 2026-11-17 against `36bf995` (0.21.3). The scenario fixture of an interface plan gives its backend

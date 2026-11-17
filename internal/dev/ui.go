@@ -69,6 +69,8 @@ type DesignInput struct {
 	Brief        string   `json:"brief"`
 	UsageContext string   `json:"usage_context"` // roles, frequency, the decisions users make and the data they need
 	Usage        *Usage   `json:"usage,omitempty"`
+	Criteria     []string `json:"criteria,omitempty"` // what the interface must achieve: the plan's ui.criteria
+	Preserve     []string `json:"preserve,omitempty"` // what it must not change: the plan's ui.preserve
 	Files        []string `json:"files,omitempty"`
 	Context      []string `json:"context,omitempty"`
 	Revise       string   `json:"revise,omitempty"`
@@ -139,6 +141,12 @@ func designInterface(cfg *config.Config, input DesignInput) (*Receipt, error) {
 		if len(input.Files) == 0 {
 			input.Files = before.Files
 		}
+		if len(input.Criteria) == 0 {
+			input.Criteria = before.Criteria
+		}
+		if len(input.Preserve) == 0 {
+			input.Preserve = before.Preserve
+		}
 		if len(input.Context) == 0 {
 			input.Context = before.Context
 		}
@@ -177,6 +185,12 @@ func designInterface(cfg *config.Config, input DesignInput) (*Receipt, error) {
 		"review_rules": rules}
 	if input.Usage != nil {
 		packet["usage"] = input.Usage
+	}
+	if len(input.Criteria) > 0 {
+		packet["criteria"] = input.Criteria
+	}
+	if len(input.Preserve) > 0 {
+		packet["preserve"] = input.Preserve
 	}
 	if len(files) == 0 {
 		packet["review_rule_catalogue"] = reviewRuleCatalogue(cfg)

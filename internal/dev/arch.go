@@ -267,7 +267,7 @@ func Architecture(cfg *config.Config, plan *Plan) (any, error) {
 	var ui *Receipt
 	if needed := plan.UI; needed != nil && needed.Usage != nil && needed.Design == "" && !resolved.Request.ReviewFirst() {
 		if ui, err = designInterface(cfg, DesignInput{Task: resolved.Request.Task, Brief: resolved.Plan.Brief, Usage: needed.Usage,
-			Files: resolved.Plan.Files(), Context: resolved.Plan.Context, Mode: resolved.Mode}); err != nil {
+			Criteria: needed.Criteria, Preserve: needed.Preserve, Files: resolved.Plan.Files(), Context: resolved.Plan.Context, Mode: resolved.Mode}); err != nil {
 			return nil, fmt.Errorf("interface design: %w", err)
 		}
 		if ui.Design.Status != "READY" || len(mode.Architecture) == 0 {

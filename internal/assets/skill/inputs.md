@@ -97,8 +97,8 @@ interface with `usage` the receipt is bound to the jobs, not to the design you a
 ## design (new screens and flows)
 
 ```json
-{"task": "...", "brief": "...", "usage_context": "Roles, frequency, decisions, data", "files": [], "context": [],
- "mode": "heavy"}
+{"task": "...", "brief": "...", "usage_context": "Roles, frequency, decisions, data", "criteria": [], "preserve": [],
+ "files": [], "context": [], "mode": "heavy"}
 {"revise": "<design id>", "notes": "The user: «the streamer is found by their Steam link, not by a code»"}
 ```
 
