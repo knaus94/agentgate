@@ -1,6 +1,7 @@
 package dev
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -66,7 +67,11 @@ type Receipt struct {
 	Route         *config.Route           `json:"route,omitempty"`
 	Revision      int                     `json:"revision,omitempty"`
 	UI            string                  `json:"ui,omitempty"` // an architecture pass: the interface design it ran first and designed on
-	Dir           string                  `json:"dir"`
+	// Executor is "session" when the design is the session's own and the other rounds challenge it.
+	Executor string `json:"executor,omitempty"`
+	// Conversation says whether the advisor of a session's plan was shown the conversation, and why not.
+	Conversation string `json:"conversation,omitempty"`
+	Dir          string `json:"dir"`
 }
 
 var receiptID = regexp.MustCompile(`^[0-9a-f]{32}$`)
@@ -148,12 +153,14 @@ type pass struct {
 	packet   map[string]any
 	timeout  time.Duration
 	subs     *substitutions
+	prompt   string   // the brief of its rounds; default: architecture
+	reads    []string // directories a round must be able to read besides its own
 }
 
 // newPass binds a pass to the plan as it is now. The architect is told what the preparation found — the named
 // risks and the load — and reads the code itself: a prepared map saves an expensive model no reading.
-func newPass(cfg *config.Config, source *Plan) (*pass, error) {
-	resolved, err := Resolve(cfg, source)
+func newPass(cfg *config.Config, source *Plan, executor string) (*pass, error) {
+	resolved, err := resolveAs(cfg, source, executor)
 	if err != nil {
 		return nil, err
 	}
@@ -201,14 +208,15 @@ func (p *pass) run(round, name string, route config.Route, extra map[string]any,
 		return lane, err
 	}
 	tools, toolDirs, toolNote := workerTools(p.cfg, "architect")
-	prompt := assets.Prompt("architecture") + "\nYour round: " + round + ". Read the packet at " + filepath.Join(dir, "packet.json") + ".\n" + toolNote
-	call := provider.Call{Route: route, Prompt: prompt, Dir: dir, Schema: schema, Timeout: p.timeout, MCP: tools, Writable: toolDirs, Persist: true}
+	prompt := assets.Prompt(cmp.Or(p.prompt, "architecture")) + "\nYour round: " + round + ". Read the packet at " + filepath.Join(dir, "packet.json") + ".\n" + toolNote
+	call := provider.Call{Route: route, Prompt: prompt, Dir: dir, Schema: schema, Timeout: p.timeout, MCP: tools, Writable: toolDirs, Persist: true,
+		ReadDirs: p.reads}
 	var result provider.Result
 	var used config.Route
 	err := errors.New("no session to continue")
 	if from != nil && from.Session != "" && dirExists(from.Dir) {
 		again := call
-		again.Dir, again.Resume, again.ReadDirs = from.Dir, from.Session, []string{dir}
+		again.Dir, again.Resume, again.ReadDirs = from.Dir, from.Session, append([]string{dir}, p.reads...)
 		again.Route = from.Route // the model and the account the session belongs to
 		again.Route.Effort, again.Route.SubstitutedFrom = route.Effort, ""
 		again.Prompt = "Your next round: " + round + ". Its rules are in your first instructions. Read the packet at " +
@@ -255,6 +263,11 @@ func (p *pass) finish() (any, error) {
 // architect: it reads the other design and the blockers raised against its own, and returns the one design the
 // task follows. Nobody else chooses between them.
 func Architecture(cfg *config.Config, plan *Plan) (any, error) {
+	return architecture(cfg, plan, ArchitectureInput{})
+}
+
+// architecture runs the pass of a plan; input carries the session's own design when the session writes the task.
+func architecture(cfg *config.Config, plan *Plan, input ArchitectureInput) (any, error) {
 	if plan.Revise != "" {
 		return nil, errors.New("a revision is its own input: `agentgate architecture` with {revise, answers, notes} (`agentgate reference inputs`)")
 	}
@@ -265,23 +278,30 @@ func Architecture(cfg *config.Config, plan *Plan) (any, error) {
 	mode := resolved.ModeConfig()
 	// An interface with jobs is designed first: the architects then design what it needs, on the design itself.
 	var ui *Receipt
-	if needed := plan.UI; needed != nil && needed.Usage != nil && needed.Design == "" && !resolved.Request.ReviewFirst() {
+	if needed := plan.UI; needed != nil && needed.Usage != nil && needed.Design == "" && !resolved.Request.ReviewFirst() && input.Revise == "" {
 		if ui, err = designInterface(cfg, DesignInput{Task: resolved.Request.Task, Brief: resolved.Plan.Brief, Usage: needed.Usage,
 			Criteria: needed.Criteria, Preserve: needed.Preserve, Files: resolved.Plan.Files(), Context: resolved.Plan.Context, Mode: resolved.Mode}); err != nil {
 			return nil, fmt.Errorf("interface design: %w", err)
 		}
-		if ui.Design.Status != "READY" || len(mode.Architecture) == 0 {
+		if ui.Design.Status != "READY" || (len(mode.Architecture) == 0 && !resolved.counselNeeded()) {
 			return interfaceAnswer(resolved.Mode, ui), nil
 		}
 		designed := *plan
 		designed.UI = &UI{Design: ui.ID, Acceptance: "Designed in this pass for the jobs in usage; the user has not seen it yet.", Usage: needed.Usage}
 		plan = &designed
 	}
+	if resolved.Executor == "session" {
+		if !resolved.counselNeeded() {
+			return map[string]any{"mode": resolved.Mode, "decision": resolved.Decision,
+				"next": "Nobody reads the plan in this mode: `start` it."}, nil
+		}
+		return sessionPass(cfg, plan, input, ui)
+	}
 	if len(mode.Architecture) == 0 {
 		return map[string]any{"mode": resolved.Mode, "decision": resolved.Decision,
 			"next": "This mode has no architecture pass: the brief is the design. Launch directly."}, nil
 	}
-	p, err := newPass(cfg, plan)
+	p, err := newPass(cfg, plan, runningExecutor(plan))
 	if err != nil {
 		return nil, err
 	}
@@ -352,9 +372,14 @@ func Architecture(cfg *config.Config, plan *Plan) (any, error) {
 // or with what the user said about the design.
 type ArchitectureInput struct {
 	Plan    string            `json:"plan,omitempty"` // a saved plan; default: the plan of this session's task
-	Revise  string            `json:"revise"`
+	Revise  string            `json:"revise,omitempty"`
 	Answers map[string]string `json:"answers,omitempty"` // question id -> the user's answer
 	Notes   string            `json:"notes,omitempty"`
+	// A task the session writes: the session's own design, and its answers to the blockers raised against it.
+	Design       string          `json:"design,omitempty"`
+	Alternatives []string        `json:"alternatives,omitempty"`
+	Risks        []Issue         `json:"risks,omitempty"`
+	Answered     []BlockerAnswer `json:"answered,omitempty"`
 }
 
 // ArchitectureRevise continues the session of the architect whose design a receipt accepts. It is how a design
@@ -373,6 +398,7 @@ func ArchitectureRevise(cfg *config.Config, input ArchitectureInput) (any, error
 		return nil, errors.New("a revision needs answers {question id: the user's answer} or notes: what the user said about the design")
 	}
 	var plan *Plan
+	executor := "" // the task's own, when the design revised is the design of this session's task
 	extra := map[string]any{"notes": input.Notes}
 	switch {
 	case input.Plan != "":
@@ -390,7 +416,7 @@ func ArchitectureRevise(cfg *config.Config, input ArchitectureInput) (any, error
 		}
 	case gate != nil && (gate.active() || gate.Step == StepDone && gate.Landed == "" && !gate.Dropped):
 		// A finished task that is not landed yet still takes new work: what the revision changes becomes its next stage.
-		plan = gate.Plan
+		plan, executor = gate.Plan, gate.executor()
 		var accepted []string
 		for _, record := range gate.Accepted {
 			accepted = append(accepted, record.Name)
@@ -429,7 +455,7 @@ func ArchitectureRevise(cfg *config.Config, input ArchitectureInput) (any, error
 		return nil, fmt.Errorf("answers name a question that design does not ask; its questions: %s", strings.Join(known, ", "))
 	}
 	extra["answers"], extra["prior"] = answers, design.Report
-	p, err := newPass(cfg, plan)
+	p, err := newPass(cfg, plan, cmp.Or(executor, runningExecutor(plan)))
 	if err != nil {
 		return nil, err
 	}
@@ -495,6 +521,9 @@ func recommended(answer, option string) bool {
 // architect has the user's answer, the design is built on those answers, and a blocker the architects
 // disagree about is decided.
 func (r *Resolved) requireArchitecture() error {
+	if r.Executor == "session" {
+		return nil // the session's plan is read once, before the task starts: requireCounsel
+	}
 	if len(r.ModeConfig().Architecture) == 0 || r.Request.ReviewFirst() {
 		return nil
 	}
@@ -659,6 +688,9 @@ func interfaceAnswer(mode string, ui *Receipt) map[string]any {
 func (r *Receipt) view() map[string]any { return r.render(false) }
 
 func (r *Receipt) render(full bool) map[string]any {
+	if r.Executor == "session" {
+		return r.sessionView()
+	}
 	issues := func(list []Issue) []string {
 		out := []string{}
 		for _, issue := range list {
@@ -792,7 +824,11 @@ func architectureFor(plan *Plan) any {
 		return nil
 	}
 	answers := []map[string]string{}
-	for _, question := range lane.open() {
+	questions := lane.open()
+	if receipt.Executor == "session" {
+		questions = receipt.asked()
+	}
+	for _, question := range questions {
 		if answer := plan.Architecture.Answers[question.ID]; answer != "" {
 			answers = append(answers, map[string]string{"question": question.Question, "answer": answer})
 		}

@@ -66,3 +66,18 @@ func Raise(effort string, steps int, ceiling string) string {
 
 // Blocks reports whether a severity blocks completion in the mode.
 func (m Mode) Blocks(severity string) bool { return slices.Contains(m.Blocking, severity) }
+
+// Executors are who may write the code of a task.
+var Executors = []string{"session", "workers"}
+
+// Process is the mode as the task runs it. When the lead's session writes, the process comes from the session
+// table and the mode table only lends its ceilings and its designer; the writers' routes are not used.
+func (c *Config) Process(executor, mode string) Mode {
+	out := c.Modes[mode]
+	if executor != "session" {
+		return out
+	}
+	process := c.Session[mode]
+	out.Architecture, out.Critique, out.Review, out.Blocking = process.Critics, process.Blind, process.Review, process.Blocking
+	return out
+}

@@ -135,6 +135,14 @@ for a particular model's effort range.
 | `modes.<mode>.critique` | Cross-critique between the two architecture routes |
 | `modes.<mode>.architecture_timeout_s`, `.writer_timeout_s`, `.reviewer_timeout_s` | Per-process ceilings in seconds; `0` uses runtime defaults; plans may override writer/reviewer ceilings |
 | `ui_designer`, `visual_reviewer`, `consultant` | Routes for scoped UI design, optional browser review and consultations |
+| `executor` | Who writes a task: `session` (default) — the lead's own session — or `workers`, sandboxed writers. `--workers` in a request selects them for one task; a task keeps the executor it started with |
+| `advisor` | The route that is shown the conversation: it reads the plan before the work and answers `advise` |
+| `session.<mode>.critics` | Independent critics of the session's design (heavy, ultra); `blind: true` has each design the change before it reads the session's |
+| `session.<mode>.review` | Who reads the code at a checkpoint and after the last stage. A lane with `"conversation": true` is given the digest of the lead's conversation when its route is of the lead's own provider. `[]`: the session reads its own patch |
+| `session.<mode>.blocking` | Blocking severities of a task the session writes |
+
+`modes` is the table of sandboxed writers: a task the session writes takes only its process ceilings and its
+`ui_designer` from it. `agentgate modes` prints both tables.
 
 Modes are `light`, `medium`, `heavy` and `ultra`. Review axes are `correctness`, `architecture`, `simplicity`,
 `performance`, `security`, `design` and `usability`. Local `review_rules` attach acceptance instructions without granting extra tools;

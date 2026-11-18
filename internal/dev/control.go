@@ -97,6 +97,19 @@ func PromptHook(cwd, sessionID string) map[string]any {
 	}
 	note := "agentgate, to the lead (not a message of the user): "
 	switch {
+	case gate.active() && gate.sessionWrites():
+		where := "step `" + gate.Step + "`"
+		if position := gate.position(); position != nil {
+			where = fmt.Sprintf("stage %v (%v accepted of %v), step `%s`", position["name"], position["accepted"], position["of"], gate.Step)
+		}
+		note += "this session writes a task: " + where + ". Keep to its plan: write the open stage and nothing of a later " +
+			"one, and close it with `agentgate run`. If this message changes what is asked, doubts how the change is built or adds a constraint, " +
+			"change the plan before the code — `agentgate amend`, with `update` saying what changed and why — and tell the user what it does to the " +
+			"stages already accepted. `agentgate advise` puts a doubt to the advisor. A new, unrelated request waits until this task is finished or " +
+			"the user ends it."
+	case !gate.active() && gate.sessionWrites():
+		note += "the last task of this session is finished. If the user now asks for another change through /dev, it begins with `agentgate prepare` " +
+			"and the request exactly as they typed it."
 	case !gate.active():
 		note += "the last task of this session is finished. If the user now asks for another change, it goes to `agentgate prepare` as their own " +
 			"words, quoted in order, with what they attached: no summary of yours, no solution, no \"keep X\" or \"do not touch Y\". What you " +

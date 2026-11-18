@@ -287,14 +287,15 @@ func run(args arguments) (any, int, error) {
 		if err != nil {
 			return nil, 0, err
 		}
-		// A plan asks for the pass; {revise, answers, notes} asks the architect of a design to continue it.
+		// A plan asks for the pass. An input that names its plan, or a receipt to continue, carries what the pass is
+		// given: the session's own design and its answers, or the user's words for the architect of a design.
 		var keys map[string]json.RawMessage
-		if args.plan == "" && json.Unmarshal(raw, &keys) == nil && keys["revise"] != nil && keys["brief"] == nil {
+		if args.plan == "" && json.Unmarshal(raw, &keys) == nil && keys["brief"] == nil && (keys["revise"] != nil || keys["plan"] != nil) {
 			input := dev.ArchitectureInput{}
 			if err := decodeInput(raw, &input); err != nil {
 				return nil, 0, fmt.Errorf("architecture input: %w", err)
 			}
-			value, err := dev.Execute("architecture", func() (any, error) { return dev.ArchitectureRevise(cfg, input) })
+			value, err := dev.Execute("architecture", func() (any, error) { return dev.ArchitectureInputs(cfg, input) })
 			return value, 0, err
 		}
 		if len(bytes.TrimSpace(raw)) == 0 {
@@ -353,6 +354,20 @@ func run(args arguments) (any, int, error) {
 			return nil, 0, err
 		}
 		value, err := dev.Execute("design", func() (any, error) { return dev.Design(cfg, input) })
+		return value, 0, err
+	case "advise":
+		input := dev.AdviseInput{}
+		if err := args.input(&input, true); err != nil {
+			return nil, 0, err
+		}
+		value, err := dev.Execute("advise", func() (any, error) { return dev.Advise(cfg, input) })
+		return value, 0, err
+	case "take":
+		input := dev.TakeInput{}
+		if err := args.input(&input, false); err != nil {
+			return nil, 0, err
+		}
+		value, err := dev.Take(cfg, input)
 		return value, 0, err
 	case "consult":
 		input := dev.ConsultInput{}

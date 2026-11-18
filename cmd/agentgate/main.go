@@ -1,4 +1,4 @@
-// agentgate is a quality gate around sandboxed model workers.
+// agentgate is a quality gate for work a session plans and writes in stages, or hands to sandboxed model workers.
 package main
 
 import (

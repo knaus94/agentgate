@@ -169,6 +169,16 @@ type RunInput struct {
 	Recheck          bool         `json:"recheck,omitempty"`  // ask for a fresh judgement of unchanged evidence; bypasses no condition
 	Prepared         []string     `json:"prepared,omitempty"` // prerequisites the lead made exist
 	Restore          []string     `json:"restore,omitempty"`  // files an isolated task changed outside its plan, to put back
+	Written          *Written     `json:"written,omitempty"`  // a task the session writes: its report on the stage, or on its fixes
+	Adopt            []string     `json:"adopt,omitempty"`    // files the session changed outside the plan, to take into the open stage
+	Disown           []string     `json:"disown,omitempty"`   // changes outside the plan that are somebody else's
+}
+
+// Written is the session's report on the stage it wrote, or on the fixes it made after a reading.
+type Written struct {
+	Summary    string    `json:"summary"`
+	Deviations []string  `json:"deviations,omitempty"` // where the work departs from the plan or the design, and why
+	Disputes   []Dispute `json:"disputes,omitempty"`   // findings of this correction the session shows to be wrong
 }
 
 // verify brings the evidence of the present position up to date: declared checks first, then independent
@@ -190,8 +200,8 @@ func (g *Gate) verify(cfg *config.Config, input RunInput, did *[]string) error {
 	if err := g.audit(now); err != nil {
 		return err
 	}
-	if g.Worktree != "" && len(g.Foreign) > 0 {
-		return g.save() // what an isolated task changed outside its plan is settled before anything is judged
+	if len(g.unsettled(g.Foreign)) > 0 {
+		return g.save() // what a task changed outside its plan is settled before anything is judged
 	}
 	if _, err := loadReviewRules(cfg, g.scope()); err != nil {
 		return err
@@ -216,6 +226,9 @@ func (g *Gate) verify(cfg *config.Config, input RunInput, did *[]string) error {
 	}
 	if g.Request.Writes() && len(g.failing()) > 0 {
 		return g.save()
+	}
+	if !g.reviewDue() {
+		return g.save() // a stage between checkpoints is accepted on its checks; the next reading covers it
 	}
 	if now, err = g.snapshot(); err != nil {
 		return err
@@ -364,7 +377,7 @@ func (g *Gate) verify(cfg *config.Config, input RunInput, did *[]string) error {
 		*did = append(*did, "evidence prepared for the lead's own review")
 		return g.save()
 	}
-	timeout, err := timeoutSeconds(input.ReviewerTimeoutS, g.Plan.ReviewerTimeoutS, cfg.Modes[g.Mode].ReviewerTimeoutS)
+	timeout, err := timeoutSeconds(input.ReviewerTimeoutS, g.Plan.ReviewerTimeoutS, g.process(cfg).ReviewerTimeoutS)
 	if err != nil {
 		return err
 	}
@@ -394,6 +407,9 @@ func (g *Gate) verify(cfg *config.Config, input RunInput, did *[]string) error {
 	var reviewers []string
 	for _, spec := range specs {
 		reviewers = append(reviewers, strings.Join(spec.Axes, "+")+" ("+spec.Route.String()+")")
+		if spec.Unshown != "" {
+			*did = append(*did, "the conversation was "+spec.Unshown)
+		}
 	}
 	if browser != nil {
 		reviewers = append(reviewers, "browser pass ("+cfg.VisualReviewer+")")
@@ -533,7 +549,7 @@ func (g *Gate) reassess(cfg *config.Config, quality *qualityInputs, input RunInp
 		"why": "The criteria or their evidence changed since your review; the code did not. " + g.amendment()}); err != nil {
 		return false, err
 	}
-	timeout, err := timeoutSeconds(input.ReviewerTimeoutS, g.Plan.ReviewerTimeoutS, cfg.Modes[g.Mode].ReviewerTimeoutS)
+	timeout, err := timeoutSeconds(input.ReviewerTimeoutS, g.Plan.ReviewerTimeoutS, g.process(cfg).ReviewerTimeoutS)
 	if err != nil {
 		return false, err
 	}

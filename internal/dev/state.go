@@ -351,11 +351,17 @@ func begin(resolved *Resolved, name string) (gate *Gate, err error) {
 	}
 	plan := resolved.Plan
 	gate = &Gate{Version: stateVersion, ID: newID(), Session: session(), Request: resolved.Request, Cwd: base(), Plan: plan, PlanName: name,
-		Modes: resolved.Modes, Mode: resolved.Modes[0], Step: StepWrite, CreatedAt: time.Now().Unix(),
+		Modes: resolved.Modes, Mode: resolved.Modes[0], Step: StepWrite, CreatedAt: time.Now().Unix(), Executor: resolved.Executor,
 		Dispositions: map[string]Disposition{}, Resolutions: map[string]string{}, Baselines: map[string]int{}, Disputes: map[string]Dispute{}}
 	gate.Revisions = []Revision{{Number: 1, At: gate.CreatedAt, Digest: digest(plan)}}
+	// A task the session planned keeps the id its trees were recorded under when the request was handed over.
+	var draft *Draft
+	if candidate := loadDraft(); gate.sessionWrites() && candidate != nil && candidate.Request == plan.Request {
+		draft, gate.ID, gate.Opened = candidate, candidate.ID, candidate.At
+	}
 	staged := len(plan.Stages) > 1
-	if resolved.Request.Worktree || (resolved.Config.Worktree.Default && !resolved.Request.ReviewFirst()) || (staged && isolateStaged(resolved.Config)) {
+	// A task the session writes works in the checkout the user is looking at: it is never isolated.
+	if !gate.sessionWrites() && (resolved.Request.Worktree || (resolved.Config.Worktree.Default && !resolved.Request.ReviewFirst()) || (staged && isolateStaged(resolved.Config))) {
 		// An isolated task shares no file with anyone, so it claims none. Preparing the worktree can take
 		// minutes and must not hold the checkout's lock.
 		if err := gate.isolate(resolved.Config); err != nil {
@@ -380,6 +386,17 @@ func begin(resolved *Resolved, name string) (gate *Gate, err error) {
 	}
 	if gate.BaseTree, err = gate.snapshot(); err != nil {
 		return nil, err
+	}
+	if draft != nil {
+		// What changed between the request and now was written before the plan started: it is measured as the
+		// task's own change, so a file no stage owns shows up instead of becoming part of what the task found.
+		// The comparison is like for like: the earlier tree was recorded before any stream owned a file.
+		if plain, err := snapshotTree(gate.objects(), nil); err == nil {
+			if early, _ := diffTrees(gate.objects(), draft.Tree, plain); len(early) > 0 {
+				gate.BaseTree = draft.Tree
+			}
+		}
+		_ = os.Remove(draftFile())
 	}
 	// The declared inputs of every check are looked at before any work, not after a writer's round.
 	if gate.said, err = gate.inspectInputs(plan.checksFor(-1), gate.BaseTree); err != nil {

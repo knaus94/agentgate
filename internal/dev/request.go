@@ -1,4 +1,5 @@
-// Package dev implements the /dev workflow: a quality gate around sandboxed model workers.
+// Package dev implements the /dev workflow: a quality gate around the work of the lead's own session, or of
+// sandboxed model workers.
 package dev
 
 import (
@@ -22,6 +23,7 @@ type Request struct {
 	Staged   bool   `json:"staged"`   // the plan must split the work into stages
 	Single   bool   `json:"single"`   // one pass, whatever the size
 	Step     bool   `json:"step"`     // wait for the user after every accepted stage
+	Workers  bool   `json:"workers"`  // sandboxed writers do the work instead of the lead's own session
 }
 
 var actions = []string{"plan", "research", "fix", "review", "clean", "verify", "status", "stop", "help"}
@@ -69,6 +71,8 @@ func ParseRequest(raw string) (Request, error) {
 			request.Single = true
 		case token == "--step" && !request.Step:
 			request.Step = true
+		case token == "--workers" && !request.Workers:
+			request.Workers = true
 		case (token == "--grill" || token == "--no-grill") && request.Grill == "auto":
 			request.Grill = map[string]string{"--grill": "force", "--no-grill": "skip"}[token]
 		case isMode && request.Mode == "":
@@ -100,7 +104,7 @@ done:
 	switch request.Action {
 	case "status", "stop", "help":
 		if request.Task != "" || request.Mode != "" || request.Parallel != 0 || request.Preview || request.Grill != "auto" || request.Worktree ||
-			request.Staged || request.Single || request.Step {
+			request.Staged || request.Single || request.Step || request.Workers {
 			return request, fmt.Errorf("%s takes no task or flags", request.Action)
 		}
 	case "research", "verify":

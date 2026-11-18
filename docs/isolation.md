@@ -2,12 +2,15 @@
 
 [Русский](ru/isolation.md)
 
+Isolation is for a task of sandboxed writers (`--workers`). A task the lead's own session writes — the
+default — always works in your checkout, and `-w` without `--workers` is refused.
+
 By default the writers of a task edit your checkout: you see the change grow, and two sessions may not own the
 same file. With `-w` a task works somewhere else, and your checkout changes only when you say so.
 
 ```
-/dev -w add rate limiting to the export endpoint
-/dev -w -h move invoice totals to integer cents      # another Claude Code session, same repository
+/dev --workers -w add rate limiting to the export endpoint
+/dev --workers -w -h move invoice totals to integer cents      # another Claude Code session, same repository
 ```
 
 ## What happens

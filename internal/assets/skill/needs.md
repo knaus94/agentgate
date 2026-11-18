@@ -1,5 +1,8 @@
 # Needs, and giving work
 
+The needs of a task you write yourself — `write`, `fix`, `scope` — are on the `session` page; `review`,
+`finding`, `requirement`, `rule`, `stall`, `setup` and `scenarios` are settled as below in both kinds of task.
+
 A need is something only a person can settle. Each carries `what` (the cause, the tool's own words first),
 `resolve` (the one way to settle it), and `command` with `input`: that way as it is sent. Write the input to a
 file, replace every `<…>`, and run `agentgate <command> --file <file>`. `decide` and `answer` run the task on

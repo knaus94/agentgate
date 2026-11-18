@@ -221,7 +221,7 @@ func TestReferenceDocumentsEveryCommand(t *testing.T) {
 	if _, known := assets.Reference("no-such-topic"); known {
 		t.Fatal("an unknown topic must not print something else")
 	}
-	for _, command := range []string{"parse", "preview", "prepare", "route", "architecture", "design", "consult", "start", "run", "answer", "decide",
+	for _, command := range []string{"parse", "preview", "prepare", "route", "architecture", "design", "consult", "advise", "take", "start", "run", "answer", "decide",
 		"amend", "show", "tell", "check", "visual", "land", "pause", "resume", "stop", "status", "watch", "doctor", "install", "update", "modes",
 		"config", "prune", "version", "drop", "forget"} {
 		if !strings.Contains(reference, "`"+command) {
@@ -285,7 +285,7 @@ func TestWholeTaskThroughTheCommandLine(t *testing.T) {
 	}
 	// The scenario starts from the plan: medium without its design pass.
 	s.ok("", "config", "set", "modes.medium.architecture", "[]")
-	plan := `{"request":"change the file","assessment":{"size":"ordinary","evidence":"one file"},"brief":"a.txt must say fixed",
+	plan := `{"request":"--workers change the file","assessment":{"size":"ordinary","evidence":"one file"},"brief":"a.txt must say fixed",
 	  "streams":[{"name":"core","domain":"backend","files":["a.txt"]}],
 	  "checks":[["grep","-q","fixed","a.txt"],["sh","-c","exit 7"]]}`
 	routed := s.ok(plan, "route", "--file", "-")

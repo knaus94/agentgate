@@ -10,6 +10,29 @@ one before it is accepted. `agentgate run` moves from one stage to the next by i
 Every plan has stages. A plan written with `streams` at the top is a plan of one stage, so there is one
 shape, one validator and one set of rules ([decision 0003](decisions/0003-one-plan-shape.md)).
 
+## Stages of a task the session writes
+
+When the lead's own session writes the task — the default — a stage is small, and closing it costs no model
+run: the tool audits the scope, runs the stage's checks and scans the added lines, then hands over the next
+stage in the same answer. Prefer several small stages to one large one.
+
+The stage is no longer the unit of review. A reading is placed at a **checkpoint**:
+
+| Where | Who reads | What is read |
+|---|---|---|
+| a stage with `"checkpoint": true` — later stages build on what it leaves | the mode's reader; light has none before the end | everything written since the last reading |
+| a stage whose own `assessment` names a risk | independent lanes, in heavy and ultra only | the same |
+| after the last stage | the mode's reader; in light the session itself | the whole change |
+
+A stage between checkpoints is accepted on its checks. Its requirements are judged at the next reading, and
+every requirement at the last one. Each stage names the existing code it follows (`like`), or says why nothing
+comparable exists (`like_waiver`); the brief shows both, and which stages are checkpoints, with the price.
+
+Such a task works in your checkout and is never isolated: `-w`, `worktree.default` and `staging.isolate`
+apply to `--workers`. `--step` pauses after every accepted stage; `--single` is a plan of one stage.
+
+The rest of this page describes stages with `--workers`, where every stage goes through the whole gate.
+
 ```
 plan with stages
    │

@@ -12,8 +12,9 @@ section.
 - **Inputs are files.** Wherever the guide says `--file -`, write the JSON to a file first (`$TMPDIR` is
   writable), then pass its path. Do both in one `exec` script — the file write, then the command — so an input
   costs one turn, not two. The task text goes into a file the same way and never onto a command line.
-- **Waiting costs a turn every time you look.** `prepare`, `architecture`, `start`, `run`, `answer` and
-  `decide` run model workers for minutes and print nothing until they end. Wait like this, and no other way:
+- **Waiting costs a turn every time you look.** A command that starts a model — `architecture`, `advise`, a
+  `run` that reaches a reading, and with `--workers` also `prepare`, `start`, `answer` and `decide` — runs for
+  minutes and prints nothing until it ends. Wait like this, and no other way:
 
   ```js
   // @exec: {"yield_time_ms": 300000}
@@ -33,7 +34,8 @@ section.
   checks, which waits for it. When your shell tool returns only after the
   command has ended, as it does in a non-interactive session, there is nothing to wait for: call the command
   once.
-- **The workers are agentgate's.** Do not use your own sub-agents, `codex review` or plan mode for this task.
+- **Nothing is delegated outside the tool.** Do not use your own sub-agents, `codex review` or plan mode for
+  this task: you write it, and the readers are agentgate's.
 - **User questions.** Use the native input tool of this session (`request_user_input`, or
   `request_user_input_async`: its acknowledgement means the question is pending, not answered). If it is
   unavailable in the current mode, ask in one concise message; do not enter plan mode or build a workaround.

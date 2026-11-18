@@ -68,6 +68,8 @@ func newFixture(t *testing.T) *fixture {
 	light := cfg.Modes["light"]
 	light.Review = nil
 	cfg.Modes["light"] = light
+	// The scenarios drive sandboxed writers; the ones about a task the session writes say so themselves.
+	cfg.Executor = "workers"
 	f.cfg = cfg
 	return f
 }

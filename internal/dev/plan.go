@@ -129,6 +129,13 @@ type Stage struct {
 	Streams    []Stream    `json:"streams"`
 	Checks     []Check     `json:"checks,omitempty"`     // in addition to the plan's checks
 	Assessment *Assessment `json:"assessment,omitempty"` // this stage's own facts; default: the plan's
+	// Like names the existing code this stage follows: the nearest implementation of the same kind. A stage with
+	// nothing to follow says so in LikeWaiver: that is a new pattern, and the user sees it in the plan.
+	Like       []string `json:"like,omitempty"`
+	LikeWaiver string   `json:"like_waiver,omitempty"`
+	// Checkpoint marks a stage later stages build on: the mode's reader reads everything since the checkpoint
+	// before it. The last stage needs no mark: the whole change is read after it.
+	Checkpoint bool `json:"checkpoint,omitempty"`
 }
 
 // Plan is what was agreed: the brief, the criteria and the stages that deliver them. A plan written with
@@ -141,6 +148,8 @@ type Plan struct {
 	Requirements  []Requirement  `json:"requirements,omitempty"`
 	Stages        []Stage        `json:"stages,omitempty"`
 	Streams       []Stream       `json:"streams,omitempty"`     // a single-pass plan: one stage, written without the wrapper
+	Like          []string       `json:"like,omitempty"`        // a single-pass plan: the existing code it follows
+	LikeWaiver    string         `json:"like_waiver,omitempty"` // a single-pass plan: why there is nothing to follow
 	Single        bool           `json:"single_pass,omitempty"` // set by the tool: the plan was written with top-level streams
 	Context       []string       `json:"context,omitempty"`
 	Checks        []Check        `json:"checks,omitempty"`
@@ -152,16 +161,20 @@ type Plan struct {
 	Prerequisites []Prerequisite `json:"prerequisites,omitempty"`
 	// EnvFile is a private file of KEY=VALUE lines outside the repository: its variables reach every declared
 	// check. The plan keeps the path; nobody is shown the values.
-	EnvFile          string    `json:"env_file,omitempty"`
-	Architecture     *Accepted `json:"architecture,omitempty"`
-	Update           string    `json:"update,omitempty"`     // an amendment: what changed and why
-	Authorized       string    `json:"authorized,omitempty"` // an amendment that changes requirements: who allowed it, in what words
-	Rework           []string  `json:"rework,omitempty"`     // an amendment: streams of the current stage that get it as new work
-	BaseRef          string    `json:"base_ref,omitempty"`   // review and clean: the commit the diff starts from
-	WriterTimeoutS   int       `json:"writer_timeout_s,omitempty"`
-	ReviewerTimeoutS int       `json:"reviewer_timeout_s,omitempty"`
-	Revise           string    `json:"revise,omitempty"`          // 0.19 and earlier; a revision is `architecture` {revise, answers, notes}
-	ReviseBlockers   []string  `json:"revise_blockers,omitempty"` // 0.19 and earlier
+	EnvFile      string    `json:"env_file,omitempty"`
+	Architecture *Accepted `json:"architecture,omitempty"`
+	// Grounding is the session's map of the area — how this kind of work is done here — in the shape of a
+	// context pack. The tool stores it where readers find it; the saved plan keeps it too.
+	Grounding        *contextPack `json:"grounding,omitempty"`
+	Approved         string       `json:"approved,omitempty"`   // a task the session writes: the user's words approving the plan
+	Update           string       `json:"update,omitempty"`     // an amendment: what changed and why
+	Authorized       string       `json:"authorized,omitempty"` // an amendment that changes requirements: who allowed it, in what words
+	Rework           []string     `json:"rework,omitempty"`     // an amendment: streams of the current stage that get it as new work
+	BaseRef          string       `json:"base_ref,omitempty"`   // review and clean: the commit the diff starts from
+	WriterTimeoutS   int          `json:"writer_timeout_s,omitempty"`
+	ReviewerTimeoutS int          `json:"reviewer_timeout_s,omitempty"`
+	Revise           string       `json:"revise,omitempty"`          // 0.19 and earlier; a revision is `architecture` {revise, answers, notes}
+	ReviseBlockers   []string     `json:"revise_blockers,omitempty"` // 0.19 and earlier
 }
 
 // Assessment is what was found in the code. The mode is computed from these facts, not chosen by taste.
@@ -332,11 +345,12 @@ func (p *Plan) normalized() *Plan {
 	_ = json.Unmarshal(raw, out)
 	out.Checks = slices.DeleteFunc(out.Checks, generatedDesignCheck)
 	if len(out.Stages) == 0 && len(out.Streams) > 0 {
-		stage := Stage{Name: "main", Goal: firstLine(out.Brief), Streams: out.Streams}
+		stage := Stage{Name: "main", Goal: firstLine(out.Brief), Streams: out.Streams, Like: out.Like, LikeWaiver: out.LikeWaiver}
 		for _, requirement := range out.Requirements {
 			stage.Covers = append(stage.Covers, requirement.ID)
 		}
 		out.Stages, out.Streams, out.Single = []Stage{stage}, nil, true
+		out.Like, out.LikeWaiver = nil, ""
 	}
 	if len(out.Stages) == 1 && len(out.Stages[0].Covers) == 0 {
 		for _, requirement := range out.Requirements {
@@ -382,13 +396,40 @@ type Resolved struct {
 	Modes     []string // per stage
 	Decisions []Decision
 	Config    *config.Config
+	Executor  string // session: the lead's own session writes; workers: sandboxed writers do
+	running   bool   // the plan of a task under way: what only a plan that has not started is held to is not checked
 }
 
-func (r *Resolved) ModeConfig() config.Mode { return r.Config.Modes[r.Mode] }
+func (r *Resolved) ModeConfig() config.Mode { return r.Config.Process(r.Executor, r.Mode) }
+
+// executorOf is who writes the code of a request: sandboxed writers when the request or the configuration
+// says so, otherwise the lead's own session.
+func executorOf(cfg *config.Config, request Request) string {
+	if request.Workers || cfg.Executor == "workers" {
+		return "workers"
+	}
+	return "session"
+}
 
 // Resolve validates a plan, gives it its one shape and decides the mode of every stage. A flag in the
 // request always wins. The plan passed in is not changed.
 func Resolve(cfg *config.Config, source *Plan) (*Resolved, error) {
+	return resolveAs(cfg, source, runningExecutor(source))
+}
+
+// runningExecutor is who writes this session's unfinished task when the plan is that task's: a task keeps the
+// executor it was started with, whatever the request and the configuration say now — a task started before the
+// session wrote by default is still a task of sandboxed writers. "" for any other plan.
+func runningExecutor(plan *Plan) string {
+	if gate := Current(); gate != nil && gate.active() && gate.Plan != nil && gate.Plan.Request == plan.Request {
+		return gate.executor()
+	}
+	return ""
+}
+
+// resolveAs resolves a plan for a known executor: the plan of a task under way. "" asks the request and the
+// configuration, as for a plan nothing runs yet.
+func resolveAs(cfg *config.Config, source *Plan, executor string) (*Resolved, error) {
 	request, err := ParseRequest(source.Request)
 	if err != nil {
 		return nil, err
@@ -402,7 +443,7 @@ func Resolve(cfg *config.Config, source *Plan) (*Resolved, error) {
 		add("a staged plan keeps its streams inside the stages")
 	}
 	plan := source.normalized()
-	resolved := &Resolved{Plan: plan, Request: request, Config: cfg}
+	resolved := &Resolved{Plan: plan, Request: request, Config: cfg, Executor: cmp.Or(executor, executorOf(cfg, request)), running: executor != ""}
 	if strings.TrimSpace(plan.Brief) == "" {
 		add("brief is required: the accepted requirements, invariants and acceptance criteria")
 	}
@@ -612,6 +653,17 @@ func (r *Resolved) decideModes() []string {
 		return problems
 	}
 	r.Decision = r.Decisions[0]
+	if r.Executor == "session" {
+		// One mode for the whole task; what the facts of any stage suggest is said once.
+		for _, decision := range r.Decisions[1:] {
+			for _, reason := range decision.Because {
+				if !slices.Contains(r.Decision.Because, reason) {
+					r.Decision.Because = append(r.Decision.Because, reason)
+				}
+			}
+		}
+		return nil
+	}
 	if len(plan.Stages) > 1 {
 		r.Decision = Decision{r.Mode, "stages", []string{fmt.Sprintf("%d stages; the most thorough of them is %s", len(plan.Stages), r.Mode)}}
 	}
@@ -625,6 +677,9 @@ func (r *Resolved) decideStage(stage Stage) (Decision, error) {
 	a := stage.Assessment
 	if a == nil {
 		a = r.Plan.Assessment
+	}
+	if r.Executor == "session" {
+		return r.decideSession(stage, a)
 	}
 	// A mode given by the plan, or by a flag in the request, is final. When the facts call for more, the reasons
 	// say so: the lead tells the user what the lower mode leaves out.
@@ -642,10 +697,35 @@ func (r *Resolved) decideStage(stage Stage) (Decision, error) {
 	return r.assess(stage, a)
 }
 
+// decideSession is the mode of a task the session writes: the plan's, the flag's, or medium. The facts of an
+// assessment never raise it: a mode is what the user is willing to spend, so they are told what the facts
+// suggest and decide.
+func (r *Resolved) decideSession(stage Stage, a *Assessment) (Decision, error) {
+	decision := Decision{"medium", "default", []string{"medium unless the request carries a mode flag"}}
+	switch {
+	case r.Plan.Mode != "":
+		decision = Decision{r.Plan.Mode, "plan", []string{"set in the plan"}}
+	case r.Request.Mode != "":
+		decision = Decision{r.Request.Mode, "flag", []string{"selected explicitly in the request"}}
+	}
+	if a == nil {
+		return decision, nil
+	}
+	assessed, err := r.assess(stage, a)
+	if err != nil {
+		return Decision{}, err
+	}
+	if modeRank[assessed.Mode] > modeRank[decision.Mode] {
+		decision.Because = append(decision.Because, fmt.Sprintf("the assessment suggests %s (%s): tell the user; a flag or `mode` in the plan raises it",
+			assessed.Mode, strings.Join(assessed.Because, "; ")))
+	}
+	return decision, nil
+}
+
 // assess computes a stage's mode from the facts of its assessment.
 func (r *Resolved) assess(stage Stage, a *Assessment) (Decision, error) {
 	if a == nil || strings.TrimSpace(a.Evidence) == "" || !slices.Contains([]string{"trivial", "ordinary", "complex"}, a.Size) {
-		return Decision{}, errors.New("without a mode flag the plan needs assessment {size: trivial|ordinary|complex, risks, irreversible, uncertainty, evidence}")
+		return Decision{}, errors.New("an assessment is {size: trivial|ordinary|complex, risks, irreversible, uncertainty, evidence}; without a mode flag a plan for workers needs one")
 	}
 	if a.Uncertainty != "" && a.Uncertainty != "low" && a.Uncertainty != "material" {
 		return Decision{}, errors.New("assessment.uncertainty is low or material")
@@ -679,6 +759,9 @@ func (r *Resolved) preflight() []string {
 				files, streams, limits.MaxFiles, limits.MaxStreams)
 		}
 	}
+	if r.Executor == "session" {
+		problems = append(problems, r.sessionPreflight(willWrite)...)
+	}
 	for index, stage := range plan.Stages {
 		mode := cfg.Modes[r.Modes[index]]
 		label := ""
@@ -693,6 +776,58 @@ func (r *Resolved) preflight() []string {
 		}
 		if willWrite && r.Modes[index] != "light" && len(plan.checksFor(index)) == 0 && strings.TrimSpace(plan.ChecksWaiver) == "" {
 			add("%sthis mode needs at least one declared check; add one to the plan or the stage, or state checks_waiver: why no command can verify this change", label)
+		}
+	}
+	return problems
+}
+
+// sessionPreflight is what a mode asks of the plan of a task the session writes: the existing code every stage
+// follows, and in ultra a proof that is executed for what a risky stage completes.
+func (r *Resolved) sessionPreflight(willWrite bool) []string {
+	plan := r.Plan
+	var problems []string
+	add := func(format string, values ...any) { problems = append(problems, fmt.Sprintf(format, values...)) }
+	if r.Request.Worktree {
+		add("-w isolates a task of sandboxed writers; a task the session writes works in the checkout. Add --workers, or drop -w")
+	}
+	for index := range plan.Stages {
+		stage := &plan.Stages[index]
+		label := ""
+		if !plan.Single {
+			label = fmt.Sprintf("stage %q: ", stage.Name)
+		}
+		like, err := cleanPaths(stage.Like)
+		if err != nil {
+			add("%slike: %v", label, err)
+			continue
+		}
+		stage.Like = like
+		// The code a stage follows exists when the plan is made. Once the task runs, a later stage may replace
+		// or remove it, and an accepted stage cannot be amended to name something else.
+		for _, path := range like {
+			if !r.running && !fileExists(path) && !dirExists(path) {
+				add("%slike names %s, which does not exist: name the existing code the stage follows", label, path)
+			}
+		}
+		if willWrite && !r.Request.ReviewFirst() && modeRank[r.Mode] >= modeRank["medium"] && len(like) == 0 && strings.TrimSpace(stage.LikeWaiver) == "" {
+			add("%s%s asks which existing code the stage follows: like [paths of the nearest implementation of the same kind], or like_waiver "+
+				"saying why nothing comparable exists — a new pattern the user sees in the plan", label, r.Mode)
+		}
+	}
+	if willWrite && !r.Request.ReviewFirst() && modeRank[r.Mode] >= modeRank["medium"] && !plan.Grounding.usable() {
+		add("%s asks how this kind of work is done here: grounding {summary, files [{path, role, symbols}], callers, invariants, conventions, unknowns} — "+
+			"what you read in the code the stages follow", r.Mode)
+	}
+	if r.Mode == "ultra" && willWrite {
+		for _, requirement := range plan.Requirements {
+			last := plan.lastCover(requirement.ID)
+			if last < 0 || plan.Stages[last].Assessment == nil || len(plan.Stages[last].Assessment.Risks) == 0 {
+				continue
+			}
+			if requirement.Method != "check" && requirement.Method != "browser" {
+				add("requirement %q is due at stage %q, which names a risk (%s): ultra takes a proof that is executed — method check or browser — not a reading of the code",
+					requirement.ID, plan.Stages[last].Name, strings.Join(plan.Stages[last].Assessment.Risks, ", "))
+			}
 		}
 	}
 	return problems

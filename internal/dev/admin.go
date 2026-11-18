@@ -26,6 +26,12 @@ func Preview(cfg *config.Config, raw string) (any, error) {
 		return nil, err
 	}
 	out := map[string]any{"request": request, "side_effects": "none"}
+	if executorOf(cfg, request) == "session" {
+		mode := cmp.Or(request.Mode, "medium")
+		out["executor"], out["mode"], out["process"] = "session", mode, sessionTable(cfg, mode)
+		out["note"] = "The lead's own session writes this task; --workers hands it to sandboxed writers. The mode is the request's flag, or medium."
+		return out, nil
+	}
 	if request.Mode != "" {
 		out["mode"], out["routes"] = request.Mode, modeTable(cfg, request.Mode)
 	} else {
@@ -64,16 +70,58 @@ func modeTable(cfg *config.Config, name string) map[string]any {
 		"blocking": mode.Blocking, "escalate_to": mode.EscalateTo, "ui_designer": cfg.UIDesignerFor(name)}
 }
 
+// sessionTable is the process of a mode when the session writes: who reads the plan and who reads the code.
+func sessionTable(cfg *config.Config, name string) map[string]any {
+	process := cfg.Session[name]
+	plan := "nobody: the task starts at once"
+	if modeRank[name] >= modeRank["medium"] {
+		plan = "advisor " + cfg.Advisor + ", with the conversation"
+		for _, critic := range process.Critics {
+			plan += " ∥ critic " + critic
+			if process.Blind {
+				plan += " (designs blind first)"
+			}
+		}
+		plan += "; then the user approves"
+	}
+	code := []string{"the session reads its own patch and proves every requirement"}
+	if len(process.Review) > 0 {
+		code = nil
+		for _, lane := range process.Review {
+			reader := strings.Join(lane.Axes, "+") + " → " + lane.Route
+			if lane.Conversation {
+				reader += " (with the conversation)"
+			}
+			code = append(code, reader)
+		}
+	}
+	places := "after the last stage"
+	switch {
+	case modeRank[name] >= modeRank["heavy"]:
+		places = "at every checkpoint, at every stage with its own risk, and after the last stage"
+	case name == "medium":
+		places = "at every checkpoint and after the last stage"
+	}
+	return map[string]any{"plan": plan, "code": code, "read": places, "blocking": process.Blocking}
+}
+
 // Modes renders the effective mode table for people.
 func Modes(cfg *config.Config) string {
 	var out strings.Builder
+	fmt.Fprintf(&out, "executor: %s\n\nwhen the lead's own session writes\n", cfg.Executor)
+	for _, name := range config.ModeNames {
+		table := sessionTable(cfg, name)
+		fmt.Fprintf(&out, "%s\n  plan      %s\n  code      %s\n  read      %s\n  blocking  %s\n", name, table["plan"],
+			strings.Join(table["code"].([]string), " ∥ "), table["read"], strings.Join(cfg.Session[name].Blocking, ", "))
+	}
+	fmt.Fprintf(&out, "\nwith --workers: sandboxed writers\n")
 	for _, name := range config.ModeNames {
 		table := modeTable(cfg, name)
 		fmt.Fprintf(&out, "%s\n  planning  %s\n  architect %s\n  backend   %s\n  frontend  %s\n  review    %s\n  ui design %s\n  blocking  %s\n  escalate  up to %s when a correction stalls\n",
 			name, table["scout"], table["design"], table["backend"], table["frontend"], strings.Join(table["review"].([]string), " ∥ "),
 			table["ui_designer"], strings.Join(cfg.Modes[name].Blocking, ", "), table["escalate_to"])
 	}
-	fmt.Fprintf(&out, "\nbrowser check %s · consultant %s\n", cfg.VisualReviewer, cfg.Consultant)
+	fmt.Fprintf(&out, "\nadvisor %s · browser check %s · consultant %s\n", cfg.Advisor, cfg.VisualReviewer, cfg.Consultant)
 	fmt.Fprintf(&out, "\nmodels\n")
 	aliases := make([]string, 0, len(cfg.Models))
 	for alias := range cfg.Models {
@@ -97,6 +145,16 @@ func Route(cfg *config.Config, plan *Plan) (any, error) {
 	limit, err := resolved.Parallelism()
 	if err != nil {
 		return nil, err
+	}
+	if resolved.Executor == "session" {
+		runs, price := resolved.price()
+		var stages []map[string]any
+		marks := resolved.checkpoints()
+		for _, stage := range resolved.Plan.Stages {
+			stages = append(stages, map[string]any{"stage": stage.Name, "follows": stage.Like, "checkpoint": slices.Contains(marks, stage.Name)})
+		}
+		return map[string]any{"decision": resolved.Decision, "executor": "session", "process": sessionTable(cfg, resolved.Mode), "stages": stages,
+			"model_runs": runs, "price": price, "parallel": limit, "read_only": true}, nil
 	}
 	describe := func(index int) map[string]any {
 		stage := resolved.Plan.Stages[index]

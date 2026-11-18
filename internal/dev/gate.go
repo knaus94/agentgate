@@ -48,13 +48,32 @@ func (g *Gate) load() string {
 	return strings.Join(all, "\n")
 }
 
-// scope is what the present position owns: the stage's entries, or the whole plan's in the final pass.
-func (g *Gate) scope() []string { return g.Plan.scope(g.stageIndex()) }
+// scope is what the present position owns: the stage's entries, or the whole plan's in the final pass. A
+// reading at a checkpoint covers every stage since the last reading, so it owns their entries too.
+func (g *Gate) scope() []string {
+	index, first := g.stageIndex(), g.spanStart()
+	if index < 0 || first >= index {
+		return g.Plan.scope(index)
+	}
+	var files []string
+	for position := first; position <= index; position++ {
+		files = append(files, g.Plan.scope(position)...)
+	}
+	sort.Strings(files)
+	return slices.Compact(files)
+}
 
-// origin is the tree the present position is measured from.
+// origin is the tree the present position is measured from: where its stage began, where the task began in
+// the final pass, and at a checkpoint where the first stage since the last reading began.
 func (g *Gate) origin() string {
 	if g.Whole {
 		return g.BaseTree
+	}
+	if first := g.spanStart(); first >= 0 && first < g.Stage {
+		if first == 0 {
+			return g.BaseTree
+		}
+		return g.Accepted[first-1].Tree
 	}
 	return g.StageTree
 }
@@ -269,11 +288,29 @@ type criterion struct {
 // requirementsFor are the requirements the present position works on. One is due here when this is the last
 // stage that covers it; the pass over the whole change judges every requirement.
 func (g *Gate) requirementsFor() []criterion {
-	plan, index := g.Plan, g.stageIndex()
+	plan, index, first := g.Plan, g.stageIndex(), g.spanStart()
 	out := []criterion{}
-	for _, requirement := range plan.covered(index) {
+	if index < 0 || first >= index {
+		for _, requirement := range plan.covered(index) {
+			item := criterion{Requirement: requirement, Due: true}
+			if last := plan.lastCover(requirement.ID); index >= 0 && last != index {
+				item.Due, item.DueAt = false, plan.Stages[last].Name
+			}
+			out = append(out, item)
+		}
+		return out
+	}
+	// A reading at a checkpoint judges what the stages since the last reading worked on: nobody read them.
+	for _, requirement := range plan.Requirements {
+		covered := false
+		for position := first; position <= index; position++ {
+			covered = covered || slices.Contains(plan.Stages[position].Covers, requirement.ID)
+		}
+		if !covered {
+			continue
+		}
 		item := criterion{Requirement: requirement, Due: true}
-		if last := plan.lastCover(requirement.ID); index >= 0 && last != index {
+		if last := plan.lastCover(requirement.ID); last > index {
 			item.Due, item.DueAt = false, plan.Stages[last].Name
 		}
 		out = append(out, item)

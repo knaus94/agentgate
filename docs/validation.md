@@ -4,6 +4,37 @@ This record distinguishes live integrations from controlled provider fixtures an
 model quality, arbitrary specification size or every possible execution environment. It has two parts: what
 was run for the 0.16.0 source, and the release validation of 0.14.0, which is kept as it was written.
 
+## 0.22.0
+
+Checked on 2026-11-18 against `9f63b7f` (0.21.5). The change is the session executor: a task the lead's own
+session writes, with checkpoints, the advisor, the conversation digest, `advise` and `take`.
+
+| Check | Actual result |
+|---|---|
+| `make check`: `gofmt`, `go vet ./...`, `go test -race ./...`, the design-kit core tests | PASS; 286 Go tests and subtests, 19 Node tests |
+| Seven new scenario tests in `internal/dev/session_test.go`, driven through the public functions with scripted workers | PASS |
+| Four of them with the rule they guard removed — a reading at every stage, the digest to any provider, no scope audit, `like` checked again on a running task | each FAILS, as it should |
+| Dry run: the built binary, Bubblewrap and git, workers answered from recorded answers; 17 scenarios | 260 of 260 promises held |
+| The four new dry-run scenarios of a task the session writes: light, medium, ultra, and one taken over by another session | 89 of 89 |
+| A task of sandboxed writers started by the 0.21.5 binary, with a configuration that has no `executor`, continued by this one: `status`, both hooks, `route`, `architecture {revise}` with and without `plan`, `plan save`, `amend`, `answer`, `run` to `done` | 23 of 23; with the rule that keeps a running task's executor removed, the scenario fails at its first plan resolution |
+| What CI runs before a release, locally: `gofmt -l .`, `go vet ./...`, `go test -race ./...`, `sh -n` on both installers, `make package VERSION=0.22.0`, `sha256sum -c SHA256SUMS`, the offline installer and a build from the extracted archive | PASS; 253 files in the archive |
+| A light task by hand through the built binary in a scratch repository | done with no model process |
+
+What the dry run showed that the Go scenarios cannot: inside its sandbox a worker reads the digest of the
+lead's conversation, with the user's words and the tool calls and without a tool result; the session's spend
+is read from the client's own record; a task moves to another session and finishes there.
+
+Two promises of earlier dry-run scenarios failed on 0.21.5 as well, with the driver as it was: the recorded
+preparation answer had `setup` in its 0.20 shape, and the Stop hook has let a turn end while only the
+environment is waited for since 0.21. The driver was brought up to date; neither is a change of this version.
+
+Not verified: no live model ran. Nothing shows whether a real session follows what a phase asks, whether an
+advisor's reading at a checkpoint finds what a reviewer of every stage found, or what a task costs in a real
+session. The digest of a Codex lead was read once from a real rollout of Codex 0.169 on the
+development machine — its user messages, the session's, its tool calls, its model and its spend came out — and
+no scenario covers it. The Chromium scenarios of the design kit (`make design-browser`) were not run locally:
+the design kit is unchanged, and CI runs them before publication.
+
 ## 0.21.5
 
 Checked on 2026-11-18 against `aff28fb` (0.21.4). The interface scenario now requires the designer's packet to

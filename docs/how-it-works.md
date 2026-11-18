@@ -2,7 +2,39 @@
 
 [Русский](ru/how-it-works.md)
 
-## The roles
+## Two ways a task is written
+
+**The session writes it** — the default. The lead's own session asks the user, reads the repository, plans
+and writes, stage by stage, in the checkout you are looking at. It holds what no worker packet can carry: the
+conversation, your decisions, your MCP servers and skills, the whole project. The tool holds it to the plan:
+
+```
+prepare → ask ⇄ read the code → plan save → [architecture] → you approve → start → (write a stage → run)… → done
+```
+
+| Phase | Who | What the tool does |
+|---|---|---|
+| Plan | the session: questions to you, the nearest existing implementation of every part, small ordered stages | `prepare` records the working tree and says what the plan needs in this mode; `plan save` validates the whole plan and prices it |
+| Read the plan (medium and above) | the advisor, a second model shown the conversation; in heavy and ultra independent critics of the session's design | `architecture` returns blockers and questions; the session answers every blocker, and one it rejects goes to you |
+| Write a stage | the session | `run` answers with need `write`: the open stage, its files, the code it follows, the requirements due and the checks |
+| Close a stage | — | `run {written}` audits the scope, runs the stage's checks and scans the added lines; no model runs |
+| Read the code | the mode's reader, at a checkpoint and after the last stage | findings come back to the session as need `fix`; it fixes or disputes, and the reader answers in its own session |
+| Finish | — | a receipt: the checks, the readers, the notes, and what the session and every model run consumed |
+
+What keeps the session to the plan is not text. A plan above light does not start without its reading and your
+approval. Only the open stage can be closed. A file changed outside the plan — also one written between the
+request and the start — is reported before anything is read, and the session says whether it is its own
+(`run {adopt}`) or somebody else's (`run {disown}`). The Stop hook holds an unfinished task.
+
+The second model is given the conversation as a digest: your messages as you wrote them, what the session
+said, and one line per tool call — no tool results and no reasoning. It goes only to a route of the lead's own
+provider ([modes](modes.md), [decision 0013](decisions/0013-the-session-writes.md)).
+
+**Sandboxed writers write it** — with `--workers` in the request, or `executor: workers` in the configuration.
+The lead coordinates and the rest of this page describes that pipeline. The gate — checks bound to trees,
+findings with stable ids, requirements, amendments — is the same in both.
+
+## The roles with `--workers`
 
 | Role | Who | Can do |
 |---|---|---|

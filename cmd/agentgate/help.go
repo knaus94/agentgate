@@ -33,13 +33,15 @@ var commandSpecs = []commandSpec{
 	{name: "fixtures", group: "Design tools", summary: "Serve or record GraphQL fixtures for a screen", syntax: "fixtures <dir> [--port 5999] [--record <url>]", example: "agentgate fixtures --help"},
 	{name: "parse", group: "Lead protocol", summary: "Parse a /dev request without starting work", syntax: "parse [request] [--file <path>|-]", input: true, example: "agentgate parse -- '-h move invoice totals to integer cents'"},
 	{name: "preview", group: "Lead protocol", summary: "Preview routing and work without starting workers", syntax: "preview [request] [--file <path>|-]", input: true, example: "agentgate preview -- '-m add pagination'"},
-	{name: "prepare", group: "Lead protocol", summary: "Draft or revise a plan with a read-only worker; the same worker continues with answers and notes", syntax: "prepare [--file <path>|-]", input: true},
+	{name: "prepare", group: "Lead protocol", summary: "Open a task: record the working tree and say what the plan needs; with --workers a read-only worker drafts the plan", syntax: "prepare [--file <path>|-]", input: true},
 	{name: "route", group: "Lead protocol", summary: "Validate a plan and resolve model routing", syntax: "route --file <path>|- | --plan <name>", input: true, plan: true},
-	{name: "architecture", group: "Lead protocol", summary: "Design a plan with the mode's architects, or continue a design with the user's answers and notes", syntax: "architecture --plan <name> | --file <path>|-", input: true, plan: true},
+	{name: "architecture", group: "Lead protocol", summary: "Have the plan and the session's design read before the work; with --workers the mode's architects design it", syntax: "architecture --plan <name> | --file <path>|-", input: true, plan: true},
 	{name: "design", group: "Lead protocol", summary: "Prepare or revise an interface specification", syntax: "design --file <path>|-", input: true},
 	{name: "consult", group: "Lead protocol", summary: "Ask read-only consultants scoped questions", syntax: "consult --file <path>|-", input: true},
+	{name: "advise", group: "Lead protocol", summary: "Put a question to the advisor, the model that is shown the conversation", syntax: "advise --file <path>|-", input: true},
+	{name: "take", group: "Lead protocol", summary: "Continue in this session a task another session was writing, on the user's word", syntax: "take [--file <path>|-]", input: true},
 	{name: "start", group: "Lead protocol", summary: "Open a task from a plan and run it", syntax: "start --plan <name> | --file <path>|- [--implement]", input: true, plan: true, flags: []string{"implement"}, example: "agentgate start --plan wallet"},
-	{name: "run", group: "Lead protocol", summary: "Take every determined step — write, check, review, correct, accept — until a person is needed", syntax: "run [--file <path>|-]", input: true, example: "agentgate run"},
+	{name: "run", group: "Lead protocol", summary: "Take every determined step — check, read, accept, open the next stage — until the session or a person is needed", syntax: "run [--file <path>|-]", input: true, example: "agentgate run"},
 	{name: "answer", group: "Lead protocol", summary: "Answer a blocked writer in its own session and run on", syntax: "answer --file <path>|-", input: true},
 	{name: "decide", group: "Lead protocol", summary: "Rule on findings, give the lead's own review, give work to writers; then run on", syntax: "decide --file <path>|-", input: true},
 	{name: "amend", group: "Lead protocol", summary: "Change the plan of the active task: named operations or the complete plan, with a reason", syntax: "amend --file <path>|- | --plan <name>", input: true, plan: true},
@@ -58,7 +60,7 @@ var commandSpecs = []commandSpec{
 	{name: "version", group: "Reference", summary: "Print the installed version", syntax: "version"},
 }
 
-var taskCommands = []string{"status", "show", "watch", "stop", "parse", "preview", "prepare", "route", "architecture", "design", "consult", "start", "run", "answer", "decide", "amend", "tell", "check", "visual", "land", "pause", "resume", "drop", "forget"}
+var taskCommands = []string{"status", "show", "watch", "stop", "parse", "preview", "prepare", "route", "architecture", "design", "consult", "advise", "take", "start", "run", "answer", "decide", "amend", "tell", "check", "visual", "land", "pause", "resume", "drop", "forget"}
 var setupCommands = []string{"install", "doctor", "update", "config", "accounts", "modes"}
 
 func command(name string) (commandSpec, bool) {
@@ -82,8 +84,8 @@ func groupCommands(name string) []string {
 
 func rootHelp() string {
 	var out strings.Builder
-	out.WriteString("agentgate — a quality gate around sandboxed model workers\n\n")
-	out.WriteString("Start in Claude Code: /dev [-l|-m|-h|-x] [-w] <task>\nStart in Codex:       $dev [-l|-m|-h|-x] [-w] <task>\n\n")
+	out.WriteString("agentgate — a quality gate for work your session plans and writes in stages; --workers hands it to sandboxed writers\n\n")
+	out.WriteString("Start in Claude Code: /dev [-l|-m|-h|-x] [--workers] <task>\nStart in Codex:       $dev [-l|-m|-h|-x] [--workers] <task>\n\n")
 	out.WriteString("Quick start\n  agentgate setup install --lead both\n  agentgate setup doctor\n  agentgate task watch\n\n")
 	for _, group := range []string{"Tasks", "Setup", "Design tools", "Lead protocol", "Reference"} {
 		out.WriteString(group + "\n")

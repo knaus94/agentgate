@@ -1,6 +1,7 @@
 package dev
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -78,13 +79,13 @@ func (g *Gate) blocks(cfg *config.Config, finding Finding) bool {
 	if finding.Confidence == "low" || finding.Severity == "P3" {
 		return false
 	}
-	return finding.BoundaryBreak || cfg.Modes[g.Mode].Blocks(finding.Severity)
+	return finding.BoundaryBreak || g.process(cfg).Blocks(finding.Severity)
 }
 
 // isNote reports whether an open finding is a note: listed for the lead, never sent to a writer by itself.
 // whyBlocks says in one line why a finding went to its author without a ruling.
 func (g *Gate) whyBlocks(cfg *config.Config, finding Finding) string {
-	if finding.BoundaryBreak && !cfg.Modes[g.Mode].Blocks(finding.Severity) {
+	if finding.BoundaryBreak && !g.process(cfg).Blocks(finding.Severity) {
 		return fmt.Sprintf("%s with %s confidence breaks a boundary, which blocks at any severity", finding.Severity, finding.Confidence)
 	}
 	return fmt.Sprintf("%s with %s confidence blocks in %s mode", finding.Severity, finding.Confidence, g.Mode)
@@ -124,10 +125,14 @@ type laneSpec struct {
 	Scope string
 	Files []string
 	Route config.Route
+	// Conversation says the lane is shown the digest of the lead's conversation; Unshown says why a lane the
+	// configuration gives it to is not.
+	Conversation bool
+	Unshown      string
 }
 
 func (g *Gate) reviewPolicy(cfg *config.Config) string {
-	return digest(map[string]any{"lanes": cfg.Modes[g.Mode].Review, "excluded": cfg.ReviewersExcluded, "models": cfg.Models})
+	return digest(map[string]any{"lanes": g.process(cfg).Review, "excluded": cfg.ReviewersExcluded, "models": cfg.Models})
 }
 
 func (g *Gate) independentReview(cfg *config.Config, review Review) bool {
@@ -135,7 +140,7 @@ func (g *Gate) independentReview(cfg *config.Config, review Review) bool {
 		return false
 	}
 	for _, lane := range review.Lanes {
-		if lane.Route.Alias == "lead" && len(cfg.Modes[g.Mode].Review) == 0 {
+		if lane.Route.Alias == "lead" && len(g.process(cfg).Review) == 0 {
 			continue
 		}
 		if lane.Route.Model == "" || slices.Contains(cfg.ReviewersExcluded, lane.Route.Alias) {
@@ -183,7 +188,7 @@ func reviewerSkip(cfg *config.Config) func(config.Route) string {
 func (g *Gate) lanes(cfg *config.Config, subs *substitutions) ([]laneSpec, func(config.Route) string, error) {
 	skip := reviewerSkip(cfg)
 	var out []laneSpec
-	for _, lane := range cfg.Modes[g.Mode].Review {
+	for _, lane := range g.process(cfg).Review {
 		route := cfg.MustRoute(lane.Route)
 		if reason := skip(route); reason != "" {
 			replaced := false
@@ -198,7 +203,14 @@ func (g *Gate) lanes(cfg *config.Config, subs *substitutions) ([]laneSpec, func(
 				return nil, nil, fmt.Errorf("%s is kept from review by reviewers_excluded and no fallback of it may review", lane.Route)
 			}
 		}
-		out = append(out, laneSpec{Axes: lane.Axes, Scope: "task", Files: g.scope(), Route: route})
+		// The user's words go to a reader the configuration names for them, and only to a model of the lead's own
+		// provider: they do not cross to another vendor unasked.
+		spec := laneSpec{Axes: lane.Axes, Scope: "task", Files: g.scope(), Route: route}
+		if lane.Conversation {
+			spec.Unshown = unshown(route)
+			spec.Conversation = spec.Unshown == ""
+		}
+		out = append(out, spec)
 	}
 	// A path whose cost grows with data is also judged for that cost, by the lane that judges correctness.
 	if g.load() != "" && !slices.ContainsFunc(out, func(lane laneSpec) bool { return slices.Contains(lane.Axes, "performance") }) {
@@ -250,7 +262,7 @@ func (g *Gate) writerNotes() []map[string]any {
 	var out []map[string]any
 	for name, writer := range g.latest() {
 		summary := writer.Summary
-		if runes := []rune(summary); len(runes) > 700 {
+		if runes := []rune(summary); len(runes) > 700 && writer.Session != "" {
 			summary = string(runes[:700]) + "… (the full report is in " + writer.Dir + ")"
 		}
 		note := map[string]any{"stream": name, "summary": summary, "deviations": writer.Deviations}
@@ -314,6 +326,11 @@ func (g *Gate) runLane(cfg *config.Config, spec laneSpec, index int, dir string,
 		scoped["quality"] = quality
 	}
 	scoped["accepted_findings"] = relevant
+	if spec.Conversation {
+		if digest := conversation(dir, cmp.Or(g.Opened, g.CreatedAt)); digest != "" {
+			scoped["conversation"] = digest
+		}
+	}
 	if disputes := g.openDisputes(relevant); len(disputes) > 0 {
 		scoped["disputes"] = disputes
 	}

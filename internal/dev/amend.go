@@ -34,7 +34,7 @@ func Amend(cfg *config.Config, gate *Gate, source *Plan) (any, error) {
 			return nil, errors.New("cannot amend while a writer is running")
 		}
 	}
-	resolved, err := Resolve(cfg, source)
+	resolved, err := resolveAs(cfg, source, gate.executor())
 	if err != nil {
 		return nil, err
 	}
@@ -803,7 +803,7 @@ func Pend(cfg *config.Config, operations Operations) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := Resolve(cfg, next); err != nil {
+	if _, err := resolveAs(cfg, next, gate.executor()); err != nil {
 		return nil, err
 	}
 	path := filepath.Join(pendingDir(gate.Cwd, gate.Session), fmt.Sprintf("%d-%s.json", time.Now().UnixNano(), newID()[:8]))

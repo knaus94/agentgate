@@ -105,7 +105,7 @@ func TestGroupedCommandsAndPositionalRequest(t *testing.T) {
 
 func TestSavedPlanShowAndConfigurationValidationDispatch(t *testing.T) {
 	s := newSandbox(t)
-	plan := `{"request":"fix the file","assessment":{"size":"ordinary","evidence":"one text file"},"brief":"a.txt must say fixed","streams":[{"name":"core","domain":"backend","files":["a.txt"]}],"checks":[["grep","-q","fixed","a.txt"]]}`
+	plan := `{"request":"--workers fix the file","assessment":{"size":"ordinary","evidence":"one text file"},"brief":"a.txt must say fixed","streams":[{"name":"core","domain":"backend","files":["a.txt"]}],"checks":[["grep","-q","fixed","a.txt"]]}`
 	if _, stderr, code := s.run(strings.Replace(plan, `,"checks":[["grep","-q","fixed","a.txt"]]`, "", 1), "plan", "save", "example", "--file", "-"); code != 1 || !strings.Contains(stderr, "checks_waiver") {
 		t.Fatalf("a plan that could not be finished is refused when it is saved, not after the work: %s", stderr)
 	}

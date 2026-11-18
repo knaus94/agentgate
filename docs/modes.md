@@ -2,10 +2,78 @@
 
 [Русский](ru/modes.md)
 
-A mode fixes everything at once: whether there is a design pass, who writes, who reviews, and which findings
-block completion. There is no second dial.
+A mode is the shape of the process, not a row of models: how far the questions to the user go, what the plan
+must contain, and which kind of second look the work gets, and where. By default the lead's own session
+writes the task and the mode sets the process around it; with `--workers` sandboxed writers do the work and
+the mode also fixes their models ([decision 0013](decisions/0013-the-session-writes.md)).
 
-## How the mode is chosen
+## How the mode is chosen when the session writes
+
+A flag in the request (`-l`, `-m`, `-h`, `-x`), or `mode` in the plan. Without either: **medium**. The plan's
+`assessment` never raises it. When its facts suggest more, `plan save` says so and the session tells the user:
+what a task may spend is the user's decision, and the price of the plan — the model runs it starts besides
+the session — is in its brief before they approve.
+
+## What each mode adds
+
+| | light `-l` | medium `-m` | heavy `-h` | ultra `-x` |
+|---|---|---|---|---|
+| Questions to the user | only those that block | the full grill | the full grill | the full grill, and authorizations for proof |
+| Grounding | the nearest existing implementation of the change | one per stage (`like`), and the conventions and invariants of the area | the same, with the callers that constrain the change | the same |
+| The plan must hold | stages and checks | requirements as outcomes | the session's design: boundaries, flow, alternatives, risks | an executed proof for every requirement a risky stage completes |
+| The plan is read by | nobody | the advisor, with the conversation | the advisor and an independent critic | the same; the critic designs blind first |
+| Start | at once | on the user's approval | on approval | on approval |
+| The code is read by | the session: its own patch, a proof for every requirement | the advisor | independent lanes: correctness ∥ architecture and simplicity | correctness ×2 ∥ security ∥ architecture and simplicity |
+| Where it is read | after the last stage | at checkpoints and after the last stage | the same, and at every stage with its own risk | the same |
+| Blocking severities | P0, P1 | P0, P1 | P0, P1, P2 | P0, P1, P2 |
+| Model runs besides the session | 0 | `2 + C` | `1 + K + L × (C + 1)` | the same, and a second round per critic |
+
+`C` is the checkpoints before the last stage, `K` the critics, `L` the review lanes of the mode. A round of
+fixes adds a recheck of what it changed, in the reader's own session and one effort step lower; a stall adds
+a question to the advisor. `agentgate modes` prints the effective table.
+
+- **Light** is a plain session with a seat belt: a plan before code, stages in order, checks run by the tool
+  and bound to the files they ran against, a scan of the added lines, a requirement-by-requirement reading
+  whose references the tool validates, and a Stop hook that holds an unfinished task. A two-line fix needs none
+  of this and should not use `/dev`.
+- **Medium** adds a second model that knows the conversation: it challenges the plan, reads the change and
+  answers `advise` when a fix goes nowhere.
+- **Heavy** adds readers that do not know the conversation — a critic of the design, and review lanes — and
+  asks for a written design. It keeps blocking on P2: in the measured tasks 70 of 72 findings were P2, and most
+  were real.
+- **Ultra** adds a second design made without seeing the session's, and proof that is executed. It is never
+  chosen by the tool.
+
+## Stages, checkpoints and risk
+
+A stage is one small outcome that leaves its checks green. Closing it costs no model run: the tool audits the
+scope, runs the stage's checks and scans the added lines. A reading is placed at a **checkpoint**: a stage the
+plan marks (`"checkpoint": true`) because later stages build on what it leaves — a schema, a contract, a public
+interface. There the mode's reader reads everything since the last reading, and the whole change is read after
+the last stage. A named risk belongs to the stage that changes the risky behaviour, as that stage's own
+`assessment`; in heavy and ultra such a stage is a checkpoint without the mark, and in medium it only tells
+the advisor where to look. A risk named for the whole plan places nothing. [Stages](stages.md).
+
+## The advisor and the conversation
+
+`advisor` in the configuration is the route that is shown the conversation. It reads a digest: the user's
+messages as they wrote them, what the session said, and one line per tool call. Tool results and reasoning are
+left out. The digest goes only to a model of the lead's own provider; a route of another provider reads the
+plan and the patch without it. Independent critics and reviewers are never shown it.
+
+```sh
+agentgate config set advisor fable:xhigh
+agentgate config set session.medium.review '[{"axes":["correctness","architecture","simplicity"],"route":"fable:high","conversation":true}]'
+agentgate config set executor workers      # sandboxed writers by default
+agentgate modes
+```
+
+## With `--workers`: sandboxed writers
+
+A mode fixes everything at once: whether there is a design pass, who writes, who reviews, and which findings
+block completion.
+
+## How the mode is chosen with `--workers`
 
 A flag in the request is final: `-l`, `-m`, `-h`, `-x` (or `--light`, `--medium`, `--heavy`, `--ultra`).
 

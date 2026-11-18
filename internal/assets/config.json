@@ -59,7 +59,103 @@
   "ui_designer": "opus:medium",
   "visual_reviewer": "astra:high",
   "consultant": "astra:medium",
+  "executor": "session",
+  "advisor": "fable:high",
   "playwright_mcp": "~/.local/share/agentgate/playwright-mcp/node_modules/@playwright/mcp/cli.js",
+  "session": {
+    "light": {
+      "critics": [],
+      "blind": false,
+      "review": [],
+      "blocking": [
+        "P0",
+        "P1"
+      ]
+    },
+    "medium": {
+      "critics": [],
+      "blind": false,
+      "review": [
+        {
+          "axes": [
+            "correctness",
+            "architecture",
+            "simplicity"
+          ],
+          "route": "fable:high",
+          "conversation": true
+        }
+      ],
+      "blocking": [
+        "P0",
+        "P1"
+      ]
+    },
+    "heavy": {
+      "critics": [
+        "astra:xhigh"
+      ],
+      "blind": false,
+      "review": [
+        {
+          "axes": [
+            "correctness"
+          ],
+          "route": "fable:high"
+        },
+        {
+          "axes": [
+            "architecture",
+            "simplicity"
+          ],
+          "route": "opus:high"
+        }
+      ],
+      "blocking": [
+        "P0",
+        "P1",
+        "P2"
+      ]
+    },
+    "ultra": {
+      "critics": [
+        "astra:max"
+      ],
+      "blind": true,
+      "review": [
+        {
+          "axes": [
+            "correctness"
+          ],
+          "route": "fable:xhigh"
+        },
+        {
+          "axes": [
+            "correctness"
+          ],
+          "route": "opus:xhigh"
+        },
+        {
+          "axes": [
+            "security"
+          ],
+          "route": "opus:high"
+        },
+        {
+          "axes": [
+            "architecture",
+            "simplicity"
+          ],
+          "route": "fable:high"
+        }
+      ],
+      "blocking": [
+        "P0",
+        "P1",
+        "P2"
+      ]
+    }
+  },
   "modes": {
     "light": {
       "scout": "",

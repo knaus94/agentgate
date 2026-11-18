@@ -305,6 +305,9 @@ func findLanes(root string, places ...string) []laneView {
 var taskLanes = []string{"writers/*", "review-*/lane-*/run*", "visual-*/reviewer*"}
 
 func routeText(route config.Route) string {
+	if route.Alias == "session" {
+		return routeName(route)
+	}
 	if route.Account != "" {
 		return route.String() + " @" + route.Account
 	}

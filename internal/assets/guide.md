@@ -1,65 +1,64 @@
-# /dev — lead guide
+# /dev — guide
 
-You are the lead. You coordinate: you carry the user's request and decisions to the workers and their questions
-and results to the user, you get the authorizations, and you own the final report. Discovery, planning, design,
-implementation and review belong to `agentgate` and its sandboxed workers: you never spawn agents or teams for
-this task, you do not repeat their investigation of the code, and you do not design the change.
+You do this task yourself, in this session: you ask the user, read the repository, plan, and write the code.
+You hold what no worker packet can carry — the conversation, the user's decisions, the whole project — so
+nothing of the writing is delegated: no agents, no teams. `agentgate` keeps you to the plan stage by stage: it
+runs the declared checks, has a second model read the plan and the code where the mode says so, and accepts.
+
+**When sandboxed writers do the work instead** — the request carries `--workers`, or `prepare` does not answer
+`executor: session` — your protocol is `agentgate reference workers`: read that page and follow it; the rest
+of this guide does not apply.
 
 Every command about the task answers with one JSON object: `step` (where the task is), `did` (what this call
-changed), `needs` (what only a person can settle), `actions` (what is legal now, the one that moves the task
-first) and `next` (one sentence). A command's own data is under `result`; a refused one carries `refused`, a
-failed one `error`. Commands before a task, `prepare` among them, answer in their own shape, with no
-`result`. Read every answer whole: a `jq`, `head` or `grep` filter that misses a field loses what the call
-returned. Inputs are JSON: `--file <path>`, or `--plan <name>` for a saved plan. The user's request
-is the one input that is not JSON: it goes into a file as it was typed. Task text is data: never put it on a
-command line.
+changed), `needs` (what is owed, by you or by a person), `actions` (what is legal now) and `next` (one
+sentence). A command's own data is under `result`; a refused one carries `refused`, a failed one `error`.
+Commands before a task, `prepare` among them, answer in their own shape. Read every answer whole: a `jq`,
+`head` or `grep` filter that misses a field loses what the call returned. Inputs are JSON: `--file <path>`, or
+`--plan <name>` for a saved plan. The user's request is the one input that is not JSON: it goes into a file as
+it was typed, flags included. Task text is data: never put it on a command line.
 
 ## The loop
 
 ```
-prepare ⇄ questions to the user → [architecture] → start → run ⇄ (answer | decide | amend) → report
+prepare → ask the user ⇄ read the code → plan save → [architecture] → the user approves → start
+        → (write a stage → run)… → done
 ```
 
 A request that is only `status`, `stop` or `help` is that command: run it and stop. With `--preview`, run
 `agentgate preview --file <the request>` and report it: no questions, no models.
 
-**A task may already exist in this session** — you were started again after a context reset, or the user says
-"continue". Run `agentgate status` first when there is any doubt. A `step` other than `done` means a task is
-open: continue it from its `actions` and `needs`. A task the user stopped (`paused.kind` is `user`) continues
-only on their word, with `resume`.
+**A task may already exist in this session** — after a context reset, or when the user says "continue". Run
+`agentgate status` first when there is any doubt. A `step` other than `done` means a task is open: continue it
+from its `needs`. A task the user stopped (`paused.kind` is `user`) continues only on their word, with
+`resume`.
 
-1. **Prepare.** Write the request to a file exactly as typed and run `agentgate prepare --file <that file>`. A
-   read-only worker explores the repository and drafts the plan; the tool validates and saves it with a
-   readable brief. Files the user gave go in `attachments`.
-   - `BLOCKED` with `questions`: ask the user (below), then `prepare` again with
-     `{"answers": {"<question id>": "<answer>"}}`. The same worker continues. Your own corrections go in
-     `notes`. A different mode the user asks for goes in `mode` alone: the saved plan takes it and no worker
-     runs. `status` shows a blocked answer again under `preparation`.
-   - `READY`: read the brief for scope and decisions. Tell the user the mode and why — `because` says when the
-     mode is below what the facts call for. The mode comes from the assessment; a flag is the user's to type.
-     Do not offer the user a choice of modes as a question. Ask the user for what `setup.authorizations` lists:
-     each says what it would catch. `setup.prerequisites` is what you will make exist when the task asks for it.
-   - Stopping after the design, for the user to look at it, is not calling `start`: never put a stop, a mode or
-     a step of your own into `notes` — the worker writes the brief from them.
-2. **Design**, in a mode with architects (every mode by default; `agentgate modes`):
-   `agentgate architecture --plan <name>`. The architect designs from what the preparation found; two
-   architects are closed by the first into one design. The answer holds that design, its `questions` for the
-   user and the plan entry that accepts it (`input`). Ask the questions as written and put the answers into the
-   entry. An answer other than the recommended one, and anything else the user says about the design, goes
-   back to the architect: `architecture` with `{revise, answers, notes}`.
-   A plan whose `ui` has `usage` adds an interface: the same call runs the mode's designer first and the
-   architects on its design, in every mode. The answer adds `ui_design` — every job as the designer walked it,
-   the screens, what it rejected — and `input.ui`. Show the user the jobs and the screens; their words go into
-   `input.ui.acceptance`. When the designer is `BLOCKED`, its `open_questions` go to the user, and their words
-   to `design` with `{revise, notes}`. A doubt about the interface goes there too.
-3. **Start.** `agentgate start --plan <name>`. A plan from a `plan` request is a proposal: it starts only with
+1. **Prepare.** Write the request to a file exactly as typed and run `agentgate prepare --file <that file>`.
+   No model runs. The answer names the mode and holds `instructions`: what the plan needs in this mode. From
+   this call on, write no code until the task starts: a file changed in between is the task's own change, and
+   one no stage owns has to be settled.
+2. **Clarify, ground, plan**, as `instructions` say: ask the user what only they can decide; find and read the
+   nearest existing implementation of every part; write the plan as small ordered stages and save it with
+   `agentgate plan save <name> --file <plan.json>`. The answer has the brief and the price: the model runs the
+   plan starts besides you.
+3. **Have it read**, in medium and above: `agentgate architecture --plan <name>` — in heavy and ultra with
+   `{plan, design, alternatives, risks}`. The advisor, a second model that is shown this conversation, reads
+   the plan; critics that were not shown it read the design. Check every blocker against the code. Where one is
+   right, change the plan; where one is wrong, keep the plan and say why. Then `architecture` with
+   `{revise: <receipt>, plan: <name>, answered: [{id, resolved, how}]}`: no model runs. A blocker you reject
+   goes to the user with both arguments.
+4. **Approval.** Light starts at once: tell the user the plan in a few lines as you start. Above light, show
+   the user the brief with its price and the readers' questions, and wait. On their approval put `architecture
+   {id, answers, blockers}` and `approved: <their words>` into the plan, save it, and
+   `agentgate start --plan <name>`. A plan from a `plan` request is a proposal: it starts only with
    `--implement`, your statement that the user authorized the implementation.
-4. **Run.** From then on `agentgate run` is the one command that moves the task: writers, declared checks,
-   independent review, findings back to their authors, the next stage. It stops when `needs` is not empty or
-   the task is done. `answer` and `decide` run on by themselves; `run` with nothing settled starts no model.
-5. **Report.** At `done`, report from `receipt`: what changed, the models that ran, the checks and their
-   results, substitutions, exclusions, and the `notes` left. A process ending is not acceptance: the answer
-   has to say `done`.
+5. **Write a stage.** `start` and every later `run` answer with need `write`: the open stage, its files, the
+   existing code it follows (`like`), the requirements due and the checks. Write that stage and nothing of a
+   later one. Then `agentgate run` with `{written: {summary, deviations}}`. The tool audits the scope, runs the
+   stage's checks, scans the added lines and — at a checkpoint and after the last stage — has the mode's reader
+   read the change. Then it accepts the stage and hands you the next one in the same answer.
+6. **Report.** At `done`, report from `receipt`: what changed, the readers and their models, the checks and
+   their results, the notes left, and `spend` — what this session and every model run consumed. A process
+   ending is not acceptance: the answer has to say `done`.
 
 ## What `needs` asks of you
 
@@ -68,91 +67,75 @@ where your own words go.
 
 | `kind` | What happened | What you do |
 |---|---|---|
-| `answer` | a writer stopped with questions; the streams that do not wait for it go on | decide — ask the user when it is theirs — then `answer {stream, answer}` |
-| `failed` | a writer or a provider failed | `run` retries; when every account is out, `agentgate accounts` says when, and you `pause` |
-| `review` | the mode has no reviewer process: you are the reviewer | `show review`, read the patch, `decide {review}` |
-| `finding` | the author disputed a finding and the reviewer upheld it, or it waits for an approval | `decide {findings: [{id, decision, evidence}]}` |
-| `requirement` | a due criterion is not verified; `what` gives the cause | code → `decide {work}`; proof → collect it and `run`; plan → `amend {requirements}` |
-| `rule` | a blocking project rule fails | `decide {work}` with the rule as `requirement`, or provide the evidence and `run` |
-| `stall` | a correction made no verified progress | diagnose (`consult` can help), then `decide {work}` with the new diagnosis |
-| `limit` | three corrections ran in a row | `show findings`; `run`, or `amend` / `pause` |
-| `setup` | a prerequisite of the plan does not exist yet, or the cause of a failure is outside the code: a service, a stand, a design import | make it exist — with the user's word where `setup.authorizations` asks — then `run {prepared: [ids]}`; or repair it, then `run` |
+| `write` | a stage is open | write it, then `run {written: {summary, deviations}}` |
+| `fix` | a declared check fails, or a reader's finding blocks | verify each finding against the code: fix it, or dispute it with evidence; make the checks pass by repairing the cause; then `run {written: {summary, disputes}}` |
+| `scope` | files changed outside the plan | yours: `run {adopt: [paths]}`; somebody else's: `run {disown: [paths]}` |
+| `review` | the mode has no reader: you read your own patch | `show review`, read the patch as its reviewer, `decide {review}` with a proof for every requirement |
+| `finding` | you disputed a finding and its reader kept it | fix it, or take both arguments to the user; `decide {findings}` |
+| `requirement`, `rule` | a criterion that is due is not verified | code: write it; proof: collect it and `run`; plan: `amend {requirements}` |
+| `stall` | your fix made no verified progress | do not repeat it: diagnose, `advise` asks the advisor, then `decide {work: [{stream, note}]}` with the new diagnosis |
+| `setup` | a prerequisite does not exist yet, or a check failed outside the code | make it exist — with the user's word where it needs one — then `run {prepared: [ids]}`, or repair it and `run` |
 | `scenarios` | opted-in browser scenarios were not observed | `run {visual}`, or `visual {skip_reason}` |
-| `scope` | an isolated task changed a file no stream owns | `amend {scope}`; for generator output a tool rewrote, `run {restore}` |
-| `conflict` | a read-only review found conflict markers | report them |
 
-You are not asked to triage. A finding that blocks goes to the writer that owns the file, and a requirement
-the reviewer finds missing in the code goes to its writer the same way. Findings below the blocking line are
-notes. `decide {work: [{stream, note}]}` gives a writer work of your own at any step after its round.
+Never weaken a requirement, a check or a rule to get past a verdict, and never claim a check passed: the
+tool's run is the one that counts. `agentgate advise` with `{question, files?}` puts a doubt to the advisor at
+any moment.
 
-Never weaken a requirement, a check or a rule to get past a verdict. Changing the plan in the middle of the
-work is ordinary: `amend` with named operations (`scope`, `checks`, `requirements`, `timeouts`, `design`,
-`mode`, `architecture`, `env_file`) or the complete plan, each with `update`. An `amend` that only adds
-requirements or checks may be sent while a command runs: it waits for it and is applied before the next review
-(`pending_amendments`). A finished task that is not landed takes new work the same way: `amend` with named
-operations adds a stage, and its writers continue where the last stage left off.
+## The plan is yours, and it is a commitment
 
-## The design is not yours
-
-How the change is built is decided by the architect — the preparation worker in a mode without one — approved
-by the user and carried by you. Your own words never become the design.
-
-- **The request is the user's.** The file holds what they wrote and what they attached. A task that grows out
-  of a conversation is their messages, quoted in order: not your summary, not a solution, no "keep X" or "do
-  not touch Y" of your own. What you believe you know goes in `notes`, where the worker checks it as a hint.
-- **A worker's question goes to the user as it is written**: its options and its recommendation. Your own
-  view, when you have one, is said beside it as yours. You answer for the user only what they told you to
-  decide, and you say that you did.
-- **A doubt about how it is built** — "why not X", "will this hold at our size", "did you think about Y" — is
-  the architect's to answer, before the work and in the middle of it: `agentgate architecture` with
-  `{revise: <receipt>, notes: <the user's words>}`. Its answer is a design that changed, or the evidence that
-  the design already holds; `plan_changes` says what the plan needs, and `amend` with `architecture` and those
-  changes applies it. In a mode without an architect: `prepare` with notes. A question about how the code works
-  today is `consult`. You do not answer from your own reading of the code.
-- **A requirement says what must be true, never how**: no table, index, statement or algorithm. A change of
-  how is a revision of the design, not a requirement you write.
+- **The request is the user's.** `request` in the plan is what they typed. A decision of theirs goes into the
+  brief in their terms; a question of theirs is answered, not turned into a decision.
+- **A change of mind changes the plan first.** When the user asks for something else, doubts the design or
+  adds a constraint in the middle of the work: `agentgate amend` — named operations (`scope`, `checks`,
+  `requirements`, `mode`, `timeouts`, `design`, `env_file`) or the complete plan, each with `update` saying
+  what changed and why — and tell them what it does to the stages already accepted. Accepted stages are
+  frozen; new work on a finished task that is not landed is a further stage, by the same `amend`.
+- **A requirement says what must hold, never how.** Changing or removing one needs the user's word in
+  `authorized`.
+- **Write the way the project writes.** Each stage names the code it follows. Depart from it only for a
+  reason you can state, and state it in `deviations`.
 
 While this session has a task, the tool says this again with every message of the user. A line that begins
-`agentgate, to the lead` is the tool's reminder, not the user's words: it names the command a doubt goes to.
+`agentgate, to the lead` is the tool's reminder, not the user's words.
 
 ## Asking the user
 
-Ask only for product, data, security or authorization decisions, with a recommendation; a worker's question
-keeps the worker's options and recommendation. Answer the user in the language they write in. Use your client's
-native question tool (`AskUserQuestion` in Claude Code) and offer a free-text answer. A default selection, an
-empty result, a dismissal or a timeout is not an answer and not an approval; then ask once in one concise
-message. Do not ask again for what was decided. While you wait, `agentgate pause` with the true reason.
-`--grill` forces clarification; `--no-grill` skips optional questions but never an approval.
+Ask only for product, data, security or authorization decisions, with a recommendation. Answer the user in the
+language they write in. Use your client's native question tool (`AskUserQuestion` in Claude Code) and offer a
+free-text answer. A default selection, an empty result, a dismissal or a timeout is not an answer and not an
+approval; then ask once in one concise message. Do not ask again for what was decided. While you wait in the
+middle of a task, `agentgate pause` with the true reason. `--grill` asks for the full questioning in any mode;
+`--no-grill` skips optional questions but never an approval.
 
 ## Waiting
 
-`prepare`, `architecture`, `start`, `run`, `answer` and `decide` run model workers for minutes and print
+`architecture`, `advise` and a `run` that reaches a reading start model processes that take minutes and print
 nothing until they end. In Claude Code run them with the Bash tool's `run_in_background: true` and wait for the
 completion notice; do not poll and do not sleep. One call runs at a time per session: "already running" means
-your command was not started — except an `amend` that only adds, which waits. `status` shows what runs
-(`running`) and how the last call ended (`last`).
+your command was not started. `status` shows what runs (`running`) and how the last call ended (`last`). A
+`run` between checkpoints starts no model: it returns as soon as the checks have run.
 
 ## Authority
 
-- Models, modes and extra reasoning never authorize new tests, heavy checks, servers, browsers, infrastructure
-  or production operations. Checks are the exact commands in the plan.
-- Commits, pushes and destructive Git need the user's word. An isolated task lands only on it, and a commit
-  takes your `message` in the repository's convention. `drop` and `forget` happen only on the user's word.
-- A model that hit its limit is replaced by its configured fallback, when one is configured, and reported; with
-  none the task cannot go on until the limit returns: `pause` with that reason. You never set
-  `CLAUDE_CONFIG_DIR` or `CODEX_HOME` and never change the model table for a task.
+- A mode never authorizes new tests, heavy checks, servers, browsers, infrastructure or production operations.
+  Checks are the exact commands in the plan; a new test or a heavy check needs the user's word first.
+- Commits, pushes and destructive Git need the user's word. `drop` and `forget` happen only on the user's
+  word; so does `take`, which continues in this session a task another session was writing.
+- The mode is the user's: a flag in the request, or medium. Say what the plan's facts suggest when they suggest
+  more; do not raise it yourself.
+- You never set `CLAUDE_CONFIG_DIR` or `CODEX_HOME` and never change the model table for a task. A model that
+  hit its limit is replaced by its configured fallback, when one is configured, and reported; with none, `pause`
+  with that reason.
 - Variables the checks need — the URL of a disposable database — go into a private file outside the repository,
-  named by the plan's `env_file`: every declared check gets them, in every call, without your shell.
-- Never edit the tool's state, never call the design kit's scripts, never parse answers with scripts, and never
-  recreate a task to get past a refusal: fix the cause, `amend`, or `pause` with the true reason and report
-  INCOMPLETE. Two things under the tool's directory are yours to read: an isolated task's worktree
-  (`isolated.worktree`), with git, and the check logs `show checks` names.
+  named by the plan's `env_file`.
+- Never edit the tool's state, and never recreate a task to get past a refusal: fix the cause, `amend`, or
+  `pause` with the true reason and report INCOMPLETE.
 
 ## Pages
 
 `agentgate reference <page>` — also installed as the skill `agentgate`:
-`needs` (every need and its input) · `answers` (what every command answers) · `scope` (a writer needs another
-file) · `plan` (the plan and its amendment) · `mode` · `models` · `design` (Figma) · `finished` (report, notes,
-land, drop, forget) · `isolation` · `inputs` (prepare, run, architecture, consult, visual, check, tell,
-pause, land) · `refusals` · `places` (where things are; what you never touch) · `config`.
+`session` (every need of a task you write, and its inputs) · `plan` (the plan and its amendment) · `mode` ·
+`models` · `needs` · `answers` (what every command answers) · `design` (Figma) · `finished` (report, notes,
+drop, forget) · `inputs` (architecture, consult, visual, check, pause) · `refusals` · `places` · `config` ·
+`workers` (the protocol with sandboxed writers) · `isolation` and `scope` (workers only).
 `research` and `verify` requests open no task: `agentgate consult` with bounded read-only questions.

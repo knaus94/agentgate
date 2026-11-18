@@ -1500,6 +1500,7 @@ func TestPlansMoveToASyncedFolderAndStayUsable(t *testing.T) {
 
 	// The link itself is not part of any change, and an isolated task still reaches the helper scripts.
 	must(t, json.Unmarshal([]byte(scenarioTable), cfg))
+	cfg.Executor = "workers"
 	f.cfg = cfg
 	plan.Checks = []Check{{Argv: []string{".agentgate/tools/check.sh", "x"}}}
 	if done := f.start(plan); done["step"] != StepDone {

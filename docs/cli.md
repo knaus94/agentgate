@@ -65,12 +65,14 @@ it is invalid. Configuration edits still use `config set`, `unset` and `profile`
 
 | Command | Purpose |
 |---|---|
-| `prepare` | A read-only worker drafts or revises the plan; the same worker continues with answers and notes |
+| `prepare` | Open a task the session writes: the working tree is recorded and the answer says what the plan needs in this mode. With `--workers`: a read-only worker drafts or revises the plan, and continues with answers and notes |
 | `plan save`, `list`, `show`, `link` | Keep reusable plans in the repository |
 | `route`, `preview` | Mode decision and routes, read-only |
-| `architecture` | The design pass of a mode with architects; with `{revise, answers, notes}` the architect continues its design |
+| `architecture` | The plan and the session's design are read before the work: `--plan`, `{plan, design, alternatives, risks}`, then `{revise, plan, answered}`. With `--workers`: the design pass of a mode with architects; with `{revise, answers, notes}` the architect continues its design |
 | `start [--implement]` | Open a task from a plan and run it |
-| `run` | Write, check, review, correct, accept — until a person is needed |
+| `run` | Check, read, accept and open the next stage — until the session or a person is needed. `{written}` closes the stage the session wrote; `{adopt}` and `{disown}` settle files changed outside the plan. With `--workers` it also runs the writers |
+| `advise` | Put a question to the advisor, the model that is shown the conversation |
+| `take` | On the user's word: continue in this session a task another session was writing |
 | `answer` | Reply to a blocked writer in its own session, then run on |
 | `decide` | Rule on findings, give the lead's own review, give work to the writers of named streams; then run on |
 | `amend` | Change the plan of the task — named operations or the complete plan — with a reason; an addition waits for a running command, and a finished task gets a new stage |
@@ -108,7 +110,12 @@ content are rejected. Unknown flags, invalid subcommands and unexpected
 positional arguments are errors. No flag is silently ignored.
 
 The first `prepare` of a task takes the user's request as it was typed, in a file or on stdin; text that
-is not a JSON object is the request. Its later calls take a JSON object with `answers` or `notes`.
+is not a JSON object is the request. With `--workers` its later calls take a JSON object with `answers` or
+`notes`.
+
+The request carries the flags of the task: a mode (`-l`, `-m`, `-h`, `-x`), `--grill` or `--no-grill`,
+`--step`, and `--workers` for sandboxed writers — with them also `-w` (an isolated worktree), `-N` (how many
+workers at once), `--staged` and `--single`.
 
 `parse` and `preview` accept request text from an argument, a file or stdin:
 

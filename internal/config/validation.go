@@ -141,7 +141,38 @@ func (c *Config) validate() error {
 			return fmt.Errorf("config: unknown mode %q", name)
 		}
 	}
-	specs := []string{c.UIDesigner, c.VisualReviewer, c.Consultant}
+	if !slices.Contains(Executors, c.Executor) {
+		return fmt.Errorf("config: executor is %s, not %q", strings.Join(Executors, " or "), c.Executor)
+	}
+	specs := []string{c.UIDesigner, c.VisualReviewer, c.Consultant, c.Advisor}
+	for name := range c.Session {
+		if !slices.Contains(ModeNames, name) {
+			return fmt.Errorf("config: unknown mode %q in session", name)
+		}
+	}
+	for _, name := range ModeNames {
+		process, ok := c.Session[name]
+		if !ok {
+			return fmt.Errorf("config: session.%s is missing", name)
+		}
+		specs = append(specs, process.Critics...)
+		for _, lane := range process.Review {
+			specs = append(specs, lane.Route)
+			if len(lane.Axes) == 0 {
+				return fmt.Errorf("config: session.%s has a review lane without axes", name)
+			}
+			for _, axis := range lane.Axes {
+				if !slices.Contains(Axes, axis) {
+					return fmt.Errorf("config: session.%s has unknown review axis %q", name, axis)
+				}
+			}
+		}
+		for _, severity := range process.Blocking {
+			if !slices.Contains(Severities, severity) {
+				return fmt.Errorf("config: session.%s has unknown severity %q", name, severity)
+			}
+		}
+	}
 	for _, name := range ModeNames {
 		mode, ok := c.Modes[name]
 		if !ok {

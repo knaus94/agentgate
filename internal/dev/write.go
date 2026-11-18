@@ -167,7 +167,7 @@ func (g *Gate) admit(cfg *config.Config) (*Resolved, error) {
 
 // resolve validates the task's own plan again under the present configuration.
 func (g *Gate) resolve(cfg *config.Config) (*Resolved, error) {
-	resolved, err := Resolve(cfg, g.Plan)
+	resolved, err := resolveAs(cfg, g.Plan, g.executor())
 	if err != nil {
 		return nil, err
 	}
@@ -492,7 +492,7 @@ func (g *Gate) runWriter(cfg *config.Config, stream Stream, record *Writer, answ
 	}
 	// A writer that keeps working is not cut off by the clock: the ceiling is generous, and a writer that goes
 	// silent is what gets stopped.
-	timeout, _ := timeoutSeconds(g.Plan.WriterTimeoutS, cfg.Modes[g.Mode].WriterTimeoutS, writerCeiling)
+	timeout, _ := timeoutSeconds(g.Plan.WriterTimeoutS, g.process(cfg).WriterTimeoutS, writerCeiling)
 	tools, toolDirs, toolNote := workerTools(cfg, "writer")
 	reads := append(append(append(packDirs(g.ContextPack), filepath.Join(g.dir(), "checks")), g.designReadDirs(stream.Name)...), g.attachmentDirs()...)
 	env, caches := g.writerCaches()

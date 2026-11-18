@@ -201,6 +201,7 @@ type StageRecord struct {
 	Tree       string               `json:"tree,omitempty"`      // the working tree the stage was accepted at
 	Handoffs   map[string]string    `json:"handoffs,omitempty"`  // stream -> the contract later stages build on
 	Writers    map[string]WriterRef `json:"writers,omitempty"`   // stream -> the session a later correction continues
+	Authors    []string             `json:"authors,omitempty"`   // a stage the session wrote: who wrote it, as the receipt names them
 	Reviewers  []string             `json:"reviewers,omitempty"` // the routes that reviewed the stage
 	Checks     []string             `json:"checks,omitempty"`    // the declared checks and their results
 	Notes      []string             `json:"notes,omitempty"`     // findings left as notes, one line each
@@ -232,6 +233,7 @@ type Gate struct {
 	Step         string                 `json:"step"`                   // write, verify, decide, done or cancelled
 	Pause        *Paused                `json:"pause,omitempty"`        // waiting for a person; the position is unchanged
 	Mode         string                 `json:"mode"`                   // the mode of the present stage
+	Executor     string                 `json:"executor,omitempty"`     // session: the lead's own session writes; workers, or empty in a task of 0.21 and earlier: sandboxed writers
 	BaseTree     string                 `json:"base_tree"`              // the working tree as the task found it
 	StageTree    string                 `json:"stage_tree"`             // the working tree as the present stage found it
 	StartCommit  string                 `json:"start_commit,omitempty"` // an isolated task: the commit its worktree was made from
@@ -265,6 +267,7 @@ type Gate struct {
 	Preparation   string                  `json:"preparation,omitempty"` // the preparation whose worker can revise this plan
 	Boost         int                     `json:"boost,omitempty"`
 	Foreign       []string                `json:"foreign_changes,omitempty"`
+	Disowned      []string                `json:"disowned,omitempty"` // a task the session writes: changes outside its plan the session says are somebody else's
 	Substitutions []provider.Substitution `json:"substitutions,omitempty"`
 	Final         *Final                  `json:"final,omitempty"`
 	Worktree      string                  `json:"worktree,omitempty"`  // an isolated task works here, not in Cwd
@@ -278,6 +281,7 @@ type Gate struct {
 	Left        string   `json:"left_tree,omitempty"`
 	Dropped     bool     `json:"dropped,omitempty"`     // the files the task changed in the checkout were restored
 	Attachments []string `json:"attachments,omitempty"` // files the user gave with the request, copied into the task
+	Opened      int64    `json:"opened,omitempty"`      // a task the session writes: when the request was handed over, before the plan
 	CreatedAt   int64    `json:"created_at"`
 	Tool        string   `json:"tool_version,omitempty"` // the agentgate that last wrote the task
 

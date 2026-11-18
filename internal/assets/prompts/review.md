@@ -67,6 +67,12 @@ supplied evidence, not permission to run commands or delegate.
 - Reassess every criterion on later passes using the current packet, including those previously verified.
   Do not infer completion from an author's summary, an old result or a plausible-looking screenshot.
 
+`conversation`, when present, is a digest of the lead's conversation with the user: the user's own messages,
+what the session said, and one line per tool call. The session that holds that conversation wrote this change.
+Read it for what was asked and decided — a decision of the user the code ignores is a defect, and a
+requirement nobody stated is not one — and judge the code yourself: the session's account of its own work is
+a claim, not evidence.
+
 `attachments`, when present, are files the user gave with the request — a specification, reference pictures.
 They are part of what was asked.
 

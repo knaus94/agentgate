@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -74,6 +75,10 @@ type SavedPlan struct {
 	Brief    string   `json:"brief"`
 	Mode     string   `json:"mode"`
 	Decision Decision `json:"decision"`
+	// A task the session writes: who writes it, and what the plan starts besides the session.
+	Executor string   `json:"executor,omitempty"`
+	Runs     int      `json:"model_runs"`
+	Price    []string `json:"price,omitempty"`
 	Next     string   `json:"next"`
 }
 
@@ -110,7 +115,55 @@ func PlanSave(cfg *config.Config, plan *Plan, name string) (*SavedPlan, error) {
 	if resolved.Request.Action == "plan" {
 		next = "Show the saved brief. This is a read-only proposal, not authorization to implement. Once the user authorizes it: `start --plan " + name + " --implement`."
 	}
-	return &SavedPlan{Name: name, Plan: path, Brief: brief, Mode: resolved.Mode, Decision: resolved.Decision, Next: next}, nil
+	saved := &SavedPlan{Name: name, Plan: path, Brief: brief, Mode: resolved.Mode, Decision: resolved.Decision, Next: next}
+	if resolved.Executor != "session" {
+		return saved, nil
+	}
+	saved.Executor = "session"
+	saved.Runs, saved.Price = resolved.price()
+	if err := resolved.keep(name, plan); err != nil {
+		return nil, err
+	}
+	if gate := Current(); gate != nil && gate.active() {
+		return saved, nil // the plan of a running task: `amend --plan` takes it
+	}
+	ui := plan.UI != nil && plan.UI.Usage != nil && plan.UI.Design == ""
+	switch {
+	case resolved.counselNeeded() && plan.Architecture == nil:
+		saved.Next = "`architecture --plan " + name + "` has the plan read before the work: " + strings.Join(saved.Price, "; ") + "."
+		if len(resolved.ModeConfig().Architecture) > 0 {
+			saved.Next = "`architecture` with {plan: \"" + name + "\", design, alternatives, risks} has your design read before the work: " + strings.Join(saved.Price, "; ") + "."
+		}
+	case ui:
+		saved.Next = "The plan adds an interface: `architecture --plan " + name + "` runs its designer first."
+	case resolved.counselNeeded() && strings.TrimSpace(plan.Approved) == "":
+		saved.Next = "Show the user the brief and the price. On their approval save the plan with approved: <their words>, then `start --plan " + name + "`."
+	case resolved.Request.Action == "plan":
+	default:
+		saved.Next = "`start --plan " + name + "` opens the first stage. Tell the user the plan in a few lines as you start; they interrupt if it is wrong."
+	}
+	return saved, nil
+}
+
+// keep stores beside a saved plan what a task the session writes takes from its planning: the map of the area,
+// where its readers find it, and the files the user gave.
+func (r *Resolved) keep(name string, plan *Plan) error {
+	proposal := &Proposal{Name: name, Digest: digest(plan)}
+	if previous := loadProposal(name); previous != nil {
+		proposal.ContextPack, proposal.Attachments = previous.ContextPack, previous.Attachments
+	}
+	if plan.Grounding.usable() {
+		pack := *plan.Grounding
+		pack.Route = sessionRoute()
+		proposal.ContextPack = filepath.Join(checkoutDir(""), "packs", name+".json")
+		if err := writePacket(proposal.ContextPack, pack); err != nil {
+			return err
+		}
+	}
+	if draft := loadDraft(); draft != nil && draft.Request == plan.Request {
+		proposal.Attachments = draft.Attachments
+	}
+	return proposal.save()
 }
 
 // Proposal ties a saved plan to the preparation that drafted it: the worker session that can revise it and
@@ -224,6 +277,9 @@ func renderBrief(name string, resolved *Resolved, revisions []Revision) string {
 	streams := func(mode string, list []Stream, heading string) {
 		for _, stream := range list {
 			title := fmt.Sprintf("%s %s — %s, %s", heading, stream.Name, stream.Domain, writerRoute(resolved.Config, mode, stream, 0))
+			if resolved.Executor == "session" {
+				title = fmt.Sprintf("%s %s — %s, written by the session", heading, stream.Name, stream.Domain)
+			}
 			switch {
 			case stream.Done:
 				title = fmt.Sprintf("%s %s — %s, already done", heading, stream.Name, stream.Domain)
@@ -255,10 +311,27 @@ func renderBrief(name string, resolved *Resolved, revisions []Revision) string {
 		}
 		line("")
 	}
+	follows := func(stage Stage) {
+		if len(stage.Like) > 0 {
+			line("Follows: `%s`\n", strings.Join(stage.Like, "`, `"))
+		}
+		if strings.TrimSpace(stage.LikeWaiver) != "" {
+			line("**New pattern** — nothing existing to follow: %s\n", strings.TrimSpace(stage.LikeWaiver))
+		}
+	}
 	if staged {
 		line("## Stages\n\nDone and reviewed one after another; a stage starts when the one before it is accepted.\n")
+		marks := resolved.checkpoints()
 		for index, stage := range plan.Stages {
-			line("### %d. %s — %s\n\n%s\n", index+1, stage.Name, resolved.Modes[index], strings.TrimSpace(stage.Goal))
+			title := resolved.Modes[index]
+			if resolved.Executor == "session" {
+				title = "checks only"
+				if slices.Contains(marks, stage.Name) {
+					title = "checkpoint: read here"
+				}
+			}
+			line("### %d. %s — %s\n\n%s\n", index+1, stage.Name, title, strings.TrimSpace(stage.Goal))
+			follows(stage)
 			if len(stage.Covers) > 0 {
 				line("Works on: %s\n", strings.Join(stage.Covers, ", "))
 			}
@@ -276,12 +349,27 @@ func renderBrief(name string, resolved *Resolved, revisions []Revision) string {
 				line("")
 			}
 		}
-		if integrationNeeded(resolved.Mode, len(plan.Stages)) {
+		switch {
+		case resolved.Executor == "session":
+			line("After the last stage the whole change is read once: %s.\n", resolved.finalReader())
+		case integrationNeeded(resolved.Mode, len(plan.Stages)):
 			line("After the last stage the whole change gets one more review, for the seams between the stages.\n")
 		}
 	} else {
 		line("## Streams\n")
+		follows(plan.Stages[0])
 		streams(resolved.Modes[0], plan.Stages[0].Streams, "###")
+	}
+	if resolved.Executor == "session" {
+		runs, price := resolved.price()
+		line("## Price\n\nThe session writes this plan. Besides it, the plan starts **%d model runs**:\n", runs)
+		for _, item := range price {
+			line("- %s", item)
+		}
+		if runs == 0 {
+			line("- none: the tool runs the checks, and the session reads its own patch at the end")
+		}
+		line("\nA round of fixes adds a recheck of what it changed; a stall adds a question to the advisor.\n")
 	}
 	if len(plan.Checks) > 0 {
 		line("## Checks\n")
@@ -347,6 +435,9 @@ func renderBrief(name string, resolved *Resolved, revisions []Revision) string {
 			}
 		}
 		line("")
+	}
+	if strings.TrimSpace(plan.Approved) != "" {
+		line("**Approved by the user:** %s\n", strings.TrimSpace(plan.Approved))
 	}
 	line("---\n\nRun it: `agentgate start --plan %s` (inside `/dev`, any session of this checkout).", name)
 	return out.String()

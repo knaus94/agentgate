@@ -39,6 +39,12 @@ func (g *Gate) needs(cfg *config.Config) []Need {
 		if g.Round == nil {
 			return out
 		}
+		if g.sessionWrites() {
+			if len(g.pending()) > 0 {
+				out = append(out, g.writeNeed())
+			}
+			return out
+		}
 		latest := g.latest()
 		for _, stream := range g.Round.Streams {
 			writer := latest[stream.Name]
@@ -92,12 +98,18 @@ func (g *Gate) next(needs []Need) string {
 		return "Report the accepted stage to the user and wait for their word; `run` then starts the next stage."
 	case g.Pause != nil:
 		return "Paused: " + g.Pause.Reason + " — when it is resolved, `run` (or answer, decide, amend) continues."
+	case len(needs) > 0 && g.Step == StepWrite && g.sessionWrites():
+		return "Do what `needs` describes in this session — the stage, or the fixes — then send its `input` with `run`."
 	case len(needs) > 0 && g.Step == StepWrite:
 		return "Settle `needs`: `answer` a blocked writer; `run` retries a failed one."
 	case len(needs) > 0:
 		return "Settle `needs`: each names its `command` and the `input` to send it; `<…>` is yours to write. `decide` and `answer` continue the task by themselves."
+	case g.Step == StepWrite && g.sessionWrites():
+		return "`run` opens the stage and says what to write."
 	case g.Step == StepWrite:
 		return "`run` continues: writers, then declared checks, then independent review."
+	case g.sessionWrites():
+		return "`run` verifies: the declared checks, then the mode's reading where the plan places one."
 	default:
 		return "`run` verifies: declared checks first, then independent review."
 	}
@@ -124,7 +136,7 @@ func (g *Gate) writerLines() []map[string]any {
 	out := []map[string]any{}
 	for _, name := range names {
 		writer := latest[name]
-		line := map[string]any{"stream": name, "status": writer.Status, "route": writer.Route.String(), "summary": clipText(firstLine(writer.Summary), 220)}
+		line := map[string]any{"stream": name, "status": writer.Status, "route": routeName(writer.Route), "summary": clipText(firstLine(writer.Summary), 220)}
 		if writer.Stale {
 			line["status"] = "AMENDED" // reported under the plan before the amendment
 		}
@@ -232,9 +244,9 @@ func (g *Gate) reviewers() []string {
 	out := []string{}
 	for _, review := range g.Reviews {
 		for _, lane := range review.Lanes {
-			name := lane.Route.String()
-			if lane.Route.Alias == "lead" {
-				name = "the lead"
+			name := routeName(lane.Route)
+			if g.sessionWrites() && lane.Route.Alias == "lead" {
+				name = "the session itself"
 			}
 			if !slices.Contains(out, name) {
 				out = append(out, name)
@@ -265,7 +277,10 @@ func (g *Gate) receipt() map[string]any {
 		}
 		sort.Strings(names)
 		for _, name := range names {
-			add(&writers, name+" "+record.Writers[name].Route.String())
+			add(&writers, name+" "+routeName(record.Writers[name].Route))
+		}
+		for _, name := range record.Authors {
+			add(&writers, name)
 		}
 		add(&reviewers, record.Reviewers...)
 		stage := map[string]any{"name": record.Name, "mode": record.Mode, "correction_rounds": record.Rounds, "findings": record.Findings,
@@ -277,7 +292,7 @@ func (g *Gate) receipt() map[string]any {
 		start = record.AcceptedAt
 	}
 	for name, writer := range g.latest() {
-		add(&writers, name+" "+writer.Route.String())
+		add(&writers, name+" "+routeName(writer.Route))
 	}
 	sort.Strings(writers)
 	add(&reviewers, g.reviewers()...)
@@ -293,6 +308,9 @@ func (g *Gate) receipt() map[string]any {
 		"stages": stages, "minutes": minutes(end - g.CreatedAt)}
 	if preparation := loadPreparation(g.Preparation); preparation != nil {
 		out["preparation"] = preparation.Route.String()
+	}
+	if g.sessionWrites() {
+		out["spend"] = g.spend(end)
 	}
 	if len(g.Substitutions) > 0 {
 		out["substitutions"] = g.Substitutions
@@ -332,11 +350,14 @@ func (g *Gate) picture(cfg *config.Config, did []string) map[string]any {
 					passed++
 				}
 			}
-			reviewers := strings.Join(record.Reviewers, " + ")
-			if reviewers == "" {
-				reviewers = "nobody"
+			reviewers := "reviewed by " + strings.Join(record.Reviewers, " + ")
+			switch {
+			case len(record.Reviewers) == 0 && g.sessionWrites():
+				reviewers = "read at the next checkpoint"
+			case len(record.Reviewers) == 0:
+				reviewers = "reviewed by nobody"
 			}
-			lines = append(lines, fmt.Sprintf("%s: %d of %d checks passed, reviewed by %s, %d findings, %d left as notes",
+			lines = append(lines, fmt.Sprintf("%s: %d of %d checks passed, %s, %d findings, %d left as notes",
 				record.Name, passed, len(record.Checks), reviewers, record.Findings, len(record.Notes)))
 		}
 		out["accepted_stages"] = lines

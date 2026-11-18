@@ -2,9 +2,10 @@
 
 [Русский](README.ru.md) · [Quick start](#quick-start) · [Commands](docs/cli.md) · [Architecture](docs/architecture.md) · [Release notes](RELEASE_NOTES.md)
 
-**A local orchestrator and quality gate for Claude Code and Codex workers.** Your lead session owns the task;
-AgentGate runs scoped workers, records their results, runs checks and independent reviews, and allows
-completion only while that evidence still matches the change.
+**A local quality gate for work done in Claude Code and Codex.** Your own session plans the task and writes it
+in small stages; AgentGate holds it to the plan — it runs the declared checks, has a second model read the
+plan and the code where the mode says so, and allows completion only while that evidence still matches the
+change. Sandboxed writers can do the work instead, with `--workers`.
 
 AgentGate is a Linux CLI with a live terminal dashboard. It runs without a background daemon or a hosted
 service. It uses the provider CLIs and accounts you configure. Former installations named `claude-dev` are
@@ -18,7 +19,7 @@ The archive includes source, documentation, SHA-256 checksums, and binaries for 
 After extracting it:
 
 ```sh
-cd agentgate-0.21.5
+cd agentgate-0.22.0
 sh scripts/install-local.sh --lead both
 agentgate setup doctor
 agentgate config validate
@@ -58,29 +59,34 @@ Open a new Claude Code or Codex session after installing the integration:
 /dev add rate limiting to the export endpoint          Claude Code
 $dev add rate limiting to the export endpoint          Codex
 
-/dev -h move invoice totals to integer cents           explicit heavy mode
-/dev -w add pagination to the orders list              isolated task worktree
-/dev -2 review --fix the current branch changes        at most two workers
-/dev plan -x split the wallet service                  plan before implementation
+/dev -l rename the export flag                         light: a plan, stages and checks, no other model
+/dev -h move invoice totals to integer cents           heavy: a written design and independent readers
+/dev review --fix the current branch changes           read an existing change and fix what is found
+/dev plan -x split the wallet service                  plan only
+/dev --workers -w add pagination to the orders list    sandboxed writers, in an isolated worktree
 ```
 
-A read-only worker prepares the plan and the tool validates all of it before anything starts. From then on
-one command, `agentgate run`, takes every step the state determines and stops only where a person is needed:
-a blocked writer, a finding its author and the reviewer disagree about, an unmet requirement, a correction
-that went nowhere. The lead coordinates and does not design: how the change is built is the architect's, the
-user approves it, and what the user says about the design later goes back to the same architect, also in the
-middle of a task. `--preview` shows intended work. `plan`, `research` and `verify` are read-only. `review`
-inspects an existing change; `--fix` adds write authority.
+Every task begins with a plan. The session asks you what the code cannot answer, finds the nearest existing
+implementation of every part, and writes the plan as small ordered stages; above light a second model that is
+shown the conversation reads the plan, and you approve it with its price in front of you — the model runs it
+starts besides the session. Then the session writes one stage at a time and `agentgate run` closes each: it
+audits the scope, runs the stage's checks and scans the added lines, with no model. The code is read by the
+mode's reader at the checkpoints the plan marks and after the last stage. `--preview` shows intended work.
+`plan`, `research` and `verify` are read-only. `review` inspects an existing change; `--fix` adds write
+authority.
 
 | Step | What happens | Evidence |
 |---|---|---|
-| Prepare | One resumable read-only worker explores, asks, and drafts a typed plan | A plan validated as a whole, every problem named at once |
-| Design (medium and above) | An architect designs the change and asks the user what is theirs to decide; two architects are closed into one design | The design the task follows, with the user's answers |
-| Write | Disjoint streams, dependency waves and bounded parallelism | Structured reports and a file ownership audit |
-| Check | Declared commands run before any reviewer | Exit code and log, bound to the tree they ran against |
-| Review | A separate model reads one patch and judges the criteria | Findings and verdicts bound to content and contract |
-| Correct | A blocking finding goes to the writer that owns the file; it fixes it or disputes it with evidence | The reviewer's answer in its own session |
-| Accept | A stage, and then the task, is accepted in the same run once everything it requires is current | Passing checks, a current review, due requirements verified |
+| Plan | The session clarifies, grounds the change in existing code and writes a typed plan | A plan validated as a whole, every problem named at once; what each stage follows; the price |
+| Read the plan (medium and above) | The advisor reads the plan with the conversation; in heavy and ultra independent critics read the session's design | Blockers the session answers; one it rejects goes to you |
+| Write | The session writes the open stage and nothing of a later one | Its report, and an audit of every file changed outside the plan |
+| Check | Declared commands run by the tool, before any reader | Exit code and log, bound to the tree they ran against |
+| Read the code | At a checkpoint and after the last stage: the session itself (light), the advisor (medium), independent lanes (heavy, ultra) | Findings and verdicts bound to content and contract |
+| Correct | A blocking finding comes back to the session; it fixes it or disputes it with evidence | The reader's answer in its own session |
+| Accept | A stage, and then the task, is accepted in the same run once everything it requires is current | Passing checks, a current reading where one is placed, due requirements verified; a receipt with what was spent |
+
+With `--workers` the same gate runs sandboxed writers: a read-only worker prepares the plan, architects
+design, one writer per stream writes and every stage is reviewed. [How it works](docs/how-it-works.md).
 
 A failure before the task began is diagnostic evidence, not permission to ignore later failures. Changing a
 file, the plan's contract or required evidence makes stale exactly what it touches. The plan can be amended at any
@@ -121,23 +127,27 @@ the selection in view. `NO_COLOR` is respected. Untrusted text cannot inject ter
 Pipes, redirected input and `TERM=dumb` produce one snapshot instead of an interactive loop.
 [Dashboard guide](docs/watch.md).
 
-## Four modes, configurable models
+## Four modes: the shape of the process
 
-| Mode | Typical scope | Architecture | Review | Blocking severities |
+A mode does not pick a stronger model for the writer: the writer is your session. It sets how far the plan
+goes and which second look the work gets.
+
+| Mode | The plan | The plan is read by | The code is read by | Model runs besides the session |
 |---|---|---|---|---|
-| light `-l` | Small, low-risk change | One architect, `opus:medium` | One reviewer, `opus:medium`: correctness, architecture, simplicity | P0–P1 |
-| medium `-m` | Ordinary implementation | One architect, `opus:high` | One reviewer, `opus:high`: correctness, architecture, simplicity | P0–P1 |
-| heavy `-h` | Named risk or complex uncertain work | Two independent proposals, closed into one design | Separate architecture and correctness lanes | P0–P2 |
-| ultra `-x` | Severe or irreversible risk | Proposals, cross-critique, one closing design | Additional correctness and security lanes | P0–P2 |
+| light `-l` | stages and checks; starts at once | nobody | the session itself, with a proof for every requirement | 0 |
+| medium `-m` (default) | the code every stage follows, a map of the area; you approve it | the advisor, which is shown the conversation | the advisor, at checkpoints and at the end | 2, and one per checkpoint |
+| heavy `-h` | and a written design | the advisor and an independent critic | independent lanes, also at every stage with its own risk | 2, and two lanes per reading |
+| ultra `-x` | and an executed proof for what a risky stage completes | the same; the critic designs blind first | four lanes | 3, and four lanes per reading |
 
-With no flag, the recorded assessment selects a mode deterministically. A flag, or `mode` in the plan, takes precedence. Claude models design and
-review, Codex models plan, write and check the browser; when the Codex limit runs out, Opus takes the call. A
-Codex-only profile is also included. These are editable starting configurations, not universal performance rankings.
-[Routing policy](docs/model-selection.md) · [Mode rules](docs/modes.md).
+With no flag the mode is medium. The plan's assessment never raises it: the tool says what the facts suggest
+and you decide. `agentgate modes` prints the effective table, for a task the session writes and for
+`--workers`. The readers and the advisor are routes you configure; a Codex-only profile is included. These
+are editable starting configurations, not universal performance rankings.
+[Mode rules](docs/modes.md) · [Routing policy](docs/model-selection.md).
 
 ```sh
-agentgate config set modes.medium.backend sol:high
-agentgate config set modes.medium.frontend sol:high
+agentgate config set advisor fable:xhigh
+agentgate config set executor workers        # sandboxed writers by default
 agentgate config validate
 ```
 
@@ -155,7 +165,7 @@ writable checkout. Files between writers are assigned and audited. This is write
 local development, not a complete secrecy boundary against hostile code. Read
 [the security model](SECURITY.md) before granting extension tools or running untrusted projects.
 
-With `-w`, the whole task uses its own worktree. Landing audits the task scope and preserves unrelated
+With `--workers -w`, the whole task uses its own worktree; a task the session writes works in your checkout. Landing audits the task scope and preserves unrelated
 staged changes. Interrupted operations retain their state; `run` retries unfinished streams instead of
 starting a replacement task. A task saved by 0.15 is read and continued as it is. [Worktrees](docs/isolation.md) · [Recovery and migration](docs/migration.md).
 

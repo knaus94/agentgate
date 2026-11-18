@@ -29,8 +29,103 @@
   },
   "reviewers_excluded": [],
   "consultant": "sol:medium",
+  "advisor": "sol:xhigh",
   "ui_designer": "astra:medium",
   "visual_reviewer": "terra:high",
+  "session": {
+    "light": {
+      "critics": [],
+      "blind": false,
+      "review": [],
+      "blocking": [
+        "P0",
+        "P1"
+      ]
+    },
+    "medium": {
+      "critics": [],
+      "blind": false,
+      "review": [
+        {
+          "axes": [
+            "correctness",
+            "architecture",
+            "simplicity"
+          ],
+          "route": "sol:high",
+          "conversation": true
+        }
+      ],
+      "blocking": [
+        "P0",
+        "P1"
+      ]
+    },
+    "heavy": {
+      "critics": [
+        "terra:xhigh"
+      ],
+      "blind": false,
+      "review": [
+        {
+          "axes": [
+            "architecture",
+            "simplicity"
+          ],
+          "route": "sol:xhigh"
+        },
+        {
+          "axes": [
+            "correctness"
+          ],
+          "route": "sol:xhigh"
+        }
+      ],
+      "blocking": [
+        "P0",
+        "P1",
+        "P2"
+      ]
+    },
+    "ultra": {
+      "critics": [
+        "terra:max"
+      ],
+      "blind": true,
+      "review": [
+        {
+          "axes": [
+            "architecture",
+            "simplicity"
+          ],
+          "route": "sol:xhigh"
+        },
+        {
+          "axes": [
+            "correctness"
+          ],
+          "route": "sol:max"
+        },
+        {
+          "axes": [
+            "correctness"
+          ],
+          "route": "terra:max"
+        },
+        {
+          "axes": [
+            "security"
+          ],
+          "route": "sol:xhigh"
+        }
+      ],
+      "blocking": [
+        "P0",
+        "P1",
+        "P2"
+      ]
+    }
+  },
   "modes": {
     "light": {
       "scout": "",

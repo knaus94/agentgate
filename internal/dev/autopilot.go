@@ -137,6 +137,9 @@ func (g *Gate) classify(cfg *config.Config) (string, []Need, error) {
 		}
 		return verdictLead, []Need{need}, nil
 	}
+	if pending := g.unsettled(foreign); g.Worktree == "" && len(pending) > 0 {
+		return verdictLead, []Need{g.scopeNeed(pending)}, nil
+	}
 	receipts := g.currentReceipts()
 	failing := g.failingReceipts(receipts)
 	for _, failure := range failing {
@@ -199,7 +202,11 @@ func (g *Gate) classify(cfg *config.Config) (string, []Need, error) {
 		return "", nil, err
 	}
 	contract := g.codeContract()
-	if len(owned) > 0 || quality != nil {
+	due := g.reviewDue()
+	if !due {
+		quality = nil // nobody reads here: the criteria of this stage are judged at the next checkpoint
+	}
+	if due && (len(owned) > 0 || quality != nil) {
 		var last *Review
 		if len(g.Reviews) > 0 {
 			last = &g.Reviews[len(g.Reviews)-1]
@@ -221,7 +228,7 @@ func (g *Gate) classify(cfg *config.Config) (string, []Need, error) {
 			}
 			return verdictVerify, nil, nil
 		}
-	} else if g.Request.ReviewFirst() {
+	} else if due && g.Request.ReviewFirst() {
 		return verdictVerify, nil, nil
 	}
 	if g.visualRequired() {
@@ -365,9 +372,13 @@ func (g *Gate) stall(status, detail string) Need {
 	for _, stream := range streams {
 		work = append(work, map[string]any{"stream": stream, "note": "<the new diagnosis and what to do differently>"})
 	}
-	return Need{Kind: "stall", What: "the last correction made no verified progress (" + status + ")", Detail: detail,
-		Resolve: "Diagnose again instead of repeating: `consult` can investigate. Then decide {work: [{stream, note}]} with the new diagnosis " +
-			"and the changed approach; its writers get one more step of effort. `pause` and ask the user when a decision is missing.",
+	resolve := "Diagnose again instead of repeating: `consult` can investigate. Then decide {work: [{stream, note}]} with the new diagnosis " +
+		"and the changed approach; its writers get one more step of effort. `pause` and ask the user when a decision is missing."
+	if g.sessionWrites() {
+		resolve = "Do not repeat the attempt: diagnose again. `advise` puts the question to the advisor, which knows the conversation. Then " +
+			"decide {work: [{stream, note}]} records the new diagnosis and reopens the stage for you. `pause` and ask the user when a decision is missing."
+	}
+	return Need{Kind: "stall", What: "the last correction made no verified progress (" + status + ")", Detail: detail, Resolve: resolve,
 		Command: "decide", Input: map[string]any{"work": work}}
 }
 
@@ -428,11 +439,16 @@ func Start(cfg *config.Config, plan *Plan, name string, implement bool, input Ru
 		return nil, err
 	}
 	if !resolved.Request.ReviewFirst() {
-		if err := errors.Join(resolved.requireInterfaceDesign(), resolved.requireArchitecture()); err != nil {
+		if err := errors.Join(resolved.requireInterfaceDesign(), resolved.requireArchitecture(), resolved.requireCounsel()); err != nil {
 			return nil, err
 		}
 		if _, err := loadUI(resolved.Plan); err != nil {
 			return nil, err
+		}
+		// A light task starts at once; above it the user has seen the plan and said so.
+		if resolved.counselNeeded() && strings.TrimSpace(resolved.Plan.Approved) == "" {
+			return nil, fmt.Errorf("%s waits for the user's approval of the plan: show them the brief, then save the plan with approved: <their words> and start it",
+				resolved.Mode)
 		}
 	}
 	if err := resolved.independent(); err != nil {
@@ -468,11 +484,15 @@ func (r *Resolved) independent() error {
 	cfg := r.Config
 	free := func(route config.Route) bool { return !slices.Contains(cfg.ReviewersExcluded, route.Alias) }
 	for index := range r.Plan.Stages {
-		for _, lane := range cfg.Modes[r.Modes[index]].Review {
+		for _, lane := range cfg.Process(r.Executor, r.Modes[index]).Review {
 			route := cfg.MustRoute(lane.Route)
 			if !free(route) && !slices.ContainsFunc(cfg.Alternates(route), free) {
-				return fmt.Errorf("%s is kept from review by reviewers_excluded and has no fallback that may review; change modes.%s.review before starting",
-					lane.Route, r.Modes[index])
+				table := "modes"
+				if r.Executor == "session" {
+					table = "session"
+				}
+				return fmt.Errorf("%s is kept from review by reviewers_excluded and has no fallback that may review; change %s.%s.review before starting",
+					lane.Route, table, r.Modes[index])
 			}
 		}
 	}
@@ -513,6 +533,23 @@ func Run(cfg *config.Config, gate *Gate, input RunInput) (any, error) {
 		}
 		did = append(did, note)
 	}
+	if input.Written != nil && (!gate.sessionWrites() || gate.Step != StepWrite) {
+		return nil, fmt.Errorf("nothing is open for the session to write: the task is at %s and its needs say what it waits for", gate.Step)
+	}
+	if len(input.Disown) > 0 {
+		note, err := gate.disown(input.Disown)
+		if err != nil {
+			return nil, err
+		}
+		did = append(did, note)
+	}
+	if len(input.Adopt) > 0 {
+		note, err := gate.adopt(cfg, input.Adopt)
+		if err != nil {
+			return nil, err
+		}
+		did = append(did, note)
+	}
 	stale := 0
 	first := true
 	for {
@@ -533,16 +570,28 @@ func Run(cfg *config.Config, gate *Gate, input RunInput) (any, error) {
 					return nil, err
 				}
 			}
-			started := time.Now()
-			complete, ran, completed, err := gate.write(cfg)
-			if err != nil {
-				return nil, err
-			}
-			if ran > 0 {
-				did = append(did, fmt.Sprintf("writers: %d of %d streams completed (%s) in %s", completed, ran, gate.Round.Batch, since(started)))
-			}
-			if !complete {
-				return gate.report(cfg, did), gate.save()
+			if gate.sessionWrites() {
+				// The session writes the round itself and says so; until then the answer names what it owes.
+				note, wrote, err := gate.sessionWrite(cfg, input.Written)
+				if err != nil {
+					return nil, err
+				}
+				if !wrote {
+					return gate.report(cfg, did), gate.save()
+				}
+				did, input.Written = append(did, note), nil
+			} else {
+				started := time.Now()
+				complete, ran, completed, err := gate.write(cfg)
+				if err != nil {
+					return nil, err
+				}
+				if ran > 0 {
+					did = append(did, fmt.Sprintf("writers: %d of %d streams completed (%s) in %s", completed, ran, gate.Round.Batch, since(started)))
+				}
+				if !complete {
+					return gate.report(cfg, did), gate.save()
+				}
 			}
 			if err := gate.setStep(StepVerify); err != nil {
 				return nil, err
@@ -588,7 +637,8 @@ func Run(cfg *config.Config, gate *Gate, input RunInput) (any, error) {
 			stale = 0
 			switch verdict {
 			case verdictFix:
-				note, err := gate.openCorrection(cfg, true, nil)
+				// A correction the session makes itself is never one "nobody looked at".
+				note, err := gate.openCorrection(cfg, !gate.sessionWrites(), nil)
 				if err != nil {
 					return nil, err
 				}
@@ -806,7 +856,11 @@ func (g *Gate) accept(cfg *config.Config) (string, error) {
 		if writer.Session != "" {
 			record.Writers[name] = WriterRef{Route: writer.Route, Dir: writer.Dir, Session: writer.Session}
 		}
+		if author := name + " " + routeName(writer.Route); writer.Route.Alias == "session" && !slices.Contains(record.Authors, author) {
+			record.Authors = append(record.Authors, author)
+		}
 	}
+	sort.Strings(record.Authors)
 	record.Archive = filepath.Join(g.dir(), "stages", fmt.Sprintf("%d-%s.json", g.Stage+1, stage.Name))
 	if err := os.MkdirAll(filepath.Dir(record.Archive), 0o700); err != nil {
 		return "", err
@@ -826,7 +880,7 @@ func (g *Gate) accept(cfg *config.Config) (string, error) {
 	}
 	g.Accepted = append(g.Accepted, record)
 	last := g.Stage+1 == len(g.Plan.Stages)
-	if last && !integrationNeeded(g.overallMode(), len(g.Plan.Stages)) {
+	if last && !g.wholePass() {
 		// The task ends here: what the last stage's workers did stays readable in the finished task.
 		return g.finish(now)
 	}

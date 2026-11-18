@@ -1,7 +1,8 @@
 # The plan
 
-A plan is the brief, the criteria and the stages that deliver them. The preparation worker writes it; write
-one yourself only for an exact change whose files you already know.
+A plan is the brief, the criteria and the stages that deliver them. You write it for a task you write
+yourself — the `session` page has the four fields such a plan adds: `like`, `checkpoint`, `grounding` and
+`approved`. With `--workers` the preparation worker writes it.
 
 ## One stage
 
@@ -55,7 +56,8 @@ A plan has `streams` or `stages`, not both. Validation reports every problem at 
 ## Fields
 
 - **`mode`**: `light`, `medium`, `heavy` or `ultra`, stronger than a flag in the request; the `mode` page.
-- **`assessment`** is required when neither the plan nor the request sets a mode. `size`: `trivial`, `ordinary`, `complex`.
+- **`assessment`** is required with `--workers` when neither the plan nor the request sets a mode; in a task you
+  write it is optional and only places readings (a stage's own risk) and says what the facts suggest. `size`: `trivial`, `ordinary`, `complex`.
   `risks`: `authorization`, `security`, `money`, `data-integrity`, `concurrency`, `migration`,
   `public-contract` — only what the change really touches. `uncertainty`: `low` or `material`. A stage may
   carry its own; the mode is computed per stage. `load`, when the change touches a path whose cost grows with

@@ -24,6 +24,18 @@ type Model struct {
 type Lane struct {
 	Axes  []string `json:"axes"`
 	Route string   `json:"route"`
+	// Conversation gives the lane the digest of the lead's conversation: a reader that knows what was asked.
+	// It is honoured only for a route of the lead's own provider.
+	Conversation bool `json:"conversation,omitempty"`
+}
+
+// SessionMode is the process of a mode when the lead's own session writes: who challenges the design and who
+// reads the change. The models that write are not in it: the session is whatever the user runs.
+type SessionMode struct {
+	Critics  []string `json:"critics"`  // independent critics of the session's design: they are not shown the conversation
+	Blind    bool     `json:"blind"`    // the critics design the change themselves before they read the session's design
+	Review   []Lane   `json:"review"`   // who reads at a checkpoint; empty: the session reads its own patch
+	Blocking []string `json:"blocking"` // severities that block completion
 }
 
 // ReviewRule adds a repository's review instructions to an existing reviewer, without granting tools.
@@ -101,29 +113,32 @@ type Worktree struct {
 }
 
 type Config struct {
-	Version           int                   `json:"version"`
-	MaxParallel       int                   `json:"max_parallel"`
-	WorkerMemoryMiB   int                   `json:"worker_memory_mib"`
-	RetentionDays     int                   `json:"retention_days"`
-	MinFreeGiB        int                   `json:"min_free_gib"` // below this much free space on the checkout's disk, doctor and start warn; 0: never
-	Models            map[string]Model      `json:"models"`
-	Fallbacks         map[string][]string   `json:"fallbacks"`
-	ReviewersExcluded []string              `json:"reviewers_excluded"`
-	UIDesigner        string                `json:"ui_designer"`
-	VisualReviewer    string                `json:"visual_reviewer"`
-	Consultant        string                `json:"consultant"`
-	PlaywrightMCP     string                `json:"playwright_mcp"`
-	Accounts          []Account             `json:"accounts"`
-	PlansHome         string                `json:"plans_home"` // synced directory that holds the .agentgate of each repository
-	WorkerMCP         map[string]WorkerMCP  `json:"worker_mcp"`
-	ReviewRules       map[string]ReviewRule `json:"review_rules,omitempty"`
-	ReviewRuleSources map[string][]string   `json:"-"`       // definition sources in precedence order, derived at load time
-	Profile           string                `json:"profile"` // a named alternative mode table laid under the user's settings, e.g. "codex"
-	Leads             []string              `json:"leads"`   // which CLIs the lead command is installed into: claude, codex
-	Worktree          Worktree              `json:"worktree"`
-	Staging           Staging               `json:"staging"`
-	Modes             map[string]Mode       `json:"modes"`
-	Design            Design                `json:"design"`
+	Version           int                    `json:"version"`
+	MaxParallel       int                    `json:"max_parallel"`
+	WorkerMemoryMiB   int                    `json:"worker_memory_mib"`
+	RetentionDays     int                    `json:"retention_days"`
+	MinFreeGiB        int                    `json:"min_free_gib"` // below this much free space on the checkout's disk, doctor and start warn; 0: never
+	Models            map[string]Model       `json:"models"`
+	Fallbacks         map[string][]string    `json:"fallbacks"`
+	ReviewersExcluded []string               `json:"reviewers_excluded"`
+	UIDesigner        string                 `json:"ui_designer"`
+	VisualReviewer    string                 `json:"visual_reviewer"`
+	Consultant        string                 `json:"consultant"`
+	Executor          string                 `json:"executor"` // who writes the code: session (the lead's own session) or workers
+	Advisor           string                 `json:"advisor"`  // the route that is shown the conversation: it challenges the plan and answers `advise`
+	PlaywrightMCP     string                 `json:"playwright_mcp"`
+	Accounts          []Account              `json:"accounts"`
+	PlansHome         string                 `json:"plans_home"` // synced directory that holds the .agentgate of each repository
+	WorkerMCP         map[string]WorkerMCP   `json:"worker_mcp"`
+	ReviewRules       map[string]ReviewRule  `json:"review_rules,omitempty"`
+	ReviewRuleSources map[string][]string    `json:"-"`       // definition sources in precedence order, derived at load time
+	Profile           string                 `json:"profile"` // a named alternative mode table laid under the user's settings, e.g. "codex"
+	Leads             []string               `json:"leads"`   // which CLIs the lead command is installed into: claude, codex
+	Worktree          Worktree               `json:"worktree"`
+	Staging           Staging                `json:"staging"`
+	Modes             map[string]Mode        `json:"modes"`
+	Session           map[string]SessionMode `json:"session"` // the process of each mode when the session writes
+	Design            Design                 `json:"design"`
 }
 
 // Design says, once for a repository, where its design screens are kept and how its front end is started to

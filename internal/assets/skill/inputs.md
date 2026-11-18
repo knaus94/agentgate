@@ -1,5 +1,8 @@
 # Other inputs
 
+`prepare`, `architecture` and `run` of a task you write yourself are on the `session` page. What follows is
+their form with `--workers`, and the inputs both share.
+
 ## prepare
 
 ```json

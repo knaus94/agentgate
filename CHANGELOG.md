@@ -2,6 +2,78 @@
 
 [Русский](CHANGELOG.ru.md)
 
+## 0.22.0
+
+The lead's own session writes the task, and a mode is the shape of the process instead of a row of models
+([decision 0013](docs/decisions/0013-the-session-writes.md)). The pipeline of sandboxed writers is unchanged
+behind `--workers`.
+
+**Changed**
+
+- **Who writes.** By default the lead's own session plans and writes a task, stage by stage, in the checkout.
+  `--workers` in the request, or `executor: workers` in the configuration, hands the task to sandboxed writers
+  as before. A task keeps the executor it was started with: one started by 0.21 or earlier continues with its
+  writers.
+- **What a mode is.** When the session writes, a mode sets how far the questions go, what the plan must
+  contain and who reads the work: light — nobody reads the plan, the session reads its own patch and proves
+  every requirement, no model runs; medium — the advisor reads the plan and the code; heavy — a written
+  design, an independent critic and independent review lanes; ultra — the critic designs blind first, and a
+  requirement a risky stage completes needs an executed proof. Without a flag the mode is medium. The plan's
+  `assessment` no longer raises it: `plan save` says what the facts suggest.
+- **`prepare`** starts no worker. It records the working tree and answers with what the plan needs in this
+  mode (`instructions`). A file changed between that call and `start` is the task's own change.
+- **The plan** gains `stages[].like` and `like_waiver` (the existing code a stage follows, or why nothing
+  comparable exists), `stages[].checkpoint`, `grounding` (the session's map of the area) and `approved` (the
+  user's words). Medium and above refuse a stage with neither `like` nor `like_waiver` and a plan without
+  `grounding`; ultra refuses `method: code` for a requirement due at a stage with its own risk. `plan save`
+  answers with `model_runs` and `price`, and the brief shows them.
+- **`architecture`** has the plan read before the work: the advisor, which is shown a digest of the
+  conversation, and in heavy and ultra independent critics of the session's design
+  (`{plan, design, alternatives, risks}`). The session answers every blocker with
+  `{revise, plan, answered: [{id, resolved, how}]}`, which runs no model; a blocker it rejects is the user's to
+  decide.
+- **`start`** refuses a plan above light without that reading and without `approved`, and refuses `-w`: a task
+  the session writes works in the checkout.
+- **`run`** answers with need `write` — the open stage, its files, the code it follows, the requirements due
+  and the checks — and takes `{written: {summary, deviations, disputes}}`. A stage is closed by the scope
+  audit, its checks and a scan of the added lines, with no model. The mode's reader reads at a checkpoint — a
+  stage with `checkpoint`, and in heavy and ultra a stage whose own assessment names a risk — everything since
+  the last reading, and the whole change after the last stage. A failing check or a blocking finding comes back
+  as need `fix`; a file changed outside the plan as need `scope`, settled with `{adopt}` or `{disown}`.
+- **The receipt** gains `spend`: what the session consumed during the task and what every model run consumed,
+  read from the clients' own records.
+- **`agentgate modes`** prints the process of a task the session writes and the table of sandboxed writers.
+  `agentgate guide` is the session's guide; the protocol with sandboxed writers is `agentgate reference
+  workers`, and `agentgate reference session` has every input and need of a task the session writes.
+- The prompt hook tells a session that writes a task which stage is open and that a change of mind changes the
+  plan first (`amend`).
+
+**Added**
+
+- `agentgate advise` with `{question, files?}`: a second opinion from the advisor at any moment, with the
+  conversation digest and the patch of the open position.
+- `agentgate take`: on the user's word, a task another session of the checkout was writing continues in this
+  session.
+- Configuration: `executor`, `advisor`, and `session.<mode>` with `critics`, `blind`, `review` and `blocking`;
+  a review lane may carry `"conversation": true`. The digest — the user's messages, the session's words, one
+  line per tool call, no tool results — is given only to a route of the lead's own provider. The Codex profile
+  has its own advisor and session table.
+
+**Fixed**
+
+- `--grill` and `--no-grill` were parsed and read by nothing. `prepare` now answers with the depth of the
+  questioning they ask for.
+
+**After the update**
+
+- A task that is already running goes on as it was started, with its writers, whatever the configuration says.
+- A plan a preparation worker saved before the update and that was not started yet is now read as a plan the
+  session writes, and above light it is refused for lacking `like` and `grounding`. To run it with writers as
+  it was planned, add `--workers` to its `request`; `executor: workers` in the configuration keeps every task
+  that way.
+- Installed lead commands and pages are refreshed by `agentgate update`; after a manual install run `agentgate
+  install`.
+
 ## 0.21.5
 
 **Changed**

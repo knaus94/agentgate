@@ -1,6 +1,6 @@
 ---
 name: agentgate
-description: Pages for the lead of an agentgate task (/dev, $dev) — what each need asks and the exact input that settles it, what every command answers, changing the plan, the mode or the models, Figma work, finishing, dropping and forgetting a task, and what a refusal means. Use while leading such a task; reading it starts nothing.
+description: Pages for the session that runs an agentgate task (/dev, $dev) — what each need asks and the exact input that settles it, the plan and its amendment, the modes, what every command answers, Figma work, finishing, dropping and forgetting a task, what a refusal means, and the protocol with sandboxed writers. Use while doing such a task; reading it starts nothing.
 ---
 
 # agentgate — the lead's pages
@@ -11,6 +11,8 @@ make, with the real ids filled in and `<…>` where your own words go. Open a pa
 
 | When | Page |
 |---|---|
+| a task you write yourself: every input and need | `session` |
+| a task of sandboxed writers (`--workers`): the whole protocol | `workers` |
 | a need of any kind; giving work to a writer | `needs` |
 | the fields of an answer: `result`, `refused`, `error`, `running`, `last`, `receipt` | `answers` |
 | a writer asks for a file outside its stream | `scope` |
@@ -33,12 +35,14 @@ fields are refused.
 | Command | Input | Purpose |
 |---|---|---|
 | `parse`, `preview` | the request as typed | how a request reads; the routes it would take, starting nothing |
-| `prepare` | the request as typed, or `{request, name?, mode?, context?, attachments?, notes?, answers?, fresh?}` | a read-only worker drafts or revises the plan; the same worker continues on every call |
+| `prepare` | the request as typed, or `{request, mode?, attachments?, fresh?}`; with `--workers` also `{name?, context?, notes?, answers?}` | open a task: the working tree is recorded and the answer says what the plan needs; with `--workers` a read-only worker drafts the plan |
 | `plan save [name]`, `plan list`, `plan show <name>` | plan | keep a plan in `.agentgate/plans/<name>/` with a readable `brief.md` |
 | `route` | plan | the mode, its reasons and the models; starts nothing |
-| `architecture` | plan, or `{revise, answers, notes}` | the design pass of a mode with architects; the architect continues its design with the user's answers and words |
+| `architecture` | plan, `{plan, design, alternatives, risks}`, or `{revise, plan, answered}`; with `--workers` `{revise, answers, notes}` | the plan and your design are read before the work; with `--workers` the mode's architects design it |
 | `start [--implement]` | plan | open a task and run it |
-| `run` | `{visual?, recheck?, reviewer_timeout_s?}` or nothing | every determined step, until a person is needed |
+| `run` | `{written?, adopt?, disown?, prepared?, visual?, recheck?, reviewer_timeout_s?}` or nothing | every determined step, until you or a person is needed |
+| `advise` | `{question, files?}` | a second opinion from the advisor, which is shown the conversation |
+| `take` | `{from?}` or nothing | on the user's word: continue here a task another session was writing |
 | `answer` | `{stream, answer}` | reply to a blocked writer in its own session, then run on |
 | `decide` | `{findings?, review?, work?}` | rule on findings, give your own review, give work; then run on |
 | `amend` | named operations, or the complete plan, with `update` | change the plan of the active task |

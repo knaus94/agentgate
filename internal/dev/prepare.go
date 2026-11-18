@@ -181,6 +181,10 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 	case revising:
 		input.Request = gate.Plan.Request
 	}
+	continued := false // the call goes on with the plan this session already opened
+	if draft := loadDraft(); input.Request == "" && preparation == nil && !revising && draft != nil {
+		input.Request, continued = draft.Request, true
+	}
 	request, err := ParseRequest(input.Request)
 	if err != nil {
 		return nil, err
@@ -195,6 +199,13 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 		return nil, fmt.Errorf("`%s` opens no task: ask bounded read-only questions with `agentgate consult` (`agentgate reference inputs`)", request.Action)
 	case strings.TrimSpace(request.Task) == "":
 		return nil, errors.New("prepare needs the user's request: the text after /dev as it was typed, or {request: \"…\"}")
+	}
+	switch {
+	case revising && gate.sessionWrites():
+		return nil, errors.New("this session writes its task: the plan is yours. `amend` changes it — named operations or the complete plan, with `update`; " +
+			"`advise` puts a doubt to the advisor")
+	case !revising && executorOf(cfg, request) == "session":
+		return prepareSession(cfg, input, request, continued)
 	}
 	context, err := cleanPaths(input.Context)
 	if err != nil {
@@ -433,7 +444,11 @@ func Prepare(cfg *config.Config, input PrepareInput) (any, error) {
 				}
 			}
 			var err error
-			if resolved, err = Resolve(cfg, plan); err != nil {
+			executor := ""
+			if revising {
+				executor = gate.executor()
+			}
+			if resolved, err = resolveAs(cfg, plan, executor); err != nil {
 				var found PlanProblems
 				if !errors.As(err, &found) {
 					found = PlanProblems{err.Error()}
